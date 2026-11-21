@@ -8,6 +8,20 @@ const BRIDGE_URL = 'http://127.0.0.1:8100/keyevent';
 const SCREEN_STATE_POLL_MS = 3000;
 const ENGINE_UNAVAILABLE = 'Engine unavailable — is the service running?';
 
+// The engine builds its own toolbox (screenshot, clipboard, stats, input
+// modes). Its icons carry a tooltip but no visible text, so the labels are
+// mapped here and rendered by CSS through data-label.
+const TOOLBOX_LABELS = new Map([
+  ['Take screenshot', 'SHOT'],
+  ['Capture keyboard', 'KEYS'],
+  ['UHID Input (keyboard + mouse)', 'MOUSE'],
+  ['Display quality stats', 'STATS'],
+  ['D-pad mode (click for Touch mode)', 'DPAD'],
+  ['Refresh stream', 'RELOAD'],
+  ['copy device selection to host clipboard', 'COPY'],
+  ['push host clipboard to device', 'PASTE'],
+]);
+
 const streamEl = document.getElementById('stream');
 const statusEl = document.getElementById('status');
 
@@ -24,6 +38,23 @@ function setStatus(text) {
   baseStatus = text;
   renderStatus();
 }
+
+// The toolbox is created by the engine once the player attaches, so it can
+// appear after our first paint. Label it as soon as it shows up.
+function labelToolbox() {
+  const list = streamEl.querySelector('.control-buttons-list');
+  if (!list) return false;
+  for (const el of list.querySelectorAll('.control-button')) {
+    const label = TOOLBOX_LABELS.get(el.getAttribute('title'));
+    if (label) el.setAttribute('data-label', label);
+  }
+  return true;
+}
+
+const toolboxObserver = new MutationObserver(() => {
+  if (labelToolbox()) toolboxObserver.disconnect();
+});
+toolboxObserver.observe(streamEl, { childList: true, subtree: true });
 
 async function pollScreenState() {
   try {
@@ -81,6 +112,7 @@ if (!isUsableContext(location.protocol, location.hostname)) {
   try {
     const options = buildStreamOptions({ deviceId: DEVICE_ID });
     options.onConnect = (info) => {
+      labelToolbox();
       setStatus(`Connected${info?.resolution ? ` — ${info.resolution}` : ''}`);
     };
     options.onDisconnect = (reason) => {

@@ -1,4 +1,11 @@
-export const KEY_CODES = { home: 3, back: 4, power: 26 };
+export const KEY_CODES = {
+  home: 3,
+  back: 4,
+  power: 26,
+  volume_up: 24,
+  volume_down: 25,
+  overview: 187,
+};
 
 // The device id is passed to startStream separately; codec stays omitted so
 // the engine auto-selects. A fresh object is returned on every call.

@@ -3,7 +3,14 @@ import assert from 'node:assert/strict';
 import { KEY_CODES, buildStreamOptions, isUsableContext, lockHint } from '../shared/keys.mjs';
 
 test('key codes match android', () => {
-  assert.deepEqual(KEY_CODES, { home: 3, back: 4, power: 26 });
+  assert.deepEqual(KEY_CODES, {
+    home: 3,
+    back: 4,
+    power: 26,
+    volume_up: 24,
+    volume_down: 25,
+    overview: 187,
+  });
 });
 
 test('stream options pin keyboard, fit and 30fps', () => {

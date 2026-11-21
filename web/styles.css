@@ -1,6 +1,6 @@
 :root {
   color-scheme: dark;
-  font-family: system-ui, sans-serif;
+  font-family: system-ui, -apple-system, sans-serif;
   background: #111318;
   color: #e8eaf0;
 }
@@ -15,14 +15,56 @@ body {
   margin: 0;
 }
 
+body {
+  background: #111318;
+}
+
 .shell {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
   height: 100%;
-  padding: 12px;
+  padding: 12px 14px;
 }
 
+/* Our own key buttons. Text-only, small, quiet: the engine's own toolbox
+   (loaded from ws-scrcpy.css) already owns the icon buttons, so these only
+   carry the keys the bridge can send and the engine toolbox cannot. */
+.nav-bar {
+  display: flex;
+  gap: 6px;
+  justify-content: center;
+}
+
+.nav-bar button {
+  font: 500 11px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.07em;
+  padding: 6px 12px;
+  min-width: 0;
+  border: none;
+  border-radius: 10px;
+  background: #21262d;
+  color: #cfd2d8;
+  opacity: 0.85;
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, opacity 0.1s;
+}
+
+.nav-bar button:hover {
+  background: #3a424e;
+  color: #e8eaf0;
+  opacity: 1;
+}
+
+.nav-bar button:focus-visible {
+  outline: 2px solid #5b9aff;
+  outline-offset: 1px;
+}
+
+/* The engine appends its .device-view (video + toolbox) inside #stream.
+   The engine's stylesheet lays that out as a flex row with the video cell
+   and a narrow control rail; we only need the video cell to fill the space
+   and to scale with the device aspect ratio. */
 #stream {
   flex: 1;
   min-height: 0;
@@ -31,47 +73,170 @@ body {
   justify-content: center;
   overflow: hidden;
   background: #000;
-  border: 1px solid #2a2e39;
   border-radius: 8px;
 }
 
-#stream > * {
+#stream .device-view {
+  display: flex;
+  flex-direction: row;
+  align-items: stretch;
+  min-width: 0;
+  min-height: 0;
+  width: 100%;
+  height: 100%;
+}
+
+/* The engine's video cell is a grid; the picture canvas and the transparent
+   touch canvas occupy the same cell (grid-area 1 / 1) so touch coordinates
+   map onto the picture. A definite height on the cell is what lets the
+   canvas's max-height resolve against the space we actually have. */
+#stream .video {
+  display: grid;
+  place-items: center;
+  min-width: 0;
+  min-height: 0;
+  flex: 1 1 auto;
+  height: 100%;
+  background: #000;
+}
+
+#stream .video-layer,
+#stream .touch-layer {
+  grid-area: 1 / 1;
   max-width: 100%;
   max-height: 100%;
 }
 
-.controls {
+/* The engine's control rail: narrow icons beside the picture. Our stylesheet
+   loads after the engine's, so these win on equal specificity. */
+#stream .control-buttons-list {
+  flex-shrink: 0;
+  width: 2.75rem;
+  padding: 6px 0;
+  background: #16191f;
+  border-left: 1px solid #23262e;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+#stream .control-buttons-list::-webkit-scrollbar {
+  display: none;
+}
+
+#stream .control-button {
   display: flex;
-  justify-content: center;
-  gap: 12px;
-}
-
-button {
-  min-width: 96px;
-  padding: 10px 16px;
-  border: 1px solid #3a4050;
-  border-radius: 6px;
-  background: #252a35;
-  color: inherit;
-  font: inherit;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  width: auto;
+  height: auto;
+  margin: 0 auto;
+  padding: 5px 2px;
+  border-radius: 8px;
+  background: transparent;
+  opacity: 1;
   cursor: pointer;
+  transition: background 0.1s;
 }
 
-button:hover {
-  background: #333a49;
+#stream .control-button:hover {
+  background: #262b34;
+  opacity: 1;
 }
 
-button:focus-visible {
-  outline: 2px solid #7aa2ff;
-  outline-offset: 2px;
+#stream .control-button > svg {
+  width: 16px;
+  height: 16px;
+  fill: #aeb5c2;
+}
+
+#stream .control-button:hover > svg {
+  fill: #e8eaf0;
+}
+
+/* The engine renders each toolbox entry as a bare icon with only a tooltip.
+   data-label is filled in by app.js; without it the entry stays icon-only. */
+#stream .control-button[data-label]::after {
+  content: attr(data-label);
+  font: 500 8px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.04em;
+  color: #7f8794;
+}
+
+#stream .control-button[data-label]:hover::after {
+  color: #cfd2d8;
+}
+
+/* Checkbox entries (keyboard capture, UHID, stats, D-pad) are labels whose
+   icon toggles; keep the label readable next to the icon. */
+#stream .control-wrapper > label.control-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  margin: 0 auto;
+  padding: 5px 2px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+#stream .control-wrapper > label.control-button:hover {
+  background: #262b34;
+}
+
+#stream .control-wrapper > input[type="checkbox"] {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+#stream .control-wrapper > input[type="checkbox"]:checked + label > svg {
+  fill: #10b981;
+}
+
+#stream .control-wrapper > label.control-button > svg {
+  width: 16px;
+  height: 16px;
+  fill: #aeb5c2;
+}
+
+#stream .control-wrapper > label.control-button:hover > svg {
+  fill: #e8eaf0;
+}
+
+/* The engine ships the two-images checkbox as an on-icon and an off-icon and
+   switches between them with the sibling :checked rules. Our own rules above
+   must not add a `display` to those SVGs or both icons show at once. */
+#stream .control-wrapper > input[type="checkbox"].two-images:checked + label > svg.image-on,
+#stream .control-wrapper > input[type="checkbox"].two-images:not(:checked) + label > svg.image-off {
+  display: block;
+}
+
+#stream .control-wrapper > input[type="checkbox"].two-images:not(:checked) + label > svg.image-on,
+#stream .control-wrapper > input[type="checkbox"].two-images:checked + label > svg.image-off {
+  display: none;
+}
+
+/* The engine's own key buttons (Home, Back, Power, Volume up/down, Overview)
+   duplicate the labeled buttons in the top bar, which carry text and go
+   through the ADB bridge. Drop them from the rail so every action exists
+   exactly once and the rail only holds the engine's extra tools. */
+#stream .control-button[title="Home"],
+#stream .control-button[title="Back"],
+#stream .control-button[title="Power"],
+#stream .control-button[title="Volume up"],
+#stream .control-button[title="Volume down"],
+#stream .control-button[title="Overview"] {
+  display: none;
 }
 
 #status {
-  min-height: 1.5em;
-  padding: 10px 12px;
-  border: 1px solid #2a2e39;
-  border-radius: 6px;
-  background: #1b1e26;
-  color: #b9c2d6;
-  line-height: 1.5;
+  margin-top: 2px;
+  padding-left: 4px;
+  color: #919393;
+  font-size: 12px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }

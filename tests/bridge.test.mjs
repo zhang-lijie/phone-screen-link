@@ -54,6 +54,18 @@ test('keyevent accepts home and maps to adb', async () => {
   });
 });
 
+test('keyevent accepts the volume and overview keys', async () => {
+  for (const key of ['volume_up', 'volume_down', 'overview']) {
+    fakeAdb.last = undefined;
+    await withBridge({}, async (address) => {
+      const res = await postKey(address, key);
+      assert.equal(res.status, 200);
+      assert.deepEqual(await res.json(), { ok: true });
+      assert.equal(fakeAdb.last, key);
+    });
+  }
+});
+
 test('keyevent rejects unknown key', async () => {
   fakeAdb.last = undefined;
   await withBridge({}, async (address) => {
