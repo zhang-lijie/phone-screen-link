@@ -7,6 +7,8 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 > **范围**：仅本机 `http://127.0.0.1:8000`；不 root、不在手机安装额外 App、不绕过锁屏、
 > 不采集 `FLAG_SECURE` / DRM 内容。远程访问未在本次实现，但架构预留了扩展空间。
 
+需求来源、功能/非功能需求、需求追溯、验收结果与遗留项见 [需求分析](docs/requirements-analysis.md)。
+
 ## 开源组件声明
 
 本项目的投屏引擎来自开源项目，在此明确声明：
@@ -206,6 +208,7 @@ web/index.html           页面结构与设置面板
 web/app.js               状态栏、按钮处理、设置持久化、工具栏包装
 web/styles.css           紧凑暗色主题与布局覆盖
 tests/*.test.mjs         39 个 node:test 用例
+docs/requirements-analysis.md  需求分析（需求来源、追溯、验收、遗留）
 docs/screenshots/        README 中使用的界面截图
 docs/superpowers/        设计规格、实施计划与开发台账
 engine/                  GPLv3 第三方引擎，由 setup 生成，已加入 .gitignore
