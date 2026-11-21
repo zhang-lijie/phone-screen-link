@@ -1,16 +1,47 @@
-import { buildStreamOptions, isUsableContext } from './keys.mjs';
+// The shared module is copied into the engine's public dir as keys.js: the
+// engine's static server has no .mjs MIME type and sends nosniff, so a .mjs
+// import would be refused by the browser.
+import { buildStreamOptions, isUsableContext, lockHint } from './keys.js';
 
 const DEVICE_ID = '2FD0221C09004177';
 const BRIDGE_URL = 'http://127.0.0.1:8100/keyevent';
+const SCREEN_STATE_POLL_MS = 3000;
 const ENGINE_UNAVAILABLE = 'Engine unavailable — is the service running?';
 
 const streamEl = document.getElementById('stream');
 const statusEl = document.getElementById('status');
 
-// Single write path for every status update (stream events and key presses).
-function setStatus(text) {
-  statusEl.textContent = text;
+let baseStatus = 'Connecting…';
+let lockMessage = '';
+
+// Every status update (stream events, key presses and the lock hint) funnels
+// through here. The hint is prepended so it never destroys the current status.
+function renderStatus() {
+  statusEl.textContent = lockMessage ? `${lockMessage} — ${baseStatus}` : baseStatus;
 }
+
+function setStatus(text) {
+  baseStatus = text;
+  renderStatus();
+}
+
+async function pollScreenState() {
+  try {
+    // Same origin as the page (port 8000), so no CORS or bridge is involved.
+    const res = await fetch(`/api/devices/screen-state?udid=${encodeURIComponent(DEVICE_ID)}`);
+    if (!res.ok) return;
+    const hint = lockHint(await res.json());
+    if (hint !== lockMessage) {
+      lockMessage = hint;
+      renderStatus();
+    }
+  } catch {
+    // Endpoint not reachable yet; keep the last known hint.
+  }
+}
+
+pollScreenState();
+setInterval(pollScreenState, SCREEN_STATE_POLL_MS);
 
 function messageOf(value) {
   return value instanceof Error ? value.message : String(value ?? '');

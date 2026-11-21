@@ -25,7 +25,7 @@ test('plan resolves web and shared directories relative to the project', () => {
   assert.equal(plan[2].cwd, '/x/engine');
 });
 
-test('copyWeb copies the three web files and shared keys into the public dir', () => {
+test('copyWeb copies the three web files and shared keys into the public dir as .js', () => {
   const root = mkdtempSync(join(tmpdir(), 'phone-link-start-'));
   try {
     const webDir = join(root, 'web');
@@ -46,11 +46,11 @@ test('copyWeb copies the three web files and shared keys into the public dir', (
     const step = buildPlan({ engineDir: join(root, 'engine'), webDir })[1];
     copyWeb(step, publicDir);
 
-    assert.deepEqual(readdirSync(publicDir).sort(), ['app.js', 'index.html', 'keys.mjs', 'styles.css']);
+    assert.deepEqual(readdirSync(publicDir).sort(), ['app.js', 'index.html', 'keys.js', 'styles.css']);
     for (const [name, content] of Object.entries(webFiles)) {
       assert.equal(readFileSync(join(publicDir, name), 'utf8'), content);
     }
-    assert.equal(readFileSync(join(publicDir, 'keys.mjs'), 'utf8'), 'export const KEY_CODES = {};');
+    assert.equal(readFileSync(join(publicDir, 'keys.js'), 'utf8'), 'export const KEY_CODES = {};');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

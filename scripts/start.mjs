@@ -35,7 +35,9 @@ export function copyWeb({ files, webDir, sharedDir }, targetDir) {
     copyFileSync(join(webDir, file), join(targetDir, file));
   }
   for (const file of sharedFiles) {
-    copyFileSync(join(sharedDir, file), join(targetDir, file));
+    // The engine's static server has no `.mjs` MIME type and sets `nosniff`,
+    // so the browser-facing copy must end in `.js` to be importable.
+    copyFileSync(join(sharedDir, file), join(targetDir, file.replace(/\.mjs$/, '.js')));
   }
 }
 

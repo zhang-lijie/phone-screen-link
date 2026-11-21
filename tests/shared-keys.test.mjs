@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KEY_CODES, buildStreamOptions, isUsableContext } from '../shared/keys.mjs';
+import { KEY_CODES, buildStreamOptions, isUsableContext, lockHint } from '../shared/keys.mjs';
 
 test('key codes match android', () => {
   assert.deepEqual(KEY_CODES, { home: 3, back: 4, power: 26 });
@@ -19,4 +19,10 @@ test('insecure lan origin is rejected', () => {
   assert.equal(isUsableContext('http:', 'localhost'), true);
   assert.equal(isUsableContext('http:', '192.168.3.50'), false);
   assert.equal(isUsableContext('https:', 'example.com'), true);
+});
+
+test('locked device produces an explicit hint', () => {
+  assert.equal(lockHint({ awake: true, locked: true }), 'Phone is locked — unlock it to see the screen');
+  assert.equal(lockHint({ awake: false, locked: false }), 'Phone is asleep — waking it');
+  assert.equal(lockHint({ awake: true, locked: false }), '');
 });
