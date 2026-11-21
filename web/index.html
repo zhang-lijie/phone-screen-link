@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Phone Screen Link</title>
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/ws-scrcpy.umd.js"></script>
+</head>
+<body>
+  <main class="shell">
+    <div id="stream" aria-label="Phone screen"></div>
+    <div class="controls">
+      <button type="button" data-key="home">Home</button>
+      <button type="button" data-key="back">Back</button>
+      <button type="button" data-key="power">Power</button>
+    </div>
+    <div id="status" role="status" aria-live="polite">Connecting…</div>
+  </main>
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
