@@ -5,10 +5,13 @@ import {
   DEFAULT_SETTINGS,
   FPS_CHOICES,
   KEY_CODES,
+  LANGUAGE_CHOICES,
+  MESSAGES,
   RESOLUTION_CHOICES,
   SETTINGS_STORAGE_KEY,
   STREAM_SIZE_LADDER,
   buildStreamOptions,
+  effectiveLanguage,
   isDegradedStream,
   isUsableContext,
   loadSettings,
@@ -17,6 +20,7 @@ import {
   normalizeSettings,
   saveSettings,
   sizeLadder,
+  translate,
 } from '../shared/keys.mjs';
 
 test('key codes match android', () => {
@@ -63,9 +67,9 @@ test('the size ladder runs best first and a fixed resolution is requestable', ()
 
 test('settings are normalized before reaching the engine', () => {
   assert.deepEqual(normalizeSettings(), DEFAULT_SETTINGS);
-  assert.deepEqual(normalizeSettings({ resolution: 'bogus', maxFps: 999, bitrate: 'x', audio: 'yes' }), DEFAULT_SETTINGS);
-  assert.deepEqual(normalizeSettings({ resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false }), {
-    resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false,
+  assert.deepEqual(normalizeSettings({ resolution: 'bogus', maxFps: 999, bitrate: 'x', audio: 'yes', language: 'fr' }), DEFAULT_SETTINGS);
+  assert.deepEqual(normalizeSettings({ resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false, language: 'zh' }), {
+    resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false, language: 'zh',
   });
   // String values from a <select> are accepted after Number conversion.
   assert.equal(normalizeSettings({ maxFps: '30', bitrate: '4000000' }).maxFps, 30);
@@ -80,8 +84,8 @@ test('settings persist in localStorage and bad data falls back to defaults', () 
   };
   assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
 
-  const chosen = saveSettings(storage, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false });
-  assert.deepEqual(chosen, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false });
+  const chosen = saveSettings(storage, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en' });
+  assert.deepEqual(chosen, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en' });
   assert.deepEqual(loadSettings(storage), chosen);
   assert.ok(data.has(SETTINGS_STORAGE_KEY));
 
@@ -117,8 +121,35 @@ test('a grossly downscaled stream is detected as degraded', () => {
   assert.equal(isDegradedStream('620x1280', 0), false);
 });
 
-test('locked device produces an explicit hint', () => {
+test('locked device produces an explicit hint in both languages', () => {
   assert.equal(lockHint({ awake: true, locked: true }), 'Phone is locked — unlock it to see the screen');
   assert.equal(lockHint({ awake: false, locked: false }), 'Phone is asleep — waking it');
   assert.equal(lockHint({ awake: true, locked: false }), '');
+  assert.equal(lockHint({ awake: true, locked: true }, 'zh'), '手机已锁定 — 请解锁后查看屏幕');
+  assert.equal(lockHint({ awake: false, locked: false }, 'zh'), '手机已休眠 — 正在唤醒');
+});
+
+test('language choices resolve from the setting or the browser', () => {
+  assert.deepEqual(LANGUAGE_CHOICES, ['auto', 'zh', 'en']);
+  assert.equal(effectiveLanguage({ language: 'zh' }, 'en-US'), 'zh');
+  assert.equal(effectiveLanguage({ language: 'en' }, 'zh-CN'), 'en');
+  assert.equal(effectiveLanguage({ language: 'auto' }, 'zh-CN'), 'zh');
+  assert.equal(effectiveLanguage({ language: 'auto' }, 'zh'), 'zh');
+  assert.equal(effectiveLanguage({ language: 'auto' }, 'en-US'), 'en');
+  // Old saved settings without a language field fall back to auto.
+  assert.equal(effectiveLanguage({}, 'zh-TW'), 'zh');
+});
+
+test('translations are complete and interpolate variables', () => {
+  assert.deepEqual(Object.keys(MESSAGES.en).sort(), Object.keys(MESSAGES.zh).sort());
+  for (const key of Object.keys(MESSAGES.en)) {
+    assert.ok(MESSAGES.en[key].length > 0, `${key} has an English value`);
+    assert.ok(MESSAGES.zh[key].length > 0, `${key} has a Chinese value`);
+  }
+  assert.equal(translate('en', 'status.keySent', { key: 'HOME' }), 'HOME key sent');
+  assert.equal(translate('zh', 'status.keySent', { key: '主页' }), '已发送 主页 键');
+  assert.equal(translate('zh', 'status.connected', { resolution: ' — 522x1080' }), '已连接 — 522x1080');
+  // Unknown keys and languages degrade to the key name / English, never crash.
+  assert.equal(translate('en', 'not.a.key'), 'not.a.key');
+  assert.equal(translate('fr', 'status.connecting'), MESSAGES.en['status.connecting']);
 });

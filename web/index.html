@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Phone Screen Link</title>
+  <title data-i18n="app.title">Phone Screen Link</title>
   <!-- The engine builds its own DOM (device-view / video / control-buttons-list).
        Its stylesheet carries the layout rules for that DOM; without it the
        toolbox buttons render unstyled and the touch layer stops overlapping
@@ -14,57 +14,65 @@
 </head>
 <body>
   <main class="shell">
-    <div class="nav-bar" aria-label="Phone controls">
-      <button type="button" data-key="home">HOME</button>
-      <button type="button" data-key="back">BACK</button>
-      <button type="button" data-key="overview">APPS</button>
-      <button type="button" data-key="volume_down">VOL&minus;</button>
-      <button type="button" data-key="volume_up">VOL+</button>
-      <button type="button" data-key="power">POWER</button>
+    <div class="nav-bar" data-i18n-aria="nav.controls" aria-label="Phone controls">
+      <button type="button" data-key="home" data-i18n="key.home">HOME</button>
+      <button type="button" data-key="back" data-i18n="key.back">BACK</button>
+      <button type="button" data-key="overview" data-i18n="key.overview">APPS</button>
+      <button type="button" data-key="volume_down" data-i18n="key.volume_down">VOL&minus;</button>
+      <button type="button" data-key="volume_up" data-i18n="key.volume_up">VOL+</button>
+      <button type="button" data-key="power" data-i18n="key.power">POWER</button>
     </div>
-    <div id="stream" aria-label="Phone screen"></div>
+    <div id="stream" data-i18n-aria="nav.screen" aria-label="Phone screen"></div>
     <div id="status" role="status" aria-live="polite"></div>
   </main>
   <div id="settings-overlay" class="settings-overlay" hidden>
     <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="settings-head">
-        <h2 id="settings-title">Stream settings</h2>
-        <button type="button" id="settings-close" aria-label="Close settings">&times;</button>
+        <h2 id="settings-title" data-i18n="settings.title">Stream settings</h2>
+        <button type="button" id="settings-close" data-i18n-aria="settings.close" aria-label="Close settings">&times;</button>
       </header>
       <label class="setting-row">
-        <span>Resolution</span>
+        <span data-i18n="settings.resolution">Resolution</span>
         <select id="set-resolution">
-          <option value="auto">Auto (recommended)</option>
-          <option value="1280">1280 — sharpest</option>
-          <option value="1080">1080 — reliable</option>
-          <option value="720">720 — lightest</option>
+          <option value="auto" data-i18n="settings.resAuto">Auto (recommended)</option>
+          <option value="1280" data-i18n="settings.res1280">1280 — sharpest</option>
+          <option value="1080" data-i18n="settings.res1080">1080 — reliable</option>
+          <option value="720" data-i18n="settings.res720">720 — lightest</option>
         </select>
       </label>
       <label class="setting-row">
-        <span>Frame rate</span>
+        <span data-i18n="settings.fps">Frame rate</span>
         <select id="set-fps">
-          <option value="15">15 fps</option>
-          <option value="30">30 fps</option>
-          <option value="60">60 fps</option>
+          <option value="15" data-i18n="settings.fps15">15 fps</option>
+          <option value="30" data-i18n="settings.fps30">30 fps</option>
+          <option value="60" data-i18n="settings.fps60">60 fps</option>
         </select>
       </label>
       <label class="setting-row">
-        <span>Bitrate</span>
+        <span data-i18n="settings.bitrate">Bitrate</span>
         <select id="set-bitrate">
-          <option value="2000000">2 Mbps</option>
-          <option value="4000000">4 Mbps</option>
-          <option value="8000000">8 Mbps</option>
-          <option value="16000000">16 Mbps</option>
+          <option value="2000000" data-i18n="settings.br2">2 Mbps</option>
+          <option value="4000000" data-i18n="settings.br4">4 Mbps</option>
+          <option value="8000000" data-i18n="settings.br8">8 Mbps</option>
+          <option value="16000000" data-i18n="settings.br16">16 Mbps</option>
         </select>
       </label>
       <label class="setting-row setting-row--check">
-        <span>Audio</span>
+        <span data-i18n="settings.audio">Audio</span>
         <input type="checkbox" id="set-audio">
       </label>
-      <p class="settings-note">Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.</p>
+      <label class="setting-row">
+        <span data-i18n="settings.language">Language</span>
+        <select id="set-language">
+          <option value="auto" data-i18n="settings.langAuto">Follow browser</option>
+          <option value="zh" data-i18n="settings.langZh">中文</option>
+          <option value="en" data-i18n="settings.langEn">English</option>
+        </select>
+      </label>
+      <p class="settings-note" data-i18n="settings.note">Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.</p>
       <footer class="settings-actions">
-        <button type="button" id="settings-reset">Reset</button>
-        <button type="button" id="settings-apply">Apply &amp; restart</button>
+        <button type="button" id="settings-reset" data-i18n="settings.reset">Reset</button>
+        <button type="button" id="settings-apply" data-i18n="settings.apply">Apply &amp; restart</button>
       </footer>
     </section>
   </div>

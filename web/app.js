@@ -4,19 +4,20 @@
 import {
   DEFAULT_SETTINGS,
   buildStreamOptions,
+  effectiveLanguage,
   isDegradedStream,
   isUsableContext,
   loadSettings,
+  lockHint,
   normalizeSettings,
   saveSettings,
   sizeLadder,
-  lockHint,
+  translate,
 } from './keys.js';
 
 const DEVICE_ID = '2FD0221C09004177';
 const BRIDGE_URL = 'http://127.0.0.1:8100/keyevent';
 const SCREEN_STATE_POLL_MS = 3000;
-const ENGINE_UNAVAILABLE = 'Engine unavailable — is the service running?';
 
 const streamEl = document.getElementById('stream');
 const statusEl = document.getElementById('status');
@@ -27,23 +28,33 @@ const statusEl = document.getElementById('status');
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 
 // The engine builds its own toolbox (screenshot, clipboard, stats, input
-// modes). Its icons carry a tooltip but no visible text, so the labels are
-// mapped here and rendered by CSS through data-label.
+// modes). Its icons carry an English tooltip but no visible text, so the
+// labels are mapped here to translation keys and rendered via data-label.
 const TOOLBOX_LABELS = new Map([
-  ['Take screenshot', 'SHOT'],
-  ['Capture keyboard', 'KEYS'],
-  ['UHID Input (keyboard + mouse)', 'MOUSE'],
-  ['Display quality stats', 'STATS'],
-  ['D-pad mode (click for Touch mode)', 'DPAD'],
-  ['Refresh stream', 'RELOAD'],
-  ['copy device selection to host clipboard', 'COPY'],
-  ['push host clipboard to device', 'PASTE'],
+  ['Take screenshot', 'tool.shot'],
+  ['Capture keyboard', 'tool.keys'],
+  ['UHID Input (keyboard + mouse)', 'tool.mouse'],
+  ['Display quality stats', 'tool.stats'],
+  ['D-pad mode (click for Touch mode)', 'tool.dpad'],
+  ['Touch mode (click for D-pad mode)', 'tool.dpad'],
+  ['Refresh stream', 'tool.reload'],
+  ['copy device selection to host clipboard', 'tool.copy'],
+  ['push host clipboard to device', 'tool.paste'],
 ]);
 
 // Settings come from localStorage and are validated before they reach the
-// engine — a stale/tampered value must not break the stream.
+// engine — a stale/tampered value must not break the stream or the UI.
 let settings = loadSettings(localStorage);
 let ladder = sizeLadder(settings);
+let lang = effectiveLanguage(settings, navigator.language);
+let screenState = {};
+let lockMessage = '';
+let statusKey = 'status.connecting';
+let statusVars = {};
+
+function t(key, vars) {
+  return translate(lang, key, vars);
+}
 
 const GEAR_SVG = '<svg viewBox="0 0 24 24" width="48" height="48" aria-hidden="true">' +
   '<path d="M19.14 12.94c.04-.31.06-.63.06-.94s-.02-.63-.07-.94l2.03-1.58a.5.5 0 0 0 .12-.64l-1.92-3.32a.5.5 0 0 0-.61-.22l-2.39.96a7.03 7.03 0 0 0-1.62-.94l-.36-2.54a.5.5 0 0 0-.5-.42h-3.84a.5.5 0 0 0-.5.42l-.36 2.54c-.59.24-1.13.56-1.62.94l-2.39-.96a.5.5 0 0 0-.61.22L2.15 8.84a.5.5 0 0 0 .12.64l2.03 1.58c-.05.31-.08.63-.08.94s.03.63.08.94l-2.03 1.58a.5.5 0 0 0-.12.64l1.92 3.32c.13.22.39.31.61.22l2.39-.96c.49.38 1.03.7 1.62.94l.36 2.54c.05.24.25.42.5.42h3.84c.25 0 .45-.18.5-.42l.36-2.54c.59-.24 1.13-.56 1.62-.94l2.39.96c.22.09.48 0 .61-.22l1.92-3.32a.5.5 0 0 0-.12-.64l-2.04-1.58zM12 15.6a3.6 3.6 0 1 1 0-7.2 3.6 3.6 0 0 1 0 7.2z"/>' +
@@ -55,6 +66,7 @@ const formFields = {
   maxFps: document.getElementById('set-fps'),
   bitrate: document.getElementById('set-bitrate'),
   audio: document.getElementById('set-audio'),
+  language: document.getElementById('set-language'),
 };
 
 function fillSettingsForm(values = settings) {
@@ -62,6 +74,7 @@ function fillSettingsForm(values = settings) {
   formFields.maxFps.value = String(values.maxFps);
   formFields.bitrate.value = String(values.bitrate);
   formFields.audio.checked = values.audio;
+  formFields.language.value = values.language;
 }
 
 function openSettings() {
@@ -80,6 +93,7 @@ function readSettingsForm() {
     maxFps: Number(formFields.maxFps.value),
     bitrate: Number(formFields.bitrate.value),
     audio: formFields.audio.checked,
+    language: formFields.language.value,
   });
 }
 
@@ -93,18 +107,34 @@ window.addEventListener('keydown', (event) => {
 document.getElementById('settings-reset').addEventListener('click', () => {
   fillSettingsForm(DEFAULT_SETTINGS);
 });
+document.getElementById('settings-apply').addEventListener('click', applySettings);
 
-let baseStatus = 'Connecting…';
-let lockMessage = '';
-
-// Every status update (stream events, key presses and the lock hint) funnels
-// through here. The hint is prepended so it never destroys the current status.
-function renderStatus() {
-  statusEl.textContent = lockMessage ? `${lockMessage} — ${baseStatus}` : baseStatus;
+// Apply the active language to every static element, then rebuild the dynamic
+// strings (status line, lock hint and toolbox labels) that depend on it.
+function applyLanguage() {
+  lang = effectiveLanguage(settings, navigator.language);
+  document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  for (const el of document.querySelectorAll('[data-i18n]')) {
+    el.textContent = t(el.dataset.i18n);
+  }
+  for (const el of document.querySelectorAll('[data-i18n-aria]')) {
+    el.setAttribute('aria-label', t(el.dataset.i18nAria));
+  }
+  lockMessage = lockHint(screenState, lang);
+  renderStatus();
+  labelToolbox();
 }
 
-function setStatus(text) {
-  baseStatus = text;
+// Every status update funnels through here as a key + variables, so a language
+// switch re-renders the same message instead of a stale English string.
+function renderStatus() {
+  const text = t(statusKey, statusVars);
+  statusEl.textContent = lockMessage ? `${lockMessage} — ${text}` : text;
+}
+
+function setStatus(key, vars) {
+  statusKey = key;
+  statusVars = vars ?? {};
   renderStatus();
 }
 
@@ -115,8 +145,8 @@ function labelToolbox() {
   const list = streamEl.querySelector('.control-buttons-list');
   if (!list) return;
   for (const el of list.querySelectorAll('.control-button')) {
-    const label = TOOLBOX_LABELS.get(el.getAttribute('title'));
-    if (label) el.setAttribute('data-label', label);
+    const labelKey = TOOLBOX_LABELS.get(el.getAttribute('title'));
+    if (labelKey) el.setAttribute('data-label', t(labelKey));
   }
   addSettingsButton(list);
 }
@@ -124,16 +154,18 @@ function labelToolbox() {
 // The engine owns the rail, so our entry is injected into its DOM. It is a
 // plain toolbox button (same class/label rules), just with our own handler.
 function addSettingsButton(list) {
-  if (list.querySelector('.settings-button')) return;
-  const button = document.createElement('button');
-  button.type = 'button';
-  button.className = 'control-button settings-button';
-  button.title = 'Stream settings';
-  button.dataset.label = 'SET';
-  button.setAttribute('aria-label', 'Stream settings');
-  button.innerHTML = GEAR_SVG;
-  button.addEventListener('click', openSettings);
-  list.appendChild(button);
+  let button = list.querySelector('.settings-button');
+  if (!button) {
+    button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'control-button settings-button';
+    button.innerHTML = GEAR_SVG;
+    button.addEventListener('click', openSettings);
+    list.appendChild(button);
+  }
+  button.title = t('tool.settingsTitle');
+  button.dataset.label = t('tool.settings');
+  button.setAttribute('aria-label', t('tool.settingsTitle'));
 }
 
 const toolboxObserver = new MutationObserver(() => labelToolbox());
@@ -144,7 +176,8 @@ async function pollScreenState() {
     // Same origin as the page (port 8000), so no CORS or bridge is involved.
     const res = await fetch(`/api/devices/screen-state?udid=${encodeURIComponent(DEVICE_ID)}`);
     if (!res.ok) return;
-    const hint = lockHint(await res.json());
+    screenState = await res.json();
+    const hint = lockHint(screenState, lang);
     if (hint !== lockMessage) {
       lockMessage = hint;
       renderStatus();
@@ -164,6 +197,7 @@ function messageOf(value) {
 for (const button of document.querySelectorAll('[data-key]')) {
   button.addEventListener('click', async () => {
     const key = button.dataset.key;
+    const keyName = t(`key.${key}`);
     try {
       const res = await fetch(BRIDGE_URL, {
         method: 'POST',
@@ -171,17 +205,21 @@ for (const button of document.querySelectorAll('[data-key]')) {
         body: JSON.stringify({ key }),
       });
       if (res.status === 503) {
-        setStatus('Phone is offline — check the USB connection');
+        setStatus('status.offline');
         return;
       }
       if (!res.ok) {
         const detail = await res.json().catch(() => ({}));
-        setStatus(`${key} key failed (${res.status})${detail.error ? ` — ${detail.error}` : ''}`);
+        setStatus('status.keyFailed', {
+          key: keyName,
+          code: res.status,
+          detail: detail.error ? ` — ${detail.error}` : '',
+        });
         return;
       }
-      setStatus(`${key} key sent`);
+      setStatus('status.keySent', { key: keyName });
     } catch (err) {
-      setStatus(`Control bridge unavailable — ${messageOf(err)}`);
+      setStatus('status.bridgeDown', { error: messageOf(err) });
     }
   });
 }
@@ -210,7 +248,7 @@ function startStream() {
     const canRetry = attempts < ladder.length;
     if (degraded && canRetry) {
       generation += 1;
-      setStatus(`Stream came back at ${info.resolution} — retrying…`);
+      setStatus('status.retrying', { resolution: info.resolution });
       try {
         window.phoneLinkHandle?.stop();
       } catch {
@@ -220,15 +258,17 @@ function startStream() {
       return;
     }
     const resolution = info?.resolution ? ` — ${info.resolution}` : '';
-    setStatus(`Connected${resolution}${degraded ? ' (low resolution — press RELOAD)' : ''}`);
+    setStatus('status.connected', {
+      resolution: `${resolution}${degraded ? t('status.lowRes') : ''}`,
+    });
   };
   options.onDisconnect = (reason) => {
     if (gen !== generation) return;
-    setStatus(`Disconnected${reason ? ` — ${reason}` : ''}`);
+    setStatus('status.disconnected', { reason: reason ? ` — ${reason}` : '' });
   };
   options.onError = (err) => {
     if (gen !== generation) return;
-    setStatus(`Stream error — ${messageOf(err)}`);
+    setStatus('status.error', { error: messageOf(err) });
   };
 
   window.phoneLinkHandle = window.WsScrcpy.startStream(streamEl, DEVICE_ID, options);
@@ -237,6 +277,7 @@ function startStream() {
 function applySettings() {
   settings = saveSettings(localStorage, readSettingsForm());
   ladder = sizeLadder(settings);
+  applyLanguage();
   closeSettings();
   generation += 1; // ignore the old stream's late callbacks
   attempts = 0;
@@ -246,24 +287,24 @@ function applySettings() {
     // It may already be gone; the new session is what matters.
   }
   if (!isUsableContext(location.protocol, location.hostname) || !window.WsScrcpy) {
-    setStatus(ENGINE_UNAVAILABLE);
+    setStatus('status.engineDown');
     return;
   }
-  setStatus('Applying settings…');
+  setStatus('status.applying');
   setTimeout(startStream, 250);
 }
 
-document.getElementById('settings-apply').addEventListener('click', applySettings);
+applyLanguage();
 
 if (!isUsableContext(location.protocol, location.hostname)) {
-  setStatus('Insecure origin — open http://127.0.0.1:8000/ (or https) so the browser can decode the stream.');
+  setStatus('status.insecure');
 } else if (!window.WsScrcpy || typeof window.WsScrcpy.startStream !== 'function') {
-  setStatus(ENGINE_UNAVAILABLE);
+  setStatus('status.engineDown');
 } else {
-  setStatus('Connecting to phone…');
+  setStatus('status.connectPhone');
   try {
     startStream();
   } catch (err) {
-    setStatus(`${ENGINE_UNAVAILABLE} ${messageOf(err)}`);
+    setStatus('status.engineDownError', { error: messageOf(err) });
   }
 }
