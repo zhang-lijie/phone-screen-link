@@ -53,8 +53,9 @@ function readJsonBody(req, res) {
   });
 }
 
-// `chat` is `{ run(userText, lang) }`, wired in scripts/start.mjs around the
-// agent loop. `chatConfig` is the backend store: it gates /chat and backs the
+// `chat` is `{ run(userText, lang, config) }`, wired in scripts/start.mjs
+// around the agent loop; `config` is the store snapshot the /chat gate already
+// loaded. `chatConfig` is the backend store: it gates /chat and backs the
 // /api/chat-config routes.
 export function createBridge({ adb, host, port, chatConfig, chat }) {
   const bindHost = host ?? DEFAULT_HOST;
@@ -144,8 +145,19 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
           sendJson(res, 503, { error: 'chat disabled' });
           return;
         }
-        const { reply, steps } = await chat.run(message, lang);
-        sendJson(res, 200, { reply, steps });
+        // Model/tool failures carry readable messages (model-client, agent
+        // timeout): surface them as 502 so the frontend can show them in a
+        // bubble. The config loaded for the gate is handed to the agent so
+        // the store is read exactly once per request (no TOCTOU re-load).
+        let result;
+        try {
+          result = await chat.run(message, lang, config);
+        } catch (err) {
+          const detail = err instanceof Error && err.message ? err.message : 'chat request failed';
+          sendJson(res, 502, { error: detail });
+          return;
+        }
+        sendJson(res, 200, { reply: result.reply, steps: result.steps });
         return;
       }
 

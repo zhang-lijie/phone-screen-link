@@ -455,12 +455,13 @@ function postChat(address, body, headers = {}) {
 }
 
 // Fake agent: counts run() invocations so tests can prove the model layer is
-// never reached when the backend config gates the request.
+// never reached when the backend config gates the request. Records the config
+// the bridge hands over (M8: the gated load is reused, never re-read).
 function fakeChat(result) {
   const chat = {
     calls: [],
-    run: async (message, lang) => {
-      chat.calls.push({ message, lang });
+    run: async (message, lang, config) => {
+      chat.calls.push({ message, lang, config });
       return result ?? { reply: '好的，已回到桌面', steps: [{ tool: 'press_home', ok: true }] };
     },
   };
@@ -481,7 +482,7 @@ test('chat: POST /chat returns reply and steps from the injected agent', async (
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
     assert.deepEqual(await res.json(), { reply: '好的，已回到桌面', steps: [{ tool: 'press_home', ok: true }] });
-    assert.deepEqual(chat.calls, [{ message: '回到桌面', lang: 'zh' }]);
+    assert.deepEqual(chat.calls, [{ message: '回到桌面', lang: 'zh', config: chatConfig.load() }]);
   });
 });
 
@@ -503,11 +504,28 @@ test('chat: POST /chat passes only message and lang to the agent; body config fi
     assert.deepEqual(chat.calls, []);
 
     // Now enable on the backend: the same body succeeds, and the agent still
-    // receives only message and lang.
+    // receives only message, lang, and the backend config — never body fields.
     chatConfig.save({ enabled: true, model: 'qwen3' });
     const ok = await postChat(address, sneaky, { origin: ALLOWED_ORIGIN });
     assert.equal(ok.status, 200);
-    assert.deepEqual(chat.calls, [{ message: 'hi', lang: 'en' }]);
+    assert.deepEqual(chat.calls, [{ message: 'hi', lang: 'en', config: chatConfig.load() }]);
+    assert.equal(chat.calls[0].config.model, 'qwen3');
+    assert.equal(chat.calls[0].config.baseUrl, DEFAULT_CHAT_CONFIG.baseUrl);
+    assert.equal(chat.calls[0].config.apiKey, '');
+  });
+});
+
+test('chat: the gated config is loaded once per request and handed to the agent', async (t) => {
+  const chatConfig = enabledChatConfig(t);
+  let loads = 0;
+  const innerLoad = chatConfig.load.bind(chatConfig);
+  chatConfig.load = () => { loads += 1; return innerLoad(); };
+  const chat = fakeChat();
+  await withBridge({ chatConfig, chat }, async (address) => {
+    const res = await postChat(address, { message: 'hi', lang: 'en' });
+    assert.equal(res.status, 200);
+    assert.equal(loads, 1, 'the gate load must be reused, not repeated (TOCTOU)');
+    assert.deepEqual(chat.calls[0].config, innerLoad());
   });
 });
 
@@ -605,13 +623,25 @@ test('chat: a cross-origin POST is rejected with 403 and never runs the agent', 
   });
 });
 
-test('chat: agent failure surfaces as 500 without leaking internals', async (t) => {
+test('chat: agent failure surfaces as 502 with the readable error message', async (t) => {
   const chatConfig = enabledChatConfig(t);
-  const chat = { run: async () => { throw new Error('model unreachable'); } };
+  const chat = { run: async () => { throw new Error('Model API error 500: model not found'); } };
+  await withBridge({ chatConfig, chat }, async (address) => {
+    const res = await postChat(address, { message: '回到桌面', lang: 'zh' });
+    assert.equal(res.status, 502);
+    assert.deepEqual(await res.json(), { error: 'Model API error 500: model not found' });
+  });
+});
+
+test('chat: an unexpected backend bug still returns the generic 500', async (t) => {
+  const chatConfig = enabledChatConfig(t);
+  chatConfig.load = () => { throw new Error('secret internal detail'); };
+  const chat = fakeChat();
   await withBridge({ chatConfig, chat }, async (address) => {
     const res = await postChat(address, { message: '回到桌面', lang: 'zh' });
     assert.equal(res.status, 500);
     assert.deepEqual(await res.json(), { error: 'internal error' });
+    assert.deepEqual(chat.calls, []);
   });
 });
 

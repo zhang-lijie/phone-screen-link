@@ -218,8 +218,10 @@ export async function main(deps = {}) {
     }
     if (aborted) throw new Error('startup aborted');
 
+    // The bridge passes the config it already loaded for the enablement gate;
+    // re-loading here would race a concurrent settings save (TOCTOU).
     const chat = ghost
-      ? { run: (userText, lang) => runAgentTurn({ config: chatConfig.load(), ghost, userText, lang }) }
+      ? { run: (userText, lang, config) => runAgentTurn({ config, ghost, userText, lang }) }
       : undefined;
 
     bridge = makeBridge({ adb: adbClient, port: bridgeStep.port, chatConfig, chat });

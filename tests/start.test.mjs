@@ -255,7 +255,7 @@ test('main wires the chat config store and ghost agent into the bridge, ghost be
 });
 
 test('chat.run goes through the agent loop and the phone-state gate', async () => {
-  const { deps, calls, handlers } = fakeRuntime();
+  const { deps, calls, handlers, chatConfig } = fakeRuntime();
   // Locked device: the agent must stop before listing tools or calling the
   // model, and reply with the localized unlock prompt.
   deps.createGhostClient = () => ({
@@ -269,7 +269,13 @@ test('chat.run goes through the agent loop and the phone-state gate', async () =
   });
 
   await main(deps);
-  const turn = await calls.bridgeOptions.chat.run('回到桌面', 'zh');
+  // M8: the bridge hands chat.run the config it already loaded for the gate;
+  // run must use it instead of re-reading the store (TOCTOU double load).
+  let loads = 0;
+  const innerLoad = chatConfig.load;
+  chatConfig.load = () => { loads += 1; return innerLoad(); };
+  const turn = await calls.bridgeOptions.chat.run('回到桌面', 'zh', innerLoad());
+  assert.equal(loads, 0, 'chat.run must not re-load the config store');
 
   assert.match(turn.reply, /解锁/);
   assert.deepEqual(turn.steps, []);

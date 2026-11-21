@@ -172,7 +172,7 @@ uvx --from ghost-in-the-droid android-agent-mcp
 
 | 方法 | 路径 | 请求体 | 响应 |
 | --- | --- | --- | --- |
-| `POST` | `/chat` | `{ message, lang }` | 成功 `200 { reply, steps }`；`400 message required`；`403 origin not allowed`；`503 chat disabled / chat unavailable` |
+| `POST` | `/chat` | `{ message, lang }` | 成功 `200 { reply, steps }`；`400 message required`；`403 origin not allowed`；`502` 模型/工具失败（带可读错误信息）；`503 chat disabled / chat unavailable` |
 | `GET` | `/api/chat-config` | — | `200` 公开展示的配置（不含 Key） |
 | `POST` | `/api/chat-config` | 上面 6 个字段的任意子集 | `200` 保存后的公开配置；`403 origin not allowed` |
 
