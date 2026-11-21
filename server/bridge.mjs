@@ -70,6 +70,15 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
         res.setHeader('Access-Control-Allow-Origin', origin);
       }
 
+      // CORS only gates response reading: a hostile page can still send a
+      // preflight-free "simple request" (e.g. content-type:text/plain) that
+      // mutates state. Every POST must therefore carry either no Origin
+      // (curl and other non-browser clients) or an allowlisted one.
+      if (req.method === 'POST' && origin !== undefined && !ALLOWED_ORIGINS.has(origin)) {
+        sendJson(res, 403, { error: 'origin not allowed' });
+        return;
+      }
+
       if (req.method === 'OPTIONS' && Object.hasOwn(PREFLIGHT_METHODS, pathname)) {
         res.writeHead(204, {
           'access-control-allow-methods': PREFLIGHT_METHODS[pathname],

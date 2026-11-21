@@ -168,15 +168,20 @@ uvx --from ghost-in-the-droid android-agent-mcp
 ### 接口
 
 在既有控制桥（`http://127.0.0.1:8100`，CORS 仍只允许 `http://127.0.0.1:8000` 与 `http://localhost:8000`）上新增两条路由，
-`/health`、`/keyevent` 的语义未变：
+`/health`、`/keyevent` 的既有语义未变（`/keyevent` 与其他 POST 一样新增了 Origin 强制校验，见下）：
 
 | 方法 | 路径 | 请求体 | 响应 |
 | --- | --- | --- | --- |
-| `POST` | `/chat` | `{ message, lang }` | 成功 `200 { reply, steps }`；`400 message required`；`503 chat disabled / chat unavailable` |
+| `POST` | `/chat` | `{ message, lang }` | 成功 `200 { reply, steps }`；`400 message required`；`403 origin not allowed`；`503 chat disabled / chat unavailable` |
 | `GET` | `/api/chat-config` | — | `200` 公开展示的配置（不含 Key） |
-| `POST` | `/api/chat-config` | 上面 6 个字段的任意子集 | `200` 保存后的公开配置 |
+| `POST` | `/api/chat-config` | 上面 6 个字段的任意子集 | `200` 保存后的公开配置；`403 origin not allowed` |
 
 `/chat` 只读 `message` 和 `lang`，**请求体里任何开关/模型字段都被忽略**；超过 64KB 的请求体返回 413。
+
+**所有写路由（`POST /keyevent`、`POST /chat`、`POST /api/chat-config`）强制校验 Origin**：
+CORS 只拦「读响应」，恶意网页仍能发出免预检的简单请求（如 `content-type: text/plain`）来改配置或驱动手机，
+所以桥对带 Origin 且不在白名单内的 POST 一律返回 `403 origin not allowed`，请求体不会被处理。
+不带 Origin 的请求（`curl` 等非浏览器客户端）不受影响；页面自身携带的是白名单内的同源 Origin。
 
 ### 隐私与边界
 
@@ -233,7 +238,8 @@ uvx --from ghost-in-the-droid android-agent-mcp
 `scripts/start.mjs` 负责资源复制、进程启动、ghost 子进程与聊天配置存储的装配、就绪等待和信号清理。
 
 安全边界：引擎与桥都只绑定回环地址；桥的 CORS 白名单仅允许
-`http://127.0.0.1:8000` 与 `http://localhost:8000` 两个精确来源；启动时强制断开 Wi‑Fi ADB，只允许固定 USB 设备。
+`http://127.0.0.1:8000` 与 `http://localhost:8000` 两个精确来源，且**所有 POST 路由都强制 Origin 校验**
+（白名单外的 Origin 直接 403，堵住免预检的跨站简单请求）；启动时强制断开 Wi‑Fi ADB，只允许固定 USB 设备。
 聊天不新增端口、不放宽 CORS，模型出口只有后端一处，且工具受白名单约束。
 
 ## 快速开始

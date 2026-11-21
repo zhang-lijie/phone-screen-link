@@ -202,11 +202,33 @@ test('unauthorized and absent origins receive no ACAO', async () => {
     for (const headers of [{ origin: 'http://evil.example' }, {}]) {
       const health = await fetch(`${address}/health`, { headers });
       assert.equal(health.headers.get('access-control-allow-origin'), null);
-      const keyevent = await postKey(address, 'home', headers);
-      assert.equal(keyevent.headers.get('access-control-allow-origin'), null);
       const preflight = await fetch(`${address}/keyevent`, { method: 'OPTIONS', headers });
       assert.equal(preflight.headers.get('access-control-allow-origin'), null);
     }
+  });
+});
+
+test('keyevent: a cross-origin POST is rejected with 403 and never reaches adb', async () => {
+  fakeAdb.last = undefined;
+  await withBridge({}, async (address) => {
+    // A malicious page can send a "simple request" (text/plain, no preflight);
+    // CORS alone would not stop it, so the bridge must reject the Origin.
+    for (const contentType of ['application/json', 'text/plain']) {
+      const res = await fetch(`${address}/keyevent`, {
+        method: 'POST',
+        headers: { 'content-type': contentType, origin: 'http://evil.example' },
+        body: JSON.stringify({ key: 'home' }),
+      });
+      assert.equal(res.status, 403);
+      assert.deepEqual(await res.json(), { error: 'origin not allowed' });
+      assert.equal(res.headers.get('access-control-allow-origin'), null);
+      assert.equal(fakeAdb.last, undefined);
+    }
+
+    // curl and other non-browser clients send no Origin and keep working.
+    const noOrigin = await postKey(address, 'home');
+    assert.equal(noOrigin.status, 200);
+    assert.equal(fakeAdb.last, 'home');
   });
 });
 
@@ -353,19 +375,42 @@ test('chat config: oversized POST body returns 413', async (t) => {
   });
 });
 
-test('chat config: unauthorized and absent origins receive no ACAO', async (t) => {
+test('chat config: a cross-origin POST is rejected with 403 and the config is unchanged', async (t) => {
   const chatConfig = tempChatConfig(t);
   await withBridge({ chatConfig }, async (address) => {
-    for (const headers of [{ origin: 'http://evil.example' }, {}]) {
-      const get = await getChatConfig(address, headers);
-      assert.equal(get.status, 200);
-      assert.equal(get.headers.get('access-control-allow-origin'), null);
-      const post = await postChatConfig(address, { model: 'sneaky' }, headers);
-      assert.equal(post.status, 200);
+    // Reads stay open (no secrets in publicConfig), but a hostile page must
+    // not be able to repoint the model URL or toggle the agent, even with a
+    // preflight-free "simple request" content type.
+    for (const contentType of ['application/json', 'text/plain']) {
+      const post = await fetch(`${address}/api/chat-config`, {
+        method: 'POST',
+        headers: { 'content-type': contentType, origin: 'http://evil.example' },
+        body: JSON.stringify({ enabled: true, baseUrl: 'http://evil.example/v1', model: 'sneaky', apiKey: 'sk-x' }),
+      });
+      assert.equal(post.status, 403);
+      assert.deepEqual(await post.json(), { error: 'origin not allowed' });
       assert.equal(post.headers.get('access-control-allow-origin'), null);
-      const preflight = await fetch(`${address}/api/chat-config`, { method: 'OPTIONS', headers });
-      assert.equal(preflight.headers.get('access-control-allow-origin'), null);
+      assert.deepEqual(chatConfig.load(), { ...DEFAULT_CHAT_CONFIG });
     }
+
+    const get = await getChatConfig(address, { origin: 'http://evil.example' });
+    assert.equal(get.status, 200);
+    assert.equal(get.headers.get('access-control-allow-origin'), null);
+    const preflight = await fetch(`${address}/api/chat-config`, {
+      method: 'OPTIONS',
+      headers: { origin: 'http://evil.example' },
+    });
+    assert.equal(preflight.headers.get('access-control-allow-origin'), null);
+  });
+});
+
+test('chat config: POST without an Origin (curl) still saves; no ACAO is emitted', async (t) => {
+  const chatConfig = tempChatConfig(t);
+  await withBridge({ chatConfig }, async (address) => {
+    const post = await postChatConfig(address, { model: 'qwen3' });
+    assert.equal(post.status, 200);
+    assert.equal(post.headers.get('access-control-allow-origin'), null);
+    assert.equal(chatConfig.load().model, 'qwen3');
   });
 });
 
@@ -534,6 +579,29 @@ test('chat: POST /chat returns 503 when the agent or config store is not wired',
     assert.equal(res.status, 503);
     assert.deepEqual(await res.json(), { error: 'chat unavailable' });
     assert.deepEqual(chat.calls, []);
+  });
+});
+
+test('chat: a cross-origin POST is rejected with 403 and never runs the agent', async (t) => {
+  const chatConfig = enabledChatConfig(t);
+  const chat = fakeChat();
+  await withBridge({ chatConfig, chat }, async (address) => {
+    for (const contentType of ['application/json', 'text/plain']) {
+      const res = await fetch(`${address}/chat`, {
+        method: 'POST',
+        headers: { 'content-type': contentType, origin: 'http://evil.example' },
+        body: JSON.stringify({ message: 'tap everywhere', lang: 'en' }),
+      });
+      assert.equal(res.status, 403);
+      assert.deepEqual(await res.json(), { error: 'origin not allowed' });
+      assert.equal(res.headers.get('access-control-allow-origin'), null);
+      assert.deepEqual(chat.calls, []);
+    }
+
+    // No Origin (curl) keeps working.
+    const ok = await postChat(address, { message: 'hi', lang: 'en' });
+    assert.equal(ok.status, 200);
+    assert.equal(chat.calls.length, 1);
   });
 });
 
