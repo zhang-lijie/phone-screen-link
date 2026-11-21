@@ -285,6 +285,51 @@ test('chat.run goes through the agent loop and the phone-state gate', async () =
   await handlers.get('SIGINT')();
 });
 
+test('a hanging ghost start is bounded: startup completes with chat disabled', async () => {
+  const { deps, calls, handlers, chatConfig } = fakeRuntime({ ghostStartTimeoutMs: 50 });
+  deps.createGhostClient = () => ({
+    start: () => { calls.ghostStart += 1; return new Promise(() => {}); }, // never resolves
+    stop: async () => { calls.ghostStop += 1; },
+    listTools: async () => [],
+    callTool: async () => ({}),
+  });
+
+  // The bridge must come up even though ghost.start() hangs forever.
+  await main(deps);
+
+  assert.equal(calls.ghostStart, 1);
+  assert.equal(calls.bridgeStart, 1);
+  assert.equal(calls.bridgeOptions.chat, undefined);
+  assert.equal(calls.bridgeOptions.chatConfig, chatConfig);
+  assert.equal(calls.ghostStop, 1); // defensive release of the partial start
+
+  await handlers.get('SIGINT')();
+  assert.equal(calls.ghostStop, 1); // stopped exactly once
+  assert.equal(calls.bridgeStop, 1);
+  assert.equal(calls.kill, 1);
+});
+
+test('a signal while ghost is still starting aborts without hanging cleanup', async () => {
+  let ghostEntered;
+  const entered = new Promise((resolve) => { ghostEntered = resolve; });
+  const { deps, calls, handlers } = fakeRuntime({ ghostStartTimeoutMs: 50 });
+  deps.createGhostClient = () => ({
+    start: () => { calls.ghostStart += 1; ghostEntered(); return new Promise(() => {}); },
+    stop: async () => { calls.ghostStop += 1; },
+    listTools: async () => [],
+    callTool: async () => ({}),
+  });
+
+  const running = main(deps);
+  await entered;
+  await handlers.get('SIGINT')();
+
+  await assert.rejects(running, /startup aborted/);
+  assert.equal(calls.ghostStop, 1);
+  assert.equal(calls.kill, 1);
+  assert.equal(calls.bridgeStart, 0);
+});
+
 test('a ghost that fails to start leaves the bridge and buttons running without chat', async () => {
   const { deps, calls, handlers, chatConfig } = fakeRuntime();
   deps.createGhostClient = () => ({

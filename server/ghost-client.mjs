@@ -32,7 +32,19 @@ export function createGhostClient(
       env: { ...env, DEFAULT_DEVICE: serial },
     });
     const next = new ClientImpl({ name: 'phone-screen-link', version: '1.0.0' });
-    await next.connect(transport);
+    try {
+      await next.connect(transport);
+    } catch (err) {
+      // A rejected connect may still have spawned the child process: close
+      // the transport so no ghost process leaks, then surface the original
+      // error (a close failure must not mask it).
+      try {
+        await transport.close();
+      } catch {
+        // The transport may never have started; nothing else to release.
+      }
+      throw err;
+    }
     client = next;
   }
 

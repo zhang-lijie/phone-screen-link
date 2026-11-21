@@ -10,7 +10,12 @@ function makeDeps() {
   deps.StdioClientTransport = class FakeStdioClientTransport {
     constructor(serverParams) {
       this.serverParams = serverParams;
+      this.closeCalls = 0;
       deps.transports.push(this);
+    }
+
+    async close() {
+      this.closeCalls += 1;
     }
   };
 
@@ -145,6 +150,49 @@ test('ghost client: listTools()/callTool() throw when not started', async () => 
 
   await client.start();
   await client.stop();
+  await assert.rejects(client.listTools(), /not started/);
+});
+
+test('ghost client: a failed connect closes the transport and leaves the client unstarted', async () => {
+  const deps = makeDeps();
+  const BaseClient = deps.Client;
+  let failNextConnect = true;
+  deps.Client = class FlakyClient extends BaseClient {
+    async connect(transport) {
+      await super.connect(transport);
+      if (failNextConnect) {
+        failNextConnect = false;
+        throw new Error('spawn uvx ENOENT');
+      }
+    }
+  };
+  const client = createGhostClient({ serial: SERIAL }, deps);
+
+  await assert.rejects(client.start(), /spawn uvx ENOENT/);
+  assert.equal(deps.transports.length, 1);
+  assert.equal(deps.transports[0].closeCalls, 1, 'transport must be closed so no ghost process leaks');
+  await assert.rejects(client.listTools(), /not started/);
+
+  // A retry after the failure builds a fresh transport and connects cleanly.
+  await client.start();
+  assert.equal(deps.transports.length, 2);
+  assert.equal(deps.transports[1].closeCalls, 0);
+  assert.equal(deps.clients[1].connects[0], deps.transports[1]);
+});
+
+test('ghost client: transport close errors do not mask the connect failure', async () => {
+  const deps = makeDeps();
+  const BaseTransport = deps.StdioClientTransport;
+  deps.StdioClientTransport = class BrokenCloseTransport extends BaseTransport {
+    async close() { throw new Error('close failed'); }
+  };
+  const BaseClient = deps.Client;
+  deps.Client = class FailingClient extends BaseClient {
+    async connect() { throw new Error('connect failed'); }
+  };
+  const client = createGhostClient({ serial: SERIAL }, deps);
+
+  await assert.rejects(client.start(), /connect failed/);
   await assert.rejects(client.listTools(), /not started/);
 });
 

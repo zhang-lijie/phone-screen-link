@@ -14,6 +14,7 @@ const ENGINE_URL = 'http://127.0.0.1:8000/';
 const USB_RECHECK_MS = 5_000;
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 250;
+const GHOST_START_TIMEOUT_MS = 25_000;
 const ABORTED = Symbol('startup-aborted');
 
 export function buildPlan({ engineDir, webDir }) {
@@ -45,6 +46,17 @@ export function copyWeb({ files, webDir, sharedDir }, targetDir) {
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Bound a startup promise so a hang cannot hold the rest of startup (or
+// cleanup) hostage. The timer is cleared as soon as the promise settles;
+// Promise.race keeps a handler on the input, so a late rejection is safe.
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 // The engine resolves an OPTIONAL node-pty dependency on startup and awaits it
 // before it starts serving. Its fetch does not use the system HTTPS proxy
@@ -91,6 +103,7 @@ export async function main(deps = {}) {
     copyWeb: copyFiles = copyWeb,
     setTimer = setInterval,
     clearTimer = clearInterval,
+    ghostStartTimeoutMs = GHOST_START_TIMEOUT_MS,
     log = console.log,
     error = console.error,
     onSignal = (signal, handler) => process.once(signal, handler),
@@ -143,7 +156,8 @@ export async function main(deps = {}) {
         const starting = ghostStart;
         ghostStart = undefined;
         try {
-          await starting;
+          // Same bound as startup: a hanging ghost must not hang cleanup.
+          await withTimeout(starting, ghostStartTimeoutMs, 'ghost MCP server start (cleanup)');
         } catch {
           // A failed start is released once by the startup path.
         }
@@ -201,7 +215,9 @@ export async function main(deps = {}) {
     const chatConfig = makeChatConfig({ file: join(projectDir, 'state', 'chat.json') });
     try {
       ghost = makeGhost({ serial: DEFAULT_USB_SERIAL });
-      ghostStart = ghost.start();
+      // A hanging ghost.start() (e.g. uvx stuck downloading) must not block
+      // the bridge: bound it and fall into the chat-disabled catch below.
+      ghostStart = withTimeout(ghost.start(), ghostStartTimeoutMs, 'ghost MCP server start');
       await ghostStart;
       ghostStart = undefined;
     } catch (err) {

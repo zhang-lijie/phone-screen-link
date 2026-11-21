@@ -136,8 +136,9 @@ uvx --from ghost-in-the-droid android-agent-mcp
   把固定序列号 `2FD0221C09004177` 传给 `server/ghost-client.mjs`，由它注入子进程环境。
 
 `npm run setup` 会顺带探测 `uvx`/`uv`，缺失时只打印安装提示、**不阻断**引擎构建；
-`npm start` 时若 ghost 起不来，会打印 `ghost MCP server failed to start; chat disabled`，
-投屏、按钮和 `/keyevent` 照常工作，只是 `/chat` 返回 503。
+`npm start` 时若 ghost 起不来（或 **25 秒**内没起来，例如 `uvx` 卡在下载），会打印
+`ghost MCP server failed to start; chat disabled`，投屏、按钮和 `/keyevent` 照常工作，只是 `/chat` 返回 503；
+ghost 连接失败时其子进程传输会被立即关闭，不留残余进程。
 
 ### 聊天设置（6 项，存在后端）
 
