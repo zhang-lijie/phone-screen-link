@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { createBridge } from '../server/bridge.mjs';
+import { DEFAULT_CHAT_CONFIG, createChatConfigStore } from '../server/chat-config.mjs';
 
 const fakeAdb = {
   isOnline: async () => true,
@@ -237,5 +241,158 @@ test('OPTIONS preflight for the localhost origin returns 204 with narrow allow h
     assert.equal(keyevent.headers.get('access-control-allow-origin'), LOCALHOST_ORIGIN);
     assert.equal(keyevent.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
     assert.equal(keyevent.headers.get('access-control-allow-headers'), 'content-type');
+  });
+});
+
+function tempChatConfig(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'bridge-chat-config-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  return createChatConfigStore({ file: join(dir, 'chat.json') });
+}
+
+function getChatConfig(address, headers = {}) {
+  return fetch(`${address}/api/chat-config`, { headers });
+}
+
+function postChatConfig(address, body, headers = {}) {
+  return fetch(`${address}/api/chat-config`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+const PUBLIC_CHAT_CONFIG_DEFAULT = {
+  enabled: false,
+  baseUrl: DEFAULT_CHAT_CONFIG.baseUrl,
+  model: '',
+  maxSteps: 8,
+  screenshot: true,
+  hasApiKey: false,
+};
+
+test('chat config: GET returns the redacted public config for authorized origins', async (t) => {
+  const chatConfig = tempChatConfig(t);
+  await withBridge({ chatConfig }, async (address) => {
+    for (const origin of [ALLOWED_ORIGIN, LOCALHOST_ORIGIN]) {
+      const res = await getChatConfig(address, { origin });
+      assert.equal(res.status, 200);
+      assert.equal(res.headers.get('access-control-allow-origin'), origin);
+      const body = await res.json();
+      assert.deepEqual(body, PUBLIC_CHAT_CONFIG_DEFAULT);
+      assert.equal(Object.hasOwn(body, 'apiKey'), false);
+    }
+  });
+});
+
+test('chat config: POST persists model and apiKey; GET reports hasApiKey without leaking the key', async (t) => {
+  const chatConfig = tempChatConfig(t);
+  await withBridge({ chatConfig }, async (address) => {
+    const headers = { origin: ALLOWED_ORIGIN };
+    const post = await postChatConfig(address, { model: 'qwen3', apiKey: 'sk-x' }, headers);
+    assert.equal(post.status, 200);
+    assert.equal(post.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+    const saved = await post.json();
+    assert.equal(saved.model, 'qwen3');
+    assert.equal(saved.hasApiKey, true);
+    assert.equal(Object.hasOwn(saved, 'apiKey'), false);
+    assert.equal(JSON.stringify(saved).includes('sk-x'), false);
+
+    const res = await getChatConfig(address, headers);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.model, 'qwen3');
+    assert.equal(body.hasApiKey, true);
+    assert.equal(JSON.stringify(body).includes('sk-x'), false);
+
+    assert.equal(chatConfig.load().apiKey, 'sk-x');
+  });
+});
+
+test('chat config: POST {"enabled":true} toggles the agent on and back off', async (t) => {
+  const chatConfig = tempChatConfig(t);
+  await withBridge({ chatConfig }, async (address) => {
+    const headers = { origin: ALLOWED_ORIGIN };
+
+    const on = await postChatConfig(address, { enabled: true }, headers);
+    assert.equal(on.status, 200);
+    assert.equal((await on.json()).enabled, true);
+
+    const res = await getChatConfig(address, headers);
+    assert.equal((await res.json()).enabled, true);
+    assert.equal(chatConfig.load().enabled, true);
+
+    const off = await postChatConfig(address, { enabled: false }, headers);
+    assert.equal((await off.json()).enabled, false);
+    assert.equal(chatConfig.load().enabled, false);
+  });
+});
+
+test('chat config: POST with invalid JSON returns 400 and changes nothing', async (t) => {
+  const chatConfig = tempChatConfig(t);
+  await withBridge({ chatConfig }, async (address) => {
+    const res = await postChatConfig(address, '{not valid json', { origin: ALLOWED_ORIGIN });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'invalid json' });
+    assert.deepEqual(chatConfig.load(), { ...DEFAULT_CHAT_CONFIG });
+  });
+});
+
+test('chat config: oversized POST body returns 413', async (t) => {
+  const chatConfig = tempChatConfig(t);
+  await withBridge({ chatConfig }, async (address) => {
+    const res = await fetch(`${address}/api/chat-config`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', origin: ALLOWED_ORIGIN },
+      body: 'x'.repeat(64 * 1024 + 1),
+    });
+    assert.equal(res.status, 413);
+    assert.equal(res.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+    assert.deepEqual(await res.json(), { error: 'payload too large' });
+    assert.deepEqual(chatConfig.load(), { ...DEFAULT_CHAT_CONFIG });
+  });
+});
+
+test('chat config: unauthorized and absent origins receive no ACAO', async (t) => {
+  const chatConfig = tempChatConfig(t);
+  await withBridge({ chatConfig }, async (address) => {
+    for (const headers of [{ origin: 'http://evil.example' }, {}]) {
+      const get = await getChatConfig(address, headers);
+      assert.equal(get.status, 200);
+      assert.equal(get.headers.get('access-control-allow-origin'), null);
+      const post = await postChatConfig(address, { model: 'sneaky' }, headers);
+      assert.equal(post.status, 200);
+      assert.equal(post.headers.get('access-control-allow-origin'), null);
+      const preflight = await fetch(`${address}/api/chat-config`, { method: 'OPTIONS', headers });
+      assert.equal(preflight.headers.get('access-control-allow-origin'), null);
+    }
+  });
+});
+
+test('chat config: OPTIONS preflight returns 204 with GET and POST allowed', async () => {
+  await withBridge({}, async (address) => {
+    for (const origin of [ALLOWED_ORIGIN, LOCALHOST_ORIGIN]) {
+      const res = await fetch(`${address}/api/chat-config`, {
+        method: 'OPTIONS',
+        headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' },
+      });
+      assert.equal(res.status, 204);
+      assert.equal(res.headers.get('access-control-allow-origin'), origin);
+      assert.equal(res.headers.get('access-control-allow-methods'), 'GET, POST, OPTIONS');
+      assert.equal(res.headers.get('access-control-allow-headers'), 'content-type');
+      assert.equal(res.headers.get('access-control-max-age'), '600');
+    }
+  });
+});
+
+test('chat config: routes return 503 when no chatConfig store is wired', async () => {
+  await withBridge({}, async (address) => {
+    const get = await getChatConfig(address, { origin: ALLOWED_ORIGIN });
+    assert.equal(get.status, 503);
+    assert.deepEqual(await get.json(), { error: 'chat config unavailable' });
+
+    const post = await postChatConfig(address, { model: 'qwen3' }, { origin: ALLOWED_ORIGIN });
+    assert.equal(post.status, 503);
+    assert.deepEqual(await post.json(), { error: 'chat config unavailable' });
   });
 });

@@ -6,6 +6,11 @@ const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000
 const MAX_BODY_BYTES = 64 * 1024;
 const TOO_LARGE = Symbol('too-large');
 const INVALID_JSON = Symbol('invalid-json');
+const PREFLIGHT_METHODS = {
+  '/health': 'GET, OPTIONS',
+  '/keyevent': 'POST, OPTIONS',
+  '/api/chat-config': 'GET, POST, OPTIONS',
+};
 
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -47,7 +52,8 @@ function readJsonBody(req, res) {
   });
 }
 
-export function createBridge({ adb, host, port }) {
+// `chat` is accepted for the future /chat route (Task 7) and unused here.
+export function createBridge({ adb, host, port, chatConfig, chat }) {
   const bindHost = host ?? DEFAULT_HOST;
   let server;
   let boundAddress;
@@ -61,9 +67,9 @@ export function createBridge({ adb, host, port }) {
         res.setHeader('Access-Control-Allow-Origin', origin);
       }
 
-      if (req.method === 'OPTIONS' && (pathname === '/health' || pathname === '/keyevent')) {
+      if (req.method === 'OPTIONS' && Object.hasOwn(PREFLIGHT_METHODS, pathname)) {
         res.writeHead(204, {
-          'access-control-allow-methods': pathname === '/health' ? 'GET, OPTIONS' : 'POST, OPTIONS',
+          'access-control-allow-methods': PREFLIGHT_METHODS[pathname],
           'access-control-allow-headers': 'content-type',
           'access-control-max-age': '600',
         });
@@ -94,6 +100,25 @@ export function createBridge({ adb, host, port }) {
         }
         await adb.keyEvent(key);
         sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (pathname === '/api/chat-config' && (req.method === 'GET' || req.method === 'POST')) {
+        if (!chatConfig) {
+          sendJson(res, 503, { error: 'chat config unavailable' });
+          return;
+        }
+        if (req.method === 'GET') {
+          sendJson(res, 200, chatConfig.publicConfig());
+          return;
+        }
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        sendJson(res, 200, chatConfig.save(body));
         return;
       }
 
