@@ -25,11 +25,12 @@ function readJsonBody(req, res) {
     };
 
     req.on('data', (chunk) => {
+      if (settled) return;
       size += chunk.length;
       if (size > MAX_BODY_BYTES) {
+        settle(TOO_LARGE);
         req.resume();
         sendJson(res, 413, { error: 'payload too large' });
-        settle(TOO_LARGE);
         return;
       }
       chunks.push(chunk);
