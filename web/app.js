@@ -3,6 +3,7 @@
 // import would be refused by the browser.
 import {
   DEFAULT_SETTINGS,
+  ENGINE_TEXT_KEYS,
   buildStreamOptions,
   effectiveLanguage,
   isDegradedStream,
@@ -123,6 +124,7 @@ function applyLanguage() {
   lockMessage = lockHint(screenState, lang);
   renderStatus();
   labelToolbox();
+  localizeEngineDom();
 }
 
 // Every status update funnels through here as a key + variables, so a language
@@ -145,10 +147,57 @@ function labelToolbox() {
   const list = streamEl.querySelector('.control-buttons-list');
   if (!list) return;
   for (const el of list.querySelectorAll('.control-button')) {
-    const labelKey = TOOLBOX_LABELS.get(el.getAttribute('title'));
+    if (el.classList.contains('settings-button')) continue;
+    // The engine's title is translated in place, so remember its original
+    // English value before looking up our label key.
+    const title = el.dataset.sourceTitle ?? el.getAttribute('title');
+    const labelKey = TOOLBOX_LABELS.get(title);
     if (labelKey) el.setAttribute('data-label', t(labelKey));
   }
   addSettingsButton(list);
+}
+
+// The engine also puts English text in tooltips, the lock notice and the
+// clipboard prompt. Translate those in place, keeping the original source so
+// a later language switch can restore it. Only childList mutations are
+// observed, so writing a text node here cannot retrigger the observer.
+const engineTextSources = new WeakMap();
+const engineAttrSources = new WeakMap();
+
+function localizeEngineDom() {
+  for (const el of streamEl.querySelectorAll('[title], [aria-label]')) {
+    if (el.classList.contains('settings-button')) continue;
+    let sources = engineAttrSources.get(el);
+    if (!sources) {
+      sources = new Map();
+      engineAttrSources.set(el, sources);
+    }
+    for (const attr of ['title', 'aria-label']) {
+      const value = el.getAttribute(attr);
+      if (!value) continue;
+      if (!sources.has(attr)) {
+        if (!ENGINE_TEXT_KEYS[value]) continue;
+        sources.set(attr, value);
+        if (attr === 'title') el.dataset.sourceTitle = value;
+      }
+      const key = ENGINE_TEXT_KEYS[sources.get(attr)];
+      if (key) el.setAttribute(attr, t(key));
+    }
+  }
+
+  const walker = document.createTreeWalker(streamEl, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    let source = engineTextSources.get(node);
+    if (source === undefined) {
+      const value = node.nodeValue.trim();
+      if (!ENGINE_TEXT_KEYS[value]) continue;
+      source = value;
+      engineTextSources.set(node, source);
+    }
+    const key = ENGINE_TEXT_KEYS[source];
+    if (key) node.nodeValue = node.nodeValue.replace(source, t(key));
+  }
 }
 
 // The engine owns the rail, so our entry is injected into its DOM. It is a
@@ -163,12 +212,15 @@ function addSettingsButton(list) {
     button.addEventListener('click', openSettings);
     list.appendChild(button);
   }
-  button.title = t('tool.settingsTitle');
+  button.title = t('settings.title');
   button.dataset.label = t('tool.settings');
-  button.setAttribute('aria-label', t('tool.settingsTitle'));
+  button.setAttribute('aria-label', t('settings.title'));
 }
 
-const toolboxObserver = new MutationObserver(() => labelToolbox());
+const toolboxObserver = new MutationObserver(() => {
+  labelToolbox();
+  localizeEngineDom();
+});
 toolboxObserver.observe(streamEl, { childList: true, subtree: true });
 
 async function pollScreenState() {

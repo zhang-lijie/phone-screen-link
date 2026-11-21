@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   BITRATE_CHOICES,
   DEFAULT_SETTINGS,
+  ENGINE_TEXT_KEYS,
   FPS_CHOICES,
   KEY_CODES,
   LANGUAGE_CHOICES,
@@ -152,4 +153,17 @@ test('translations are complete and interpolate variables', () => {
   // Unknown keys and languages degrade to the key name / English, never crash.
   assert.equal(translate('en', 'not.a.key'), 'not.a.key');
   assert.equal(translate('fr', 'status.connecting'), MESSAGES.en['status.connecting']);
+});
+
+test('every engine-owned English string has a translation in both languages', () => {
+  for (const [source, key] of Object.entries(ENGINE_TEXT_KEYS)) {
+    assert.ok(source.length > 0);
+    assert.ok(MESSAGES.en[key], `${source} -> en.${key}`);
+    assert.ok(MESSAGES.zh[key], `${source} -> zh.${key}`);
+    assert.notEqual(MESSAGES.zh[key], source, `${source} must not stay English in Chinese`);
+  }
+  assert.equal(ENGINE_TEXT_KEYS['Take screenshot'], 'engine.screenshot');
+  assert.equal(ENGINE_TEXT_KEYS['Device clipboard ready —'], 'engine.clipboardReady');
+  assert.equal(ENGINE_TEXT_KEYS['device is locked — unlock it to see the screen'], 'engine.locked');
+  assert.equal(translate('zh', ENGINE_TEXT_KEYS['Refresh stream']), '刷新画面');
 });
