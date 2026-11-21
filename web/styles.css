@@ -84,10 +84,10 @@ body {
   overflow: hidden;
   background: #050609;
   /* Rounded, slightly raised glass-looking bezel around the mirrored screen. */
-  border: 1px solid #343a46;
+  border: 2px solid #fff;
   border-radius: 26px;
   box-shadow:
-    inset 0 0 0 1px #0d1016,
+    inset 0 0 0 1px rgb(255 255 255 / 30%),
     inset 0 0 34px rgb(255 255 255 / 6%),
     0 18px 44px rgb(0 0 0 / 55%);
 }
