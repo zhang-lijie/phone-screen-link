@@ -18,13 +18,15 @@ async function withBridge(options, fn) {
   }
 }
 
-function postKey(address, key) {
+function postKey(address, key, extraHeaders = {}) {
   return fetch(`${address}/keyevent`, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...extraHeaders },
     body: JSON.stringify({ key }),
   });
 }
+
+const ALLOWED_ORIGIN = 'http://127.0.0.1:8000';
 
 test('health reports online', async () => {
   await withBridge({}, async (address) => {
@@ -140,12 +142,66 @@ test('multi-chunk oversized body returns a single 413 without crashing the bridg
   });
 });
 
-test('responses carry no CORS headers', async () => {
+test('authorized origin receives ACAO on success and error responses', async () => {
+  const originHeaders = { origin: ALLOWED_ORIGIN };
   await withBridge({}, async (address) => {
-    const health = await fetch(`${address}/health`);
-    const keyevent = await postKey(address, 'home');
-    for (const res of [health, keyevent]) {
-      assert.equal([...res.headers.keys()].some((name) => name.startsWith('access-control-')), false);
+    const health = await fetch(`${address}/health`, { headers: originHeaders });
+    assert.equal(health.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+
+    const ok = await postKey(address, 'home', originHeaders);
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+
+    const unknown = await postKey(address, 'f13', originHeaders);
+    assert.equal(unknown.status, 400);
+    assert.equal(unknown.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+
+    const oversized = await fetch(`${address}/keyevent`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...originHeaders },
+      body: 'x'.repeat(64 * 1024 + 1),
+    });
+    assert.equal(oversized.status, 413);
+    assert.equal(oversized.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+  });
+
+  await withBridge({ adb: { isOnline: async () => false, keyEvent: async () => {} } }, async (address) => {
+    const offline = await postKey(address, 'home', originHeaders);
+    assert.equal(offline.status, 503);
+    assert.equal(offline.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+  });
+});
+
+test('unauthorized and absent origins receive no ACAO', async () => {
+  await withBridge({}, async (address) => {
+    for (const headers of [{ origin: 'http://evil.example' }, {}]) {
+      const health = await fetch(`${address}/health`, { headers });
+      assert.equal(health.headers.get('access-control-allow-origin'), null);
+      const keyevent = await postKey(address, 'home', headers);
+      assert.equal(keyevent.headers.get('access-control-allow-origin'), null);
+      const preflight = await fetch(`${address}/keyevent`, { method: 'OPTIONS', headers });
+      assert.equal(preflight.headers.get('access-control-allow-origin'), null);
     }
+  });
+});
+
+test('OPTIONS preflight for the authorized origin returns 204 with narrow allow headers', async () => {
+  await withBridge({}, async (address) => {
+    const keyevent = await fetch(`${address}/keyevent`, {
+      method: 'OPTIONS',
+      headers: { origin: ALLOWED_ORIGIN, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' },
+    });
+    assert.equal(keyevent.status, 204);
+    assert.equal(keyevent.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+    assert.equal(keyevent.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
+    assert.equal(keyevent.headers.get('access-control-allow-headers'), 'content-type');
+
+    const health = await fetch(`${address}/health`, {
+      method: 'OPTIONS',
+      headers: { origin: ALLOWED_ORIGIN, 'access-control-request-method': 'GET' },
+    });
+    assert.equal(health.status, 204);
+    assert.equal(health.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+    assert.equal(health.headers.get('access-control-allow-methods'), 'GET, OPTIONS');
   });
 });
