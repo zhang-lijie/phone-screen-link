@@ -95,6 +95,25 @@ test('chat tools: validateToolArgs checks basic property types', () => {
   assert.equal(validateToolArgs('type_text', { text: 'hi', clear: true }, definitions).ok, true);
 });
 
+test('chat tools: validateToolArgs enforces integer and finite number types', () => {
+  const definitions = [{
+    name: 'tap',
+    inputSchema: {
+      required: ['x', 'y'],
+      properties: { x: { type: 'integer' }, y: { type: 'number' }, duration: { type: 'integer' } },
+    },
+  }];
+
+  assert.equal(validateToolArgs('tap', { x: 1, y: 2 }, definitions).ok, true);
+  assert.equal(validateToolArgs('tap', { x: 1.5, y: 2 }, definitions).ok, false);
+  assert.equal(validateToolArgs('tap', { x: '1', y: 2 }, definitions).ok, false);
+  assert.equal(validateToolArgs('tap', { x: true, y: 2 }, definitions).ok, false);
+  assert.equal(validateToolArgs('tap', { x: 1, y: NaN }, definitions).ok, false);
+  assert.equal(validateToolArgs('tap', { x: 1, y: Infinity }, definitions).ok, false);
+  assert.equal(validateToolArgs('tap', { x: 1, y: 2, duration: 250 }, definitions).ok, true);
+  assert.equal(validateToolArgs('tap', { x: 1, y: 2, duration: 2.5 }, definitions).ok, false);
+});
+
 test('chat tools: validateToolArgs rejects unknown tools and non-object args', () => {
   assert.equal(validateToolArgs('shell', {}, []).ok, false);
   assert.equal(validateToolArgs('tap', null, [{ name: 'tap', inputSchema: {} }]).ok, false);

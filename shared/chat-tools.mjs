@@ -57,7 +57,9 @@ function typeMatches(value, expected) {
     case 'string':
       return typeof value === 'string';
     case 'number':
-      return typeof value === 'number';
+      return typeof value === 'number' && Number.isFinite(value);
+    case 'integer':
+      return Number.isInteger(value);
     case 'boolean':
       return typeof value === 'boolean';
     case 'object':
