@@ -88,6 +88,10 @@ export function buildStreamOptions(raw = {}, maxSizeOverride) {
     maxFps: s.maxFps,
     bitrate: s.bitrate,
     audio: s.audio,
+    // Phone/tablet starts the engine in Touch mode. That makes the wheel
+    // produce a real ScrollControlMessage (a finger swipe) instead of DPAD
+    // key taps, and makes clicks behave like touches on the phone screen.
+    deviceKind: 'phone',
   };
 }
 

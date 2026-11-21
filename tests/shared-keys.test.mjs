@@ -40,6 +40,7 @@ test('stream options pin keyboard, a fixed max size and 30fps', () => {
   assert.equal(o.maxSize, 1280);
   assert.equal(o.maxFps, 30);
   assert.equal(o.audio, true);
+  assert.equal(o.deviceKind, 'phone');
 });
 
 test('the size ladder runs best first and a fixed resolution is requestable', () => {

@@ -21,6 +21,11 @@ const ENGINE_UNAVAILABLE = 'Engine unavailable — is the service running?';
 const streamEl = document.getElementById('stream');
 const statusEl = document.getElementById('status');
 
+// The browser menu must never pop up over the mirrored phone: the engine uses
+// right-click as the phone's Back button, and a native menu would swallow the
+// click and cover the picture. Keep the mousedown control, drop only the menu.
+document.addEventListener('contextmenu', (event) => event.preventDefault());
+
 // The engine builds its own toolbox (screenshot, clipboard, stats, input
 // modes). Its icons carry a tooltip but no visible text, so the labels are
 // mapped here and rendered by CSS through data-label.
