@@ -20,6 +20,20 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 - 引擎运行时还依赖上游的 scrcpy-server 等组件，它们的版权与许可证同样属于各自上游项目。
 - 致谢：整屏投射与触摸反控能力来自 ws-scrcpy-web 及 scrcpy 社区，本项目只做本机启动编排、控制桥和界面封装。
 
+## 界面预览
+
+**主界面** — 手机「设置」页面投屏，顶部是控制按钮，右侧是窄工具栏：
+
+![主界面：手机设置页面投屏到浏览器](docs/screenshots/01-main.png)
+
+**设置面板** — 点击右侧齿轮打开，可调整分辨率、帧率、码率和音频：
+
+![设置面板](docs/screenshots/02-settings.png)
+
+**手机主屏幕投屏** — 整台手机屏幕实时镜像：
+
+![手机主屏幕投屏](docs/screenshots/03-phone-home.png)
+
 ## 功能
 
 - **全屏镜像**：整台手机画面实时投到浏览器，不是单个 App 的截图。
@@ -182,6 +196,7 @@ web/index.html           页面结构与设置面板
 web/app.js               状态栏、按钮处理、设置持久化、工具栏包装
 web/styles.css           紧凑暗色主题与布局覆盖
 tests/*.test.mjs         39 个 node:test 用例
+docs/screenshots/        README 中使用的界面截图
 docs/superpowers/        设计规格、实施计划与开发台账
 engine/                  GPLv3 第三方引擎，由 setup 生成，已加入 .gitignore
 ```
