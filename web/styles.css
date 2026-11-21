@@ -135,7 +135,11 @@ body {
 #stream .touch-layer {
   grid-area: 1 / 1;
   max-width: 100%;
-  max-height: 100%;
+  /* Leave room for the 2px margins inside the grid track. */
+  max-height: calc(100% - 4px);
+  /* 2px of breathing room above and below the picture. Applied to both
+     stacked canvases so the touch layer stays exactly on top. */
+  margin: 2px 0;
   border-radius: 20px;
   /* A white ring that hugs the picture only, not the whole container with
      its tool rail. box-shadow keeps the element box unchanged, so the
