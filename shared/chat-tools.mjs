@@ -33,7 +33,7 @@ const ALLOWED_SET = new Set(ALLOWED_TOOLS);
 
 export function isAllowedTool(name, config) {
   if (!ALLOWED_SET.has(name)) return false;
-  if (name === 'screenshot') return config?.screenshot !== false;
+  if (name === 'screenshot') return config?.screenshot === true;
   return true;
 }
 
@@ -72,6 +72,10 @@ function typeMatches(value, expected) {
 // Shallow validation only: required-field presence and basic declared types.
 // Full JSON Schema validation is intentionally out of scope.
 export function validateToolArgs(name, args, definitions) {
+  if (!ALLOWED_SET.has(name)) {
+    return { ok: false, error: `Tool not allowed: ${name}` };
+  }
+
   const def = Array.isArray(definitions)
     ? definitions.find((item) => item && item.name === name)
     : undefined;

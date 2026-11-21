@@ -99,3 +99,9 @@ test('chat tools: validateToolArgs rejects unknown tools and non-object args', (
   assert.equal(validateToolArgs('shell', {}, []).ok, false);
   assert.equal(validateToolArgs('tap', null, [{ name: 'tap', inputSchema: {} }]).ok, false);
 });
+
+test('chat tools: validateToolArgs rejects a denied tool even when its definition exists', () => {
+  const result = validateToolArgs('shell', {}, [{ name: 'shell', inputSchema: {} }]);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /shell/);
+});
