@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DEFAULT_CHAT_CONFIG, createChatConfigStore } from '../server/chat-config.mjs';
@@ -93,6 +93,44 @@ test('chat config: enabled is read from disk and can be turned back off', (t) =>
   assert.equal(store.load().enabled, false);
   assert.equal(store.load().model, 'qwen3');
   assert.equal(saved.enabled, false);
+});
+
+test('chat config: save clamps integer maxSteps to 1..32 and drops non-integers', (t) => {
+  const store = tempStore(t);
+  assert.equal(store.save({ maxSteps: 0 }).maxSteps, 1);
+  assert.equal(store.save({ maxSteps: -5 }).maxSteps, 1);
+  assert.equal(store.save({ maxSteps: 100 }).maxSteps, 32);
+  assert.equal(store.save({ maxSteps: 1 }).maxSteps, 1);
+  assert.equal(store.save({ maxSteps: 32 }).maxSteps, 32);
+  assert.equal(store.save({ maxSteps: 5 }).maxSteps, 5);
+  // Non-integers are dropped like any other type mismatch: the stored value stays.
+  assert.equal(store.save({ maxSteps: 2.5 }).maxSteps, 5);
+  assert.equal(store.save({ maxSteps: '9' }).maxSteps, 5);
+  assert.equal(store.save({ maxSteps: NaN }).maxSteps, 5);
+  assert.equal(store.save({ maxSteps: Infinity }).maxSteps, 5);
+  assert.equal(store.load().maxSteps, 5);
+});
+
+test('chat config: save writes owner-only (0600) via temp-file rename', (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'chat-config-mode-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'chat.json');
+  const store = createChatConfigStore({ file });
+
+  store.save({ apiKey: 'sk-x' });
+  if (process.platform !== 'win32') {
+    assert.equal(statSync(file).mode & 0o777, 0o600, 'config holds the API key: owner-only');
+  }
+  assert.equal(existsSync(`${file}.tmp`), false, 'temp file must be renamed away');
+  assert.equal(store.load().apiKey, 'sk-x');
+
+  // Replacing a pre-existing world-readable file must tighten it too.
+  if (process.platform !== 'win32') {
+    chmodSync(file, 0o644);
+    store.save({ model: 'qwen3' });
+    assert.equal(statSync(file).mode & 0o777, 0o600);
+    assert.equal(store.load().model, 'qwen3');
+  }
 });
 
 test('chat config: load falls back to defaults for corrupt JSON', (t) => {

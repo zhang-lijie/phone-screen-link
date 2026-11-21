@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export const DEFAULT_CHAT_CONFIG = Object.freeze({
@@ -49,12 +49,27 @@ export function createChatConfigStore({ file }) {
   function save(patch = {}) {
     const config = load();
     const fields = patch !== null && typeof patch === 'object' ? patch : {};
+    const previousMaxSteps = config.maxSteps;
     for (const key of WRITABLE_FIELDS) {
       const value = fieldValue(fields, key);
       if (value !== undefined) config[key] = value;
     }
+    // maxSteps policy: integers are CLAMPED to 1..32 (the settings input's
+    // range, web/index.html max=32); non-integers are dropped like any other
+    // type mismatch, keeping the previously stored value.
+    if (Object.hasOwn(fields, 'maxSteps')) {
+      const value = fields.maxSteps;
+      config.maxSteps = typeof value === 'number' && Number.isInteger(value)
+        ? Math.min(32, Math.max(1, value))
+        : previousMaxSteps;
+    }
     mkdirSync(dirname(file), { recursive: true });
-    writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
+    // The file holds the API key: owner-only permissions, and an atomic
+    // temp-file + rename so readers never see a half-written config.
+    const tmp = `${file}.tmp`;
+    rmSync(tmp, { force: true }); // a crashed earlier save may have left one
+    writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
+    renameSync(tmp, file);
     return publicConfig();
   }
 

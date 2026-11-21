@@ -148,9 +148,9 @@ uvx --from ghost-in-the-droid android-agent-mcp
 | 模型名 | `model` | 空 | **留空即禁用**（后端强制，不信任前端开关）；需支持 function/tool calling |
 | API Key | `apiKey` | 空 | 可选，局域网模型通常不需要；只在请求里作 `Authorization: Bearer`，**从不回传前端**（前端只看到 `hasApiKey`） |
 | 截图发给模型 | `screenshot` | 开 | 关闭时连 `screenshot` 工具都不暴露给模型；开启时截图以 base64 data URI 作视觉消息回灌，模型不支持视觉会报可读错误 |
-| 单次最大步数 | `maxSteps` | 8 | agent 一次请求最多调几轮工具（界面 1–32），到了就停并提示「已达到最大步数」 |
+| 单次最大步数 | `maxSteps` | 8 | agent 一次请求最多调几轮工具（界面 1–32），到了就停并提示「已达到最大步数」。后端强制：整数收敛到 1–32，非整数丢弃 |
 
-后端把有效值写成 JSON 文件 `state/chat.json`（已 gitignore）；`GET /api/chat-config` 返回
+后端把有效值写成 JSON 文件 `state/chat.json`（已 gitignore，权限 `0600` 仅本人可读，临时文件 + 重命名原子写入）；`GET /api/chat-config` 返回
 `{enabled, baseUrl, model, maxSteps, screenshot, hasApiKey}` —— Key 只以 `hasApiKey` 摘要出现；`POST` 只接受
 `enabled / baseUrl / model / maxSteps / screenshot / apiKey` 这 6 个字段，类型与默认值不符的输入一律丢弃、其他键忽略。
 两点行为需要知道：**API Key 留空表示「保持不变」**，所以面板上无法删除已存的 Key（要删就改 `state/chat.json`）；

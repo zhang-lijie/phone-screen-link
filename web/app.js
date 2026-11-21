@@ -598,11 +598,12 @@ async function saveChatSettings() {
     model: chatFormFields.model.value.trim(),
     screenshot: chatFormFields.screenshot.checked,
   };
-  // The store accepts typed fields only; a garbage step count is dropped
-  // rather than posted. The key is sent only when the user typed one, so
-  // the stored value survives every other edit untouched.
+  // Mirror the backend maxSteps policy: integers clamped to 1..32 (the
+  // input's min/max), garbage dropped rather than posted. The key is sent
+  // only when the user typed one, so the stored value survives every other
+  // edit untouched.
   const maxSteps = Number.parseInt(chatFormFields.maxSteps.value, 10);
-  if (Number.isFinite(maxSteps) && maxSteps >= 1) patch.maxSteps = maxSteps;
+  if (Number.isFinite(maxSteps)) patch.maxSteps = Math.min(32, Math.max(1, maxSteps));
   if (chatFormFields.apiKey.value !== '') patch.apiKey = chatFormFields.apiKey.value;
   try {
     const res = await fetch(CHAT_CONFIG_URL, {
