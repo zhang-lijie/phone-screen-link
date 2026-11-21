@@ -235,6 +235,142 @@ body {
   display: none;
 }
 
+/* Gear entry injected into the engine's right-hand rail by app.js. It is a
+   normal toolbox button, so it inherits the compact sizing and label rules. */
+#stream .control-button.settings-button > svg {
+  fill: #9fb6d8;
+}
+
+#stream .control-button.settings-button:hover > svg {
+  fill: #5b9aff;
+}
+
+/* Settings dialog. Fixed overlay so it stays put while the stream restarts
+   underneath it; the panel stays small and uses the same quiet dark palette. */
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 55%);
+}
+
+.settings-overlay[hidden] {
+  display: none;
+}
+
+.settings-panel {
+  width: min(300px, 100%);
+  padding: 14px 16px 12px;
+  border: 1px solid #2c3038;
+  border-radius: 12px;
+  background: #181b21;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 50%);
+  color: #e8eaf0;
+  font-size: 12px;
+}
+
+.settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.settings-head h2 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+
+.settings-head button {
+  padding: 0 3px;
+  border: none;
+  background: transparent;
+  color: #8b919c;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.settings-head button:hover {
+  color: #e8eaf0;
+}
+
+.setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid #23262d;
+  color: #b9bec8;
+}
+
+.setting-row select {
+  min-width: 130px;
+  padding: 4px 6px;
+  border: 1px solid #343a44;
+  border-radius: 6px;
+  background: #21262d;
+  color: #e8eaf0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.setting-row select:focus-visible,
+.setting-row input:focus-visible {
+  outline: 2px solid #5b9aff;
+  outline-offset: 1px;
+}
+
+.setting-row--check input {
+  width: 15px;
+  height: 15px;
+  accent-color: #5b9aff;
+  cursor: pointer;
+}
+
+.settings-note {
+  margin: 10px 0 12px;
+  color: #7f8794;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.settings-actions button {
+  padding: 6px 11px;
+  border: 1px solid #343a44;
+  border-radius: 7px;
+  background: #21262d;
+  color: #cfd2d8;
+  font: 500 11px/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.settings-actions button:hover {
+  background: #2b323c;
+}
+
+.settings-actions #settings-apply {
+  border-color: #3a6fb5;
+  background: #2e5f9e;
+  color: #f2f6ff;
+}
+
+.settings-actions #settings-apply:hover {
+  background: #3a73bb;
+}
+
 #status {
   margin-top: 2px;
   padding-left: 4px;

@@ -23,13 +23,71 @@ export const KEY_CODES = {
 // are capped by the cell.
 export const STREAM_SIZE_LADDER = [1280, 1080, 720];
 
-export function buildStreamOptions({ maxSize } = {}) {
+// Stream settings exposed by the gear button in the right-hand rail. Values
+// are kept as strings/numbers from the form; normalizeSettings is the single
+// gate between untrusted form/localStorage data and the engine options.
+export const RESOLUTION_CHOICES = ['auto', ...STREAM_SIZE_LADDER.map(String)];
+export const FPS_CHOICES = [15, 30, 60];
+export const BITRATE_CHOICES = [2_000_000, 4_000_000, 8_000_000, 16_000_000];
+export const DEFAULT_SETTINGS = {
+  resolution: 'auto',
+  maxFps: 30,
+  bitrate: 8_000_000,
+  audio: true,
+};
+export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
+
+function pick(value, choices, fallback) {
+  return choices.includes(value) ? value : fallback;
+}
+
+export function normalizeSettings(raw = {}) {
+  return {
+    resolution: pick(raw?.resolution, RESOLUTION_CHOICES, DEFAULT_SETTINGS.resolution),
+    maxFps: pick(Number(raw?.maxFps), FPS_CHOICES, DEFAULT_SETTINGS.maxFps),
+    bitrate: pick(Number(raw?.bitrate), BITRATE_CHOICES, DEFAULT_SETTINGS.bitrate),
+    audio: typeof raw?.audio === 'boolean' ? raw.audio : DEFAULT_SETTINGS.audio,
+  };
+}
+
+export function loadSettings(storage) {
+  try {
+    return normalizeSettings(JSON.parse(storage.getItem(SETTINGS_STORAGE_KEY)));
+  } catch {
+    return normalizeSettings();
+  }
+}
+
+export function saveSettings(storage, settings) {
+  const normalized = normalizeSettings(settings);
+  try {
+    storage.setItem(SETTINGS_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Private browsing or a full quota: the current session still uses them.
+  }
+  return normalized;
+}
+
+// "auto" walks the measured ladder; a fixed resolution is used as-is, so the
+// user's explicit choice is not silently replaced.
+export function sizeLadder(settings) {
+  const s = normalizeSettings(settings);
+  return s.resolution === 'auto' ? [...STREAM_SIZE_LADDER] : [Number(s.resolution)];
+}
+
+// maxSizeOverride is used by the retry loop; it must never bypass the other
+// settings (fps, bitrate, audio) the user chose.
+export function buildStreamOptions(raw = {}, maxSizeOverride) {
+  const s = normalizeSettings(raw);
+  const maxSize = maxSizeOverride
+    ?? (s.resolution === 'auto' ? STREAM_SIZE_LADDER[0] : Number(s.resolution));
   return {
     keyboard: true,
     fitToScreen: false,
-    maxSize: maxSize ?? STREAM_SIZE_LADDER[0],
-    maxFps: 30,
-    audio: true,
+    maxSize,
+    maxFps: s.maxFps,
+    bitrate: s.bitrate,
+    audio: s.audio,
   };
 }
 

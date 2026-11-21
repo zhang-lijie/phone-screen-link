@@ -1,6 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { KEY_CODES, STREAM_SIZE_LADDER, buildStreamOptions, isDegradedStream, isUsableContext, lockHint, negotiatedMaxDimension } from '../shared/keys.mjs';
+import {
+  BITRATE_CHOICES,
+  DEFAULT_SETTINGS,
+  FPS_CHOICES,
+  KEY_CODES,
+  RESOLUTION_CHOICES,
+  SETTINGS_STORAGE_KEY,
+  STREAM_SIZE_LADDER,
+  buildStreamOptions,
+  isDegradedStream,
+  isUsableContext,
+  loadSettings,
+  lockHint,
+  negotiatedMaxDimension,
+  normalizeSettings,
+  saveSettings,
+  sizeLadder,
+} from '../shared/keys.mjs';
 
 test('key codes match android', () => {
   assert.deepEqual(KEY_CODES, {
@@ -25,13 +42,52 @@ test('stream options pin keyboard, a fixed max size and 30fps', () => {
   assert.equal(o.audio, true);
 });
 
-test('the size ladder runs best first and each step is requestable', () => {
+test('the size ladder runs best first and a fixed resolution is requestable', () => {
   assert.deepEqual(STREAM_SIZE_LADDER, [1280, 1080, 720]);
-  // The encoder's ceiling moves with device state, so the caller steps down
-  // rather than pinning one size.
-  assert.equal(buildStreamOptions({ maxSize: 1080 }).maxSize, 1080);
-  assert.equal(buildStreamOptions({ maxSize: 720 }).maxSize, 720);
-  assert.equal(buildStreamOptions().maxSize, STREAM_SIZE_LADDER[0]);
+  assert.deepEqual(RESOLUTION_CHOICES, ['auto', '1280', '1080', '720']);
+  assert.deepEqual(FPS_CHOICES, [15, 30, 60]);
+  assert.deepEqual(BITRATE_CHOICES, [2_000_000, 4_000_000, 8_000_000, 16_000_000]);
+
+  assert.deepEqual(sizeLadder({ resolution: 'auto' }), [1280, 1080, 720]);
+  assert.deepEqual(sizeLadder({ resolution: '1080' }), [1080]);
+  // A fixed resolution is used as-is: the user's explicit choice wins.
+  assert.equal(buildStreamOptions({ resolution: '720' }).maxSize, 720);
+  // The retry loop's per-attempt override does not reset other settings.
+  const o = buildStreamOptions({ resolution: 'auto', maxFps: 60, audio: false, bitrate: 4_000_000 }, 1080);
+  assert.equal(o.maxSize, 1080);
+  assert.equal(o.maxFps, 60);
+  assert.equal(o.audio, false);
+  assert.equal(o.bitrate, 4_000_000);
+});
+
+test('settings are normalized before reaching the engine', () => {
+  assert.deepEqual(normalizeSettings(), DEFAULT_SETTINGS);
+  assert.deepEqual(normalizeSettings({ resolution: 'bogus', maxFps: 999, bitrate: 'x', audio: 'yes' }), DEFAULT_SETTINGS);
+  assert.deepEqual(normalizeSettings({ resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false }), {
+    resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false,
+  });
+  // String values from a <select> are accepted after Number conversion.
+  assert.equal(normalizeSettings({ maxFps: '30', bitrate: '4000000' }).maxFps, 30);
+  assert.equal(normalizeSettings({ bitrate: '4000000' }).bitrate, 4_000_000);
+});
+
+test('settings persist in localStorage and bad data falls back to defaults', () => {
+  const data = new Map();
+  const storage = {
+    getItem: (key) => data.get(key) ?? null,
+    setItem: (key, value) => data.set(key, value),
+  };
+  assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
+
+  const chosen = saveSettings(storage, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false });
+  assert.deepEqual(chosen, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false });
+  assert.deepEqual(loadSettings(storage), chosen);
+  assert.ok(data.has(SETTINGS_STORAGE_KEY));
+
+  data.set(SETTINGS_STORAGE_KEY, 'not json');
+  assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
+  data.set(SETTINGS_STORAGE_KEY, JSON.stringify({ resolution: 'evil', maxFps: 999 }));
+  assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
 });
 
 test('insecure lan origin is rejected', () => {
