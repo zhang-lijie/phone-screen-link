@@ -1,55 +1,135 @@
 # Phone Screen Link
 
-Mirror a HUAWEI Mate 40 Pro to a browser on this machine and control it with
-on-screen Home / Back / Power buttons. The app wraps ws-scrcpy-web v0.5.13
-(bound only to `127.0.0.1:8000`) plus a small control bridge on
-`127.0.0.1:8100`.
+把一台华为 Mate 40 Pro 的**整台屏幕**投到本机浏览器，并在网页上反向控制手机。
+视频流和触摸走成熟的开源引擎 [ws-scrcpy-web](https://github.com/bilbospocketses/ws-scrcpy-web)
+v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 
-## Setup
+> **范围**：仅本机 `http://127.0.0.1:8000`；不 root、不在手机安装额外 App、不绕过锁屏、
+> 不采集 `FLAG_SECURE` / DRM 内容。远程访问未在本次实现，但架构预留了扩展空间。
 
-```sh
-npm run setup
+## 功能
+
+- **全屏镜像**：整台手机画面实时投到浏览器，不是单个 App 的截图。
+- **网页反控**：顶栏 `HOME / BACK / APPS / VOL− / VOL+ / POWER` 六个文字按钮。
+- **自然交互**：鼠标左键点击和拖拽等价于手指触摸；滚轮上下滚动手机页面；右键映射为手机返回键，浏览器右键菜单已被禁用。
+- **设置面板**：右侧工具栏的齿轮按钮可设置分辨率、帧率、码率和音频，改动立即生效并自动重启画面流。
+- **状态联动**：每 3 秒轮询手机锁屏/休眠状态并显示在状态栏，锁屏黑屏时给出明确提示。
+- **分辨率自适应**：自动探测设备编码器能接受的尺寸，画面糊时自动降档，无需手动调参。
+
+## 界面与操作
+
+| 操作 | 方式 | 实现 |
+| --- | --- | --- |
+| 系统按键 | 顶栏按钮 | `POST /keyevent` → ADB `input keyevent` |
+| 点击 / 拖拽 / 滑动 | 画面上的鼠标左键 | 引擎触摸层 |
+| 屏幕滚动 | 画面上的滚轮 | 引擎 `ScrollControlMessage`（触摸模式下的手指滑动） |
+| 返回 | 画面上鼠标右键 | 引擎映射 BACK，浏览器菜单已屏蔽 |
+| 截图 / 键盘 / 鼠标 / 统计 / 显示模式 / 刷新 / 剪贴板 | 右侧窄工具栏 | 引擎自带工具，带文字标签 |
+| 设置 | 工具栏 `SET` 齿轮 | 自定义面板，见下节 |
+
+右侧工具栏把引擎自带的图标按钮压缩成窄栏并补上文字标签，重复的系统按键被隐藏，保证每个操作只有一个入口。
+
+### 设置项
+
+| 选项 | 可选项 | 说明 |
+| --- | --- | --- |
+| 分辨率 | 自动 / 1280 / 1080 / 720 | 「自动」按 `1280 → 1080 → 720` 依次尝试；固定值严格按所选值请求 |
+| 帧率 | 15 / 30 / 60 fps | 引擎作为上限使用 |
+| 码率 | 2 / 4 / 8 / 16 Mbps | 越高越清晰，占用带宽越大 |
+| 音频 | 开 / 关 | 关闭后不再传输手机音频 |
+
+设置保存在浏览器 `localStorage`，刷新页面后仍然有效；`Reset` 填回默认值，`Esc`、点遮罩或点 `×` 关闭面板。
+
+**为什么要做分辨率阶梯**：实测 Mate 40 Pro 屏幕为 1152×2376，但引擎按视口反推请求尺寸时，设备编码器会拒绝请求并抛出
+`IllegalArgumentException`，回退到最大边 512 的帧（248×512），被浏览器放大后明显发糊。该编码器能接受的上限还会随设备状态变化，
+因此页面在连上后检查协商分辨率，一旦被大幅降级就自动重启并降低一档；实测稳定结果为 **522×1080**（约 4.4 倍像素量）。
+
+## 架构
+
+```
+浏览器 (http://127.0.0.1:8000)
+├── web/               自定义页面：顶栏、设置面板、状态栏、对引擎工具栏的包装
+│   └── shared/keys.mjs  浏览器与 Node 共用的按键码、设置校验、分辨率策略
+├── engine/             ws-scrcpy-web v0.5.13（由 npm run setup 拉取，不入库）
+│   ├── HTTP :8000     仅绑定 127.0.0.1，提供页面与 WebSocket
+│   └── scrcpy-server  视频/音频流 + 触摸/滚轮/剪贴板控制通道
+└── control bridge     http://127.0.0.1:8100
+    └── POST /keyevent → adb input keyevent → 手机
 ```
 
-This clones and builds the pinned engine into `engine/` and patches it to listen
-on loopback only. It is safe to re-run: an already-built engine is left
-untouched. The custom web page is copied in when you run `npm start`.
+三个部分各司其职：**引擎**负责视频解码和控制协议，**桥**只做按键转发，
+**页面**负责交互层和分辨率/设置策略。`scripts/start.mjs` 负责资源复制、进程启动、就绪等待和信号清理。
 
-## Run
+安全边界：引擎与桥都只绑定回环地址；桥的 CORS 白名单仅允许
+`http://127.0.0.1:8000` 与 `http://localhost:8000` 两个精确来源；启动时强制断开 Wi‑Fi ADB，只允许固定 USB 设备。
+
+## 快速开始
+
+### 环境
+
+- Node.js（开发验证于 v26）与 npm
+- 可用的 `adb`（引擎会自带一份）
+- 通过 USB 连接、已授权 USB 调试的华为 Mate 40 Pro
+
+### 安装与运行
 
 ```sh
-npm start
+npm run setup   # 首次运行：克隆并构建固定版本引擎，打上仅监听 127.0.0.1 的补丁（已构建则跳过）
+npm start       # 复制 web/ 资源、启动引擎和控制桥
+npm test        # 运行 39 个单元测试
 ```
 
-Then open <http://127.0.0.1:8000/> in the browser. `npm start` disconnects Wi‑Fi
-ADB, copies the web assets over the engine's public directory, starts the engine
-and the control bridge, and stops both cleanly on Ctrl-C / SIGTERM.
+浏览器打开 <http://127.0.0.1:8000/>。按 `Ctrl-C` 或发送 `SIGTERM` 即可干净停止引擎和桥，无需进程守护工具。
 
-## Limitations
+> 修改 `web/` 或 `shared/` 后必须**重启 `npm start`**：自定义页面只在启动时复制到引擎目录。
+> 修改 `server/` 后同样需要重启桥。
 
-- **Lock screen:** A locked phone shows a black stream. Android's keyguard
-  hands scrcpy a black surface, so if the canvas is dark but the device is
-  connected, unlock the phone first — the status line shows a lock hint while
-  the keyguard is up (polled every 3 s). A black screen is not by itself a
-  broken stream.
-- **Secure context:** WebCodecs decoding requires a secure context. Plain HTTP
-  works only on `http://127.0.0.1` or `http://localhost`; a LAN address such as
-  `http://192.168.3.x:8000/` will not decode video. Use an `https://` origin if
-  you must reach it from another machine.
-- **USB only:** This app deliberately enforces a wired connection. It disconnects
-  Wi‑Fi ADB (`192.168.3.123:5555`) at startup and again every 5 s, and uses only
-  the USB serial `2FD0221C09004177` for streaming and key events. Do not rely on
-  a wireless ADB connection staying up.
+## 配置
 
-## Troubleshooting
+- **设备序列号**：固定为 `2FD0221C09004177`，定义在 `server/adb.mjs`（`DEFAULT_USB_SERIAL`）和 `web/app.js`（`DEVICE_ID`）。换设备需同时改这两处。
+- **端口**：引擎 `8000`，控制桥 `8100`，在 `scripts/start.mjs` 中配置。
+- **USB 限制**：`scripts/start.mjs` 启动时及每 5 秒断开 Wi‑Fi ADB `192.168.3.123:5555`；无线连接不会被接受。
 
-- **`velopack` EBADENGINE warning during `npm run setup`:** On Node 26, npm may
-  print an `EBADENGINE` warning for the engine's `velopack` dependency. It is
-  harmless — setup and the app work fine; ignore it.
-- **No supervisor / auto-restart:** A process supervisor is deliberately not
-  used. Run `npm start` in a terminal and stop it with Ctrl-C; the orchestrator
-  tears down the engine and bridge itself rather than depending on a supervisor.
-- **Engine first-run dialog:** If the engine's own "install for all users?"
-  first-run dialog appears on `/`, dismiss it with **"no, me only"**. Our copied
-  custom page normally replaces that home page at the root, so this dialog
-  usually will not appear.
+## 已知限制
+
+- **锁屏黑屏**：Android 的 keyguard 只向 scrcpy 提供黑色画面，这是系统限制，不是流坏了。解锁手机即可，状态栏会显示锁屏提示。
+- **安全上下文**：WebCodecs 解码要求 secure context，普通 HTTP 只能在 `127.0.0.1` / `localhost` 上使用；局域网地址（如 `192.168.x.x:8000`）无法解码视频，远程访问需自行加 HTTPS 并放宽 CORS/绑定地址。
+- **USB Only**：只允许上述 USB 设备，不实现无线投屏。
+- **无守护进程**：刻意不引入 supervisor，由启动脚本自己处理清理。
+- **引擎许可**：`engine/` 是 GPLv3 的第三方项目，由 `npm run setup` 单独拉取，未提交到本仓库；本仓库仅包含自己的封装代码。
+
+## 故障排查
+
+| 现象 | 处理 |
+| --- | --- |
+| 状态栏显示 `Engine unavailable` | 确认 `npm run setup` 已成功，再运行 `npm start` |
+| 启动报 `engine did not become ready` | 代理环境下 Node 的 `fetch` 不走系统代理，引擎可选依赖下载会超时；启动脚本检测到代理时已自动注入 `NODE_USE_ENV_PROXY=1` 与 `--use-system-ca`，可检查代理/NO_PROXY 设置后重试 |
+| 画面糊、状态栏显示 `248x512` | 在设置里选「自动」或 `1080`；日志中会出现编码器 `IllegalArgumentException` |
+| 画面全黑但显示已连接 | 手机处于锁屏状态，解锁后恢复；不绕过锁屏 |
+| 引擎首次运行弹出安装范围对话框 | 选 “no, me only”；自定义页面通常会替换掉该首页 |
+| `npm run setup` 出现 `velopack` 的 `EBADENGINE` 警告 | 可忽略，不影响安装和运行 |
+
+## 目录结构
+
+```
+scripts/setup.mjs        克隆/构建/打补丁固定版本引擎
+scripts/start.mjs        启动编排：USB 检查、资源复制、进程管理、就绪等待
+server/adb.mjs           ADB 可用性检查与设备发现
+server/bridge.mjs        回环 HTTP 控制桥（/health、/keyevent，含 CORS 白名单）
+shared/keys.mjs          共用按键码、设置校验与分辨率策略
+web/index.html           页面结构与设置面板
+web/app.js               状态栏、按钮处理、设置持久化、工具栏包装
+web/styles.css           紧凑暗色主题与布局覆盖
+tests/*.test.mjs         39 个 node:test 用例
+docs/superpowers/        设计规格、实施计划与开发台账
+engine/                  运行时生成，已加入 .gitignore
+```
+
+## 测试
+
+```sh
+npm test
+```
+
+覆盖 ADB 设备筛选、桥的 CORS/按键接口、引擎安装与启动编排、按键码、设置校验与持久化、
+分辨率阶梯与降级检测等，共 39 个用例。
