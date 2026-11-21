@@ -8,9 +8,13 @@ import {
   KEY_CODES,
   LANGUAGE_CHOICES,
   MESSAGES,
+  RAIL_SCALES,
   RESOLUTION_CHOICES,
   SETTINGS_STORAGE_KEY,
   STREAM_SIZE_LADDER,
+  STATS_FONT_SCALES,
+  STATUS_SCALES,
+  UI_FONT_SCALES,
   buildStreamOptions,
   effectiveLanguage,
   isDegradedStream,
@@ -71,7 +75,7 @@ test('settings are normalized before reaching the engine', () => {
   assert.deepEqual(normalizeSettings(), DEFAULT_SETTINGS);
   assert.deepEqual(normalizeSettings({ resolution: 'bogus', maxFps: 999, bitrate: 'x', audio: 'yes', language: 'fr' }), DEFAULT_SETTINGS);
   assert.deepEqual(normalizeSettings({ resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false, language: 'zh' }), {
-    resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false, language: 'zh',
+    ...DEFAULT_SETTINGS, resolution: '1080', maxFps: 60, bitrate: 16_000_000, audio: false, language: 'zh',
   });
   // String values from a <select> are accepted after Number conversion.
   assert.equal(normalizeSettings({ maxFps: '30', bitrate: '4000000' }).maxFps, 30);
@@ -87,7 +91,9 @@ test('settings persist in localStorage and bad data falls back to defaults', () 
   assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
 
   const chosen = saveSettings(storage, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en' });
-  assert.deepEqual(chosen, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en' });
+  assert.deepEqual(chosen, {
+    ...DEFAULT_SETTINGS, resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en',
+  });
   assert.deepEqual(loadSettings(storage), chosen);
   assert.ok(data.has(SETTINGS_STORAGE_KEY));
 
@@ -95,6 +101,34 @@ test('settings persist in localStorage and bad data falls back to defaults', () 
   assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
   data.set(SETTINGS_STORAGE_KEY, JSON.stringify({ resolution: 'evil', maxFps: 999 }));
   assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
+});
+
+test('font size and color settings are validated', () => {
+  assert.deepEqual(UI_FONT_SCALES, [0.85, 1, 1.2]);
+  assert.deepEqual(STATS_FONT_SCALES, [0.75, 1, 1.4]);
+  assert.deepEqual(RAIL_SCALES, [0.8, 1, 1.25]);
+  assert.deepEqual(STATUS_SCALES, [0.8, 1, 1.25]);
+
+  const chosen = normalizeSettings({
+    uiFontSize: '1.2', uiFontColor: '#ff9900',
+    statsFontSize: '0.75', statsFontColor: '#00ffcc',
+    railScale: '1.25', statusScale: '0.8',
+  });
+  assert.equal(chosen.uiFontSize, 1.2);
+  assert.equal(chosen.uiFontColor, '#ff9900');
+  assert.equal(chosen.statsFontSize, 0.75);
+  assert.equal(chosen.statsFontColor, '#00ffcc');
+  assert.equal(chosen.railScale, 1.25);
+  assert.equal(chosen.statusScale, 0.8);
+
+  // Out-of-range sizes and malformed colors fall back to defaults.
+  const bad = normalizeSettings({ uiFontSize: 99, uiFontColor: 'red', statsFontSize: -1, statsFontColor: '#fff', railScale: 2, statusScale: 'x' });
+  assert.equal(bad.uiFontSize, DEFAULT_SETTINGS.uiFontSize);
+  assert.equal(bad.uiFontColor, DEFAULT_SETTINGS.uiFontColor);
+  assert.equal(bad.statsFontSize, DEFAULT_SETTINGS.statsFontSize);
+  assert.equal(bad.statsFontColor, DEFAULT_SETTINGS.statsFontColor);
+  assert.equal(bad.railScale, DEFAULT_SETTINGS.railScale);
+  assert.equal(bad.statusScale, DEFAULT_SETTINGS.statusScale);
 });
 
 test('insecure lan origin is rejected', () => {

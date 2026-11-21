@@ -33,6 +33,12 @@ document.addEventListener('contextmenu', (event) => event.preventDefault());
 // modes). Its icons carry an English tooltip but no visible text, so the
 // labels are mapped here to translation keys and rendered via data-label.
 const TOOLBOX_LABELS = new Map([
+  ['Power', 'engine.power'],
+  ['Volume up', 'engine.volumeUp'],
+  ['Volume down', 'engine.volumeDown'],
+  ['Back', 'engine.back'],
+  ['Home', 'engine.home'],
+  ['Overview', 'engine.overview'],
   ['Take screenshot', 'tool.shot'],
   ['Capture keyboard', 'tool.keys'],
   ['UHID Input (keyboard + mouse)', 'tool.mouse'],
@@ -69,6 +75,12 @@ const formFields = {
   bitrate: document.getElementById('set-bitrate'),
   audio: document.getElementById('set-audio'),
   language: document.getElementById('set-language'),
+  uiFontSize: document.getElementById('set-ui-font-size'),
+  uiFontColor: document.getElementById('set-ui-font-color'),
+  statsFontSize: document.getElementById('set-stats-font-size'),
+  statsFontColor: document.getElementById('set-stats-font-color'),
+  railScale: document.getElementById('set-rail-scale'),
+  statusScale: document.getElementById('set-status-scale'),
 };
 
 function fillSettingsForm(values = settings) {
@@ -77,6 +89,12 @@ function fillSettingsForm(values = settings) {
   formFields.bitrate.value = String(values.bitrate);
   formFields.audio.checked = values.audio;
   formFields.language.value = values.language;
+  formFields.uiFontSize.value = String(values.uiFontSize);
+  formFields.uiFontColor.value = values.uiFontColor;
+  formFields.statsFontSize.value = String(values.statsFontSize);
+  formFields.statsFontColor.value = values.statsFontColor;
+  formFields.railScale.value = String(values.railScale);
+  formFields.statusScale.value = String(values.statusScale);
 }
 
 function openSettings() {
@@ -96,6 +114,12 @@ function readSettingsForm() {
     bitrate: Number(formFields.bitrate.value),
     audio: formFields.audio.checked,
     language: formFields.language.value,
+    uiFontSize: Number(formFields.uiFontSize.value),
+    uiFontColor: formFields.uiFontColor.value,
+    statsFontSize: Number(formFields.statsFontSize.value),
+    statsFontColor: formFields.statsFontColor.value,
+    railScale: Number(formFields.railScale.value),
+    statusScale: Number(formFields.statusScale.value),
   });
 }
 
@@ -111,11 +135,22 @@ document.getElementById('settings-reset').addEventListener('click', () => {
 });
 document.getElementById('settings-apply').addEventListener('click', applySettings);
 
+function applyTypography() {
+  const root = document.documentElement;
+  root.style.setProperty('--ui-font-scale', String(settings.uiFontSize));
+  root.style.setProperty('--ui-text-color', settings.uiFontColor);
+  root.style.setProperty('--rail-scale', String(settings.railScale));
+  root.style.setProperty('--status-scale', String(settings.statusScale));
+  statsFontScale = settings.statsFontSize;
+  statsFontColor = settings.statsFontColor;
+}
+
 // Apply the active language to every static element, then rebuild the dynamic
 // strings (status line, lock hint and toolbox labels) that depend on it.
 function applyLanguage() {
   lang = effectiveLanguage(settings, navigator.language);
   document.documentElement.lang = lang === 'zh' ? 'zh-CN' : 'en';
+  applyTypography();
   for (const el of document.querySelectorAll('[data-i18n]')) {
     el.textContent = t(el.dataset.i18n);
   }
@@ -208,6 +243,27 @@ function localizeEngineDom() {
 // labels come out in the active language. The closure reads `lang` at draw
 // time, so a language switch needs no re-patching.
 const patchedStatsCanvases = new WeakSet();
+let statsFontScale = 1;
+let statsFontColor = '';
+
+// The engine sets ctx.font/fillStyle before drawing each stats line. Wrap the
+// drawing calls so our size/color win for those lines only; the engine's own
+// values are restored immediately afterwards.
+function withStatsFont(ctx, draw) {
+  const font = ctx.font;
+  if (statsFontScale !== 1) {
+    const match = /(\d+(?:\.\d+)?)px/.exec(font);
+    if (match) {
+      const size = (Number(match[1]) * statsFontScale).toFixed(1);
+      ctx.font = font.replace(match[0], `${size}px`);
+    }
+  }
+  try {
+    return draw();
+  } finally {
+    ctx.font = font;
+  }
+}
 
 function localizeStatsCanvas() {
   const canvas = streamEl.querySelector('canvas.touch-layer');
@@ -215,7 +271,17 @@ function localizeStatsCanvas() {
   const ctx = canvas.getContext('2d');
   if (!ctx) return;
   const originalFillText = ctx.fillText.bind(ctx);
-  ctx.fillText = (text, x, y, ...rest) => originalFillText(translateStatLine(text, lang), x, y, ...rest);
+  const originalMeasureText = ctx.measureText.bind(ctx);
+  ctx.measureText = (text) => withStatsFont(ctx, () => originalMeasureText(translateStatLine(text, lang)));
+  ctx.fillText = (text, x, y, ...rest) => {
+    const color = ctx.fillStyle;
+    if (statsFontColor) ctx.fillStyle = statsFontColor;
+    try {
+      return withStatsFont(ctx, () => originalFillText(translateStatLine(text, lang), x, y, ...rest));
+    } finally {
+      ctx.fillStyle = color;
+    }
+  };
   patchedStatsCanvases.add(canvas);
 }
 

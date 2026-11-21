@@ -30,6 +30,11 @@ export const RESOLUTION_CHOICES = ['auto', ...STREAM_SIZE_LADDER.map(String)];
 export const FPS_CHOICES = [15, 30, 60];
 export const BITRATE_CHOICES = [2_000_000, 4_000_000, 8_000_000, 16_000_000];
 export const LANGUAGE_CHOICES = ['auto', 'zh', 'en'];
+export const UI_FONT_SCALES = [0.85, 1, 1.2];
+export const STATS_FONT_SCALES = [0.75, 1, 1.4];
+export const RAIL_SCALES = [0.8, 1, 1.25];
+export const STATUS_SCALES = [0.8, 1, 1.25];
+const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 // All user-visible strings live here so the UI can switch language without a
 // reload. "auto" follows the browser language (zh* -> Chinese, else English).
@@ -74,6 +79,15 @@ export const MESSAGES = {
     'settings.langAuto': 'Follow browser',
     'settings.langZh': '中文',
     'settings.langEn': 'English',
+    'settings.uiFontSize': 'UI font size',
+    'settings.statsFontSize': 'Stats font size',
+    'settings.uiFontColor': 'UI text color',
+    'settings.statsFontColor': 'Stats text color',
+    'settings.railScale': 'Nav bar max size',
+    'settings.statusScale': 'Status bar max size',
+    'settings.fontSmall': 'Small',
+    'settings.fontNormal': 'Default',
+    'settings.fontLarge': 'Large',
     'settings.note': 'Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.',
     'settings.reset': 'Reset',
     'settings.apply': 'Apply & restart',
@@ -167,6 +181,15 @@ export const MESSAGES = {
     'settings.langAuto': '跟随浏览器',
     'settings.langZh': '中文',
     'settings.langEn': 'English',
+    'settings.uiFontSize': '界面字体大小',
+    'settings.statsFontSize': '统计字体大小',
+    'settings.uiFontColor': '界面文字颜色',
+    'settings.statsFontColor': '统计文字颜色',
+    'settings.railScale': '导航条最大尺寸',
+    'settings.statusScale': '状态条最大尺寸',
+    'settings.fontSmall': '小',
+    'settings.fontNormal': '默认',
+    'settings.fontLarge': '大',
     'settings.note': '自动模式先尝试 1280，被手机拒绝时会自动降档。应用设置会重启画面。',
     'settings.reset': '恢复默认',
     'settings.apply': '应用并重启',
@@ -290,6 +313,12 @@ export const DEFAULT_SETTINGS = {
   bitrate: 8_000_000,
   audio: true,
   language: 'auto',
+  uiFontSize: 1,
+  uiFontColor: '#e8eaf0',
+  statsFontSize: 1,
+  statsFontColor: '#ec6a13',
+  railScale: 1,
+  statusScale: 1,
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
 
@@ -304,6 +333,12 @@ export function normalizeSettings(raw = {}) {
     bitrate: pick(Number(raw?.bitrate), BITRATE_CHOICES, DEFAULT_SETTINGS.bitrate),
     audio: typeof raw?.audio === 'boolean' ? raw.audio : DEFAULT_SETTINGS.audio,
     language: pick(raw?.language, LANGUAGE_CHOICES, DEFAULT_SETTINGS.language),
+    uiFontSize: pick(Number(raw?.uiFontSize), UI_FONT_SCALES, DEFAULT_SETTINGS.uiFontSize),
+    uiFontColor: HEX_COLOR.test(raw?.uiFontColor ?? '') ? raw.uiFontColor : DEFAULT_SETTINGS.uiFontColor,
+    statsFontSize: pick(Number(raw?.statsFontSize), STATS_FONT_SCALES, DEFAULT_SETTINGS.statsFontSize),
+    statsFontColor: HEX_COLOR.test(raw?.statsFontColor ?? '') ? raw.statsFontColor : DEFAULT_SETTINGS.statsFontColor,
+    railScale: pick(Number(raw?.railScale), RAIL_SCALES, DEFAULT_SETTINGS.railScale),
+    statusScale: pick(Number(raw?.statusScale), STATUS_SCALES, DEFAULT_SETTINGS.statusScale),
   };
 }
 
