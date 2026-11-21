@@ -7,6 +7,19 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 > **范围**：仅本机 `http://127.0.0.1:8000`；不 root、不在手机安装额外 App、不绕过锁屏、
 > 不采集 `FLAG_SECURE` / DRM 内容。远程访问未在本次实现，但架构预留了扩展空间。
 
+## 开源组件声明
+
+本项目的投屏引擎来自开源项目，在此明确声明：
+
+| 组件 | 版本 | 来源 | 许可证 | 在本项目中的作用 |
+| --- | --- | --- | --- | --- |
+| [ws-scrcpy-web](https://github.com/bilbospocketses/ws-scrcpy-web) | v0.5.13 | https://github.com/bilbospocketses/ws-scrcpy-web | **GPL-3.0** | HTTP/WebSocket 服务、WebCodecs 解码、投屏画面、触摸/滚轮/剪贴板控制与工具箱 |
+
+- 引擎代码**不包含在本仓库中**：`npm run setup` 从上述上游仓库克隆到 `engine/`，它独立遵循上游的 GPL-3.0 许可证；本仓库只提交我们自己的封装代码。
+- 本项目的改动限于：把 HTTP 服务限制为只监听 `127.0.0.1`（修改 `src/server/services/HttpServer.ts` 的 `server.listen`），以及用自定义的 `index.html` / `app.js` / `styles.css` 替换引擎根页面。投屏协议实现本身没有改动。
+- 引擎运行时还依赖上游的 scrcpy-server 等组件，它们的版权与许可证同样属于各自上游项目。
+- 致谢：整屏投射与触摸反控能力来自 ws-scrcpy-web 及 scrcpy 社区，本项目只做本机启动编排、控制桥和界面封装。
+
 ## 功能
 
 - **全屏镜像**：整台手机画面实时投到浏览器，不是单个 App 的截图。
@@ -84,6 +97,54 @@ npm test        # 运行 39 个单元测试
 > 修改 `web/` 或 `shared/` 后必须**重启 `npm start`**：自定义页面只在启动时复制到引擎目录。
 > 修改 `server/` 后同样需要重启桥。
 
+## 引擎安装（ws-scrcpy-web）
+
+### 自动安装（推荐）
+
+```sh
+npm run setup
+```
+
+`scripts/setup.mjs` 会依次执行以下步骤，全部在项目根目录完成：
+
+1. 用 `git clone --depth 1 --branch v0.5.13` 把上游仓库克隆到 `engine/`；
+2. 在 `engine/` 中运行 `npm install` 安装依赖；
+3. 打上 loopback 补丁：把 `src/server/services/HttpServer.ts` 中的 `server.listen(port, () => {`
+   改为 `server.listen(port, '127.0.0.1', () => {`，保证 HTTP 只监听本机；若上游代码结构变化导致匹配不到，脚本会直接报错而不是静默跳过；
+4. 运行 `npm run stage-seed`，把运行期需要的 `adb`、`scrcpy-server`、node-pty 等依赖落到 `engine/dependencies/`；
+5. 运行 `npm run build` 生成 `engine/dist/index.js`。
+
+该命令是**幂等**的：检测到 `engine/dist/index.js` 已存在就跳过，不会重复克隆或覆盖已有构建。
+
+### 手动安装 / 调试引擎
+
+需要自定义引擎版本或排查安装问题时，可按上面的顺序手工执行：
+
+```sh
+git clone --depth 1 --branch v0.5.13 \
+  https://github.com/bilbospocketses/ws-scrcpy-web.git engine
+cd engine
+npm install
+# 编辑 src/server/services/HttpServer.ts：server.listen(port, '127.0.0.1', () => {
+npm run stage-seed
+npm run build
+```
+
+注意：
+
+- 若跳过 loopback 补丁，引擎会监听所有网卡，不符合本项目的本机安全边界；`scripts/start.mjs` 仍按 `127.0.0.1:8000` 访问。
+- 升级引擎版本时修改 `scripts/setup.mjs` 中的 `ENGINE_TAG`，删除 `engine/` 后重新运行 `npm run setup`，再重启 `npm start`。
+- 引擎启动时会尝试下载**可选**的 node-pty 预编译包。在需要代理的网络环境中，Node 的 `fetch` 默认不读取 `HTTP(S)_PROXY`，`scripts/start.mjs` 检测到代理变量后会自动传入 `NODE_USE_ENV_PROXY=1` 和 `--use-system-ca`，避免因此卡住启动。
+
+### 自定义页面如何进入引擎
+
+`npm start` 会把：
+
+- `web/index.html`、`web/app.js`、`web/styles.css` 原样复制到 `engine/dist/public/`；
+- `shared/keys.mjs` 复制为 `engine/dist/public/keys.js`（引擎静态服务器不支持 `.mjs` 的 MIME 类型且设置了 `nosniff`，所以浏览器侧必须用 `.js` 扩展名）。
+
+因此每次修改 `web/` 或 `shared/` 都要重新运行 `npm start` 才能看到效果。
+
 ## 配置
 
 - **设备序列号**：固定为 `2FD0221C09004177`，定义在 `server/adb.mjs`（`DEFAULT_USB_SERIAL`）和 `web/app.js`（`DEVICE_ID`）。换设备需同时改这两处。
@@ -96,13 +157,13 @@ npm test        # 运行 39 个单元测试
 - **安全上下文**：WebCodecs 解码要求 secure context，普通 HTTP 只能在 `127.0.0.1` / `localhost` 上使用；局域网地址（如 `192.168.x.x:8000`）无法解码视频，远程访问需自行加 HTTPS 并放宽 CORS/绑定地址。
 - **USB Only**：只允许上述 USB 设备，不实现无线投屏。
 - **无守护进程**：刻意不引入 supervisor，由启动脚本自己处理清理。
-- **引擎许可**：`engine/` 是 GPLv3 的第三方项目，由 `npm run setup` 单独拉取，未提交到本仓库；本仓库仅包含自己的封装代码。
+- **引擎许可**：`engine/` 是 GPLv3 的第三方项目，由 `npm run setup` 单独拉取，未提交到本仓库；详见「开源组件声明」与「引擎安装」。
 
 ## 故障排查
 
 | 现象 | 处理 |
 | --- | --- |
-| 状态栏显示 `Engine unavailable` | 确认 `npm run setup` 已成功，再运行 `npm start` |
+| 状态栏显示 `Engine unavailable` | 按「引擎安装」完成 `npm run setup`，再运行 `npm start` |
 | 启动报 `engine did not become ready` | 代理环境下 Node 的 `fetch` 不走系统代理，引擎可选依赖下载会超时；启动脚本检测到代理时已自动注入 `NODE_USE_ENV_PROXY=1` 与 `--use-system-ca`，可检查代理/NO_PROXY 设置后重试 |
 | 画面糊、状态栏显示 `248x512` | 在设置里选「自动」或 `1080`；日志中会出现编码器 `IllegalArgumentException` |
 | 画面全黑但显示已连接 | 手机处于锁屏状态，解锁后恢复；不绕过锁屏 |
@@ -122,7 +183,7 @@ web/app.js               状态栏、按钮处理、设置持久化、工具栏�
 web/styles.css           紧凑暗色主题与布局覆盖
 tests/*.test.mjs         39 个 node:test 用例
 docs/superpowers/        设计规格、实施计划与开发台账
-engine/                  运行时生成，已加入 .gitignore
+engine/                  GPLv3 第三方引擎，由 setup 生成，已加入 .gitignore
 ```
 
 ## 测试
