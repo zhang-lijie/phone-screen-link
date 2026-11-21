@@ -92,8 +92,7 @@ body {
   z-index: 5;
   display: flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 8px;
+  padding: 6px 7px;
   border: 1px solid #3a424e;
   border-radius: 8px;
   background: rgb(17 19 24 / 82%);
@@ -121,15 +120,6 @@ body.screen-fullscreen #stream {
 
 body.screen-fullscreen #stream .control-buttons-list {
   display: none;
-}
-
-/* Keep the aspect ratio: the canvases still scale to fit the grid cell, just
-   without the margin/ring/radius that framed the windowed view. */
-body.screen-fullscreen #stream .video-layer,
-body.screen-fullscreen #stream .touch-layer {
-  margin: 0;
-  border-radius: 0;
-  box-shadow: none;
 }
 
 #stream .device-view {

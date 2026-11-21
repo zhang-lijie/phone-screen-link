@@ -114,7 +114,6 @@ const fullscreenToggle = document.getElementById('fullscreen-toggle');
 function setFullscreen(active) {
   document.body.classList.toggle('screen-fullscreen', active);
   const label = t(active ? 'fullscreen.exit' : 'fullscreen.enter');
-  fullscreenToggle.querySelector('span').textContent = label;
   fullscreenToggle.title = label;
   fullscreenToggle.setAttribute('aria-label', label);
 }
