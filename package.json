@@ -1,0 +1,11 @@
+{
+  "name": "phone-screen-link",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "start": "node scripts/start.mjs",
+    "test": "node --test tests/*.test.mjs"
+  }
+}
