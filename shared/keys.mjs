@@ -34,6 +34,7 @@ export const UI_FONT_SCALES = [0.85, 1, 1.2];
 export const STATS_FONT_SCALES = [0.75, 1, 1.4];
 export const RAIL_SCALES = [0.8, 1, 1.25];
 export const STATUS_SCALES = [0.8, 1, 1.25];
+export const NAV_BUTTON_MODES = ['icon', 'text', 'both'];
 const HEX_COLOR = /^#[0-9a-f]{6}$/i;
 
 // All user-visible strings live here so the UI can switch language without a
@@ -85,6 +86,10 @@ export const MESSAGES = {
     'settings.statsFontColor': 'Stats text color',
     'settings.railScale': 'Nav bar max size',
     'settings.statusScale': 'Status bar max size',
+    'settings.navButtonMode': 'Nav button display',
+    'settings.navIcon': 'Icon',
+    'settings.navText': 'Text',
+    'settings.navBoth': 'Icon & text',
     'settings.fontSmall': 'Small',
     'settings.fontNormal': 'Default',
     'settings.fontLarge': 'Large',
@@ -189,6 +194,10 @@ export const MESSAGES = {
     'settings.statsFontColor': '统计文字颜色',
     'settings.railScale': '导航条最大尺寸',
     'settings.statusScale': '状态条最大尺寸',
+    'settings.navButtonMode': '导航按钮显示',
+    'settings.navIcon': '图标',
+    'settings.navText': '文字',
+    'settings.navBoth': '图标&文字',
     'settings.fontSmall': '小',
     'settings.fontNormal': '默认',
     'settings.fontLarge': '大',
@@ -323,6 +332,7 @@ export const DEFAULT_SETTINGS = {
   statsFontColor: '#ec6a13',
   railScale: 1,
   statusScale: 1,
+  navButtonMode: 'both',
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
 
@@ -343,6 +353,7 @@ export function normalizeSettings(raw = {}) {
     statsFontColor: HEX_COLOR.test(raw?.statsFontColor ?? '') ? raw.statsFontColor : DEFAULT_SETTINGS.statsFontColor,
     railScale: pick(Number(raw?.railScale), RAIL_SCALES, DEFAULT_SETTINGS.railScale),
     statusScale: pick(Number(raw?.statusScale), STATUS_SCALES, DEFAULT_SETTINGS.statusScale),
+    navButtonMode: pick(raw?.navButtonMode, NAV_BUTTON_MODES, DEFAULT_SETTINGS.navButtonMode),
   };
 }
 

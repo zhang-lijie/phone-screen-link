@@ -8,6 +8,7 @@ import {
   KEY_CODES,
   LANGUAGE_CHOICES,
   MESSAGES,
+  NAV_BUTTON_MODES,
   RAIL_SCALES,
   RESOLUTION_CHOICES,
   SETTINGS_STORAGE_KEY,
@@ -108,11 +109,12 @@ test('font size and color settings are validated', () => {
   assert.deepEqual(STATS_FONT_SCALES, [0.75, 1, 1.4]);
   assert.deepEqual(RAIL_SCALES, [0.8, 1, 1.25]);
   assert.deepEqual(STATUS_SCALES, [0.8, 1, 1.25]);
+  assert.deepEqual(NAV_BUTTON_MODES, ['icon', 'text', 'both']);
 
   const chosen = normalizeSettings({
     uiFontSize: '1.2', uiFontColor: '#ff9900',
     statsFontSize: '0.75', statsFontColor: '#00ffcc',
-    railScale: '1.25', statusScale: '0.8',
+    railScale: '1.25', statusScale: '0.8', navButtonMode: 'text',
   });
   assert.equal(chosen.uiFontSize, 1.2);
   assert.equal(chosen.uiFontColor, '#ff9900');
@@ -120,15 +122,17 @@ test('font size and color settings are validated', () => {
   assert.equal(chosen.statsFontColor, '#00ffcc');
   assert.equal(chosen.railScale, 1.25);
   assert.equal(chosen.statusScale, 0.8);
+  assert.equal(chosen.navButtonMode, 'text');
 
   // Out-of-range sizes and malformed colors fall back to defaults.
-  const bad = normalizeSettings({ uiFontSize: 99, uiFontColor: 'red', statsFontSize: -1, statsFontColor: '#fff', railScale: 2, statusScale: 'x' });
+  const bad = normalizeSettings({ uiFontSize: 99, uiFontColor: 'red', statsFontSize: -1, statsFontColor: '#fff', railScale: 2, statusScale: 'x', navButtonMode: 'weird' });
   assert.equal(bad.uiFontSize, DEFAULT_SETTINGS.uiFontSize);
   assert.equal(bad.uiFontColor, DEFAULT_SETTINGS.uiFontColor);
   assert.equal(bad.statsFontSize, DEFAULT_SETTINGS.statsFontSize);
   assert.equal(bad.statsFontColor, DEFAULT_SETTINGS.statsFontColor);
   assert.equal(bad.railScale, DEFAULT_SETTINGS.railScale);
   assert.equal(bad.statusScale, DEFAULT_SETTINGS.statusScale);
+  assert.equal(bad.navButtonMode, DEFAULT_SETTINGS.navButtonMode);
 });
 
 test('insecure lan origin is rejected', () => {

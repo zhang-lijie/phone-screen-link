@@ -227,6 +227,19 @@ body.screen-fullscreen #stream .control-buttons-list {
   color: var(--ui-text-soft);
 }
 
+/* Nav button display mode: icon only, text only, or both (the default). */
+body.nav-icon-only #stream .control-button[data-label]::after {
+  display: none;
+}
+
+body.nav-text-only #stream .control-button > svg {
+  display: none;
+}
+
+body.nav-text-only #stream .control-button[data-label]::after {
+  font-size: calc(9px * var(--rail-scale));
+}
+
 /* Checkbox entries (keyboard capture, UHID, stats, D-pad) are labels whose
    icon toggles; keep the label readable next to the icon. */
 #stream .control-wrapper > label.control-button {

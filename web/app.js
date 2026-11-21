@@ -81,6 +81,7 @@ const formFields = {
   statsFontColor: document.getElementById('set-stats-font-color'),
   railScale: document.getElementById('set-rail-scale'),
   statusScale: document.getElementById('set-status-scale'),
+  navButtonMode: document.getElementById('set-nav-button-mode'),
 };
 
 function fillSettingsForm(values = settings) {
@@ -95,6 +96,7 @@ function fillSettingsForm(values = settings) {
   formFields.statsFontColor.value = values.statsFontColor;
   formFields.railScale.value = String(values.railScale);
   formFields.statusScale.value = String(values.statusScale);
+  formFields.navButtonMode.value = values.navButtonMode;
 }
 
 function openSettings() {
@@ -135,6 +137,7 @@ function readSettingsForm() {
     statsFontColor: formFields.statsFontColor.value,
     railScale: Number(formFields.railScale.value),
     statusScale: Number(formFields.statusScale.value),
+    navButtonMode: formFields.navButtonMode.value,
   });
 }
 
@@ -158,6 +161,8 @@ function applyTypography() {
   root.style.setProperty('--ui-text-color', settings.uiFontColor);
   root.style.setProperty('--rail-scale', String(settings.railScale));
   root.style.setProperty('--status-scale', String(settings.statusScale));
+  document.body.classList.toggle('nav-icon-only', settings.navButtonMode === 'icon');
+  document.body.classList.toggle('nav-text-only', settings.navButtonMode === 'text');
   statsFontScale = settings.statsFontSize;
   statsFontColor = settings.statsFontColor;
 }
