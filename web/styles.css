@@ -84,6 +84,54 @@ body {
   background: #000;
 }
 
+/* Fullscreen toggle sits in the black area outside the rounded picture. */
+.fullscreen-toggle {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 8px;
+  border: 1px solid #3a424e;
+  border-radius: 8px;
+  background: rgb(17 19 24 / 82%);
+  color: var(--ui-text-soft);
+  font: 500 calc(10px * var(--ui-font-scale))/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.fullscreen-toggle:hover {
+  border-color: #5b9aff;
+  color: var(--ui-text-color);
+}
+
+.fullscreen-toggle svg {
+  fill: currentColor;
+}
+
+body.screen-fullscreen #stream {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border-radius: 0;
+  background: #000;
+}
+
+body.screen-fullscreen #stream .control-buttons-list {
+  display: none;
+}
+
+/* Keep the aspect ratio: the canvases still scale to fit the grid cell, just
+   without the margin/ring/radius that framed the windowed view. */
+body.screen-fullscreen #stream .video-layer,
+body.screen-fullscreen #stream .touch-layer {
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 #stream .device-view {
   display: flex;
   flex-direction: row;

@@ -107,6 +107,22 @@ function closeSettings() {
   overlay.hidden = true;
 }
 
+// Windowed/letterboxed fullscreen for the phone picture only: the tool rail
+// is hidden so nothing sits beside the mirrored screen.
+const fullscreenToggle = document.getElementById('fullscreen-toggle');
+
+function setFullscreen(active) {
+  document.body.classList.toggle('screen-fullscreen', active);
+  const label = t(active ? 'fullscreen.exit' : 'fullscreen.enter');
+  fullscreenToggle.querySelector('span').textContent = label;
+  fullscreenToggle.title = label;
+  fullscreenToggle.setAttribute('aria-label', label);
+}
+
+fullscreenToggle.addEventListener('click', () => {
+  setFullscreen(!document.body.classList.contains('screen-fullscreen'));
+});
+
 function readSettingsForm() {
   return normalizeSettings({
     resolution: formFields.resolution.value,
@@ -128,7 +144,9 @@ overlay.addEventListener('click', (event) => {
   if (event.target === overlay) closeSettings();
 });
 window.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape' && !overlay.hidden) closeSettings();
+  if (event.key !== 'Escape') return;
+  if (!overlay.hidden) closeSettings();
+  else if (document.body.classList.contains('screen-fullscreen')) setFullscreen(false);
 });
 document.getElementById('settings-reset').addEventListener('click', () => {
   fillSettingsForm(DEFAULT_SETTINGS);
@@ -159,6 +177,7 @@ function applyLanguage() {
   }
   lockMessage = lockHint(screenState, lang);
   renderStatus();
+  setFullscreen(document.body.classList.contains('screen-fullscreen'));
   labelToolbox();
   localizeEngineDom();
 }
