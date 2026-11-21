@@ -33,17 +33,29 @@ test('chat config: save persists patched fields and keeps unspecified defaults',
   const saved = store.save({ model: 'qwen3', apiKey: 'sk-x' });
 
   assert.equal(saved.model, 'qwen3');
+  assert.equal(Object.hasOwn(saved, 'apiKey'), false);
+  assert.equal(saved.hasApiKey, true);
+  assert.equal(JSON.stringify(saved).includes('sk-x'), false);
   assert.equal(store.load().model, 'qwen3');
   assert.equal(store.load().apiKey, 'sk-x');
   assert.deepEqual(store.load(), { ...EXPECTED_DEFAULT, model: 'qwen3', apiKey: 'sk-x' });
 });
 
-test('chat config: save filters unknown fields and ignores enabled', (t) => {
+test('chat config: save filters unknown fields but accepts enabled', (t) => {
   const store = tempStore(t);
   store.save({ enabled: true, model: 'qwen3', injected: 'nope' });
 
-  assert.deepEqual(store.load(), { ...EXPECTED_DEFAULT, model: 'qwen3' });
+  assert.deepEqual(store.load(), { ...EXPECTED_DEFAULT, enabled: true, model: 'qwen3' });
   assert.equal(Object.hasOwn(store.load(), 'injected'), false);
+});
+
+test('chat config: save({ enabled: true }) turns the agent on', (t) => {
+  const store = tempStore(t);
+  assert.equal(store.load().enabled, false);
+
+  const saved = store.save({ enabled: true });
+  assert.equal(store.load().enabled, true);
+  assert.equal(saved.enabled, true);
 });
 
 test('chat config: publicConfig hides apiKey and reports hasApiKey', (t) => {
@@ -72,14 +84,15 @@ test('chat config: publicConfig hides apiKey and reports hasApiKey', (t) => {
   assert.equal(JSON.stringify(pub).includes('sk-x'), false);
 });
 
-test('chat config: enabled is read from disk but survives save unchanged', (t) => {
+test('chat config: enabled is read from disk and can be turned back off', (t) => {
   const store = tempStore(t, JSON.stringify({ enabled: true, apiKey: 'sk-x' }));
   assert.equal(store.load().enabled, true);
   assert.equal(store.publicConfig().enabled, true);
 
-  store.save({ enabled: false, model: 'qwen3' });
-  assert.equal(store.load().enabled, true);
+  const saved = store.save({ enabled: false, model: 'qwen3' });
+  assert.equal(store.load().enabled, false);
   assert.equal(store.load().model, 'qwen3');
+  assert.equal(saved.enabled, false);
 });
 
 test('chat config: load falls back to defaults for corrupt JSON', (t) => {

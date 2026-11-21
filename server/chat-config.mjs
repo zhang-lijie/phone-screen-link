@@ -10,9 +10,7 @@ export const DEFAULT_CHAT_CONFIG = Object.freeze({
   apiKey: '',
 });
 
-// `enabled` is intentionally absent: a config POST must not let the browser
-// switch the chat agent on by itself.
-const WRITABLE_FIELDS = ['baseUrl', 'model', 'maxSteps', 'screenshot', 'apiKey'];
+const WRITABLE_FIELDS = ['enabled', 'baseUrl', 'model', 'maxSteps', 'screenshot', 'apiKey'];
 
 function fieldValue(source, key) {
   if (!Object.hasOwn(source, key)) return undefined;
@@ -41,7 +39,7 @@ export function createChatConfigStore({ file }) {
     }
 
     const config = { ...DEFAULT_CHAT_CONFIG };
-    for (const key of [...WRITABLE_FIELDS, 'enabled']) {
+    for (const key of WRITABLE_FIELDS) {
       const value = fieldValue(stored, key);
       if (value !== undefined) config[key] = value;
     }
@@ -57,7 +55,7 @@ export function createChatConfigStore({ file }) {
     }
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, `${JSON.stringify(config, null, 2)}\n`);
-    return config;
+    return publicConfig();
   }
 
   function publicConfig() {
