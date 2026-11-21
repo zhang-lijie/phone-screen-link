@@ -43,6 +43,23 @@ export function copyWeb({ files, webDir, sharedDir }, targetDir) {
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+// The engine resolves an OPTIONAL node-pty dependency on startup and awaits it
+// before it starts serving. Its fetch does not use the system HTTPS proxy
+// (Node ignores HTTP(S)_PROXY for fetch unless told otherwise), so on a
+// proxied network that fetch hangs for 3 x 30s and the engine misses the
+// readiness deadline here. These two settings make the same fetch succeed in
+// under a second; they only matter when a proxy is configured.
+export function engineEnv(env = process.env) {
+  const result = {};
+  if (env.HTTPS_PROXY || env.https_proxy || env.HTTP_PROXY || env.http_proxy) {
+    result.NODE_USE_ENV_PROXY = '1';
+    // A proxy re-signs TLS with its own CA, which Node's bundled root store
+    // does not know; the system store does.
+    result.NODE_OPTIONS = [env.NODE_OPTIONS, '--use-system-ca'].filter(Boolean).join(' ');
+  }
+  return result;
+}
+
 async function waitForEngine(url) {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
@@ -149,6 +166,7 @@ export async function main(deps = {}) {
     engine = spawnChild(spawnStep.command, spawnStep.args, {
       cwd: spawnStep.cwd,
       stdio: 'inherit',
+      env: { ...process.env, ...engineEnv() },
     });
     if (aborted) throw new Error('startup aborted');
 

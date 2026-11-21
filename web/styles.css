@@ -88,10 +88,13 @@ body {
 
 /* The engine's video cell is a grid; the picture canvas and the transparent
    touch canvas occupy the same cell (grid-area 1 / 1) so touch coordinates
-   map onto the picture. A definite height on the cell is what lets the
-   canvas's max-height resolve against the space we actually have. */
+   map onto the picture. The track is pinned to the cell's own size: with an
+   auto track, the canvases' percentage max-height resolves against a size
+   that depends on the canvases themselves, so it is ignored and a 1080px-tall
+   canvas overflows the window instead of shrinking into it. */
 #stream .video {
   display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
   place-items: center;
   min-width: 0;
   min-height: 0;

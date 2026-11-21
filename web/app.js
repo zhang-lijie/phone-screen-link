@@ -1,7 +1,7 @@
 // The shared module is copied into the engine's public dir as keys.js: the
 // engine's static server has no .mjs MIME type and sends nosniff, so a .mjs
 // import would be refused by the browser.
-import { buildStreamOptions, isUsableContext, lockHint } from './keys.js';
+import { STREAM_SIZE_LADDER, buildStreamOptions, isDegradedStream, isUsableContext, lockHint } from './keys.js';
 
 const DEVICE_ID = '2FD0221C09004177';
 const BRIDGE_URL = 'http://127.0.0.1:8100/keyevent';
@@ -40,20 +40,18 @@ function setStatus(text) {
 }
 
 // The toolbox is created by the engine once the player attaches, so it can
-// appear after our first paint. Label it as soon as it shows up.
+// appear after our first paint — and again after a stream restart. Label every
+// copy as soon as it shows up, for as long as the page lives.
 function labelToolbox() {
   const list = streamEl.querySelector('.control-buttons-list');
-  if (!list) return false;
+  if (!list) return;
   for (const el of list.querySelectorAll('.control-button')) {
     const label = TOOLBOX_LABELS.get(el.getAttribute('title'));
     if (label) el.setAttribute('data-label', label);
   }
-  return true;
 }
 
-const toolboxObserver = new MutationObserver(() => {
-  if (labelToolbox()) toolboxObserver.disconnect();
-});
+const toolboxObserver = new MutationObserver(() => labelToolbox());
 toolboxObserver.observe(streamEl, { childList: true, subtree: true });
 
 async function pollScreenState() {
@@ -103,6 +101,52 @@ for (const button of document.querySelectorAll('[data-key]')) {
   });
 }
 
+const RETRY_DELAY_MS = 1200;
+
+// Each attempt gets a generation. Stopping a stream fires its disconnect
+// callback asynchronously, so a retry bumps the generation first and the stale
+// callback is ignored instead of overwriting the new status.
+let generation = 0;
+let attempts = 0;
+
+function startStream() {
+  const gen = ++generation;
+  const size = STREAM_SIZE_LADDER[Math.min(attempts, STREAM_SIZE_LADDER.length - 1)];
+  attempts += 1;
+
+  const options = buildStreamOptions({ deviceId: DEVICE_ID, maxSize: size });
+
+  options.onConnect = (info) => {
+    if (gen !== generation) return;
+    labelToolbox();
+    const degraded = isDegradedStream(info?.resolution, size);
+    const canRetry = attempts < STREAM_SIZE_LADDER.length;
+    if (degraded && canRetry) {
+      generation += 1;
+      setStatus(`Stream came back at ${info.resolution} — retrying…`);
+      try {
+        window.phoneLinkHandle?.stop();
+      } catch {
+        // The session is already gone; starting a new one is all that matters.
+      }
+      setTimeout(startStream, RETRY_DELAY_MS);
+      return;
+    }
+    const resolution = info?.resolution ? ` — ${info.resolution}` : '';
+    setStatus(`Connected${resolution}${degraded ? ' (low resolution — press RELOAD)' : ''}`);
+  };
+  options.onDisconnect = (reason) => {
+    if (gen !== generation) return;
+    setStatus(`Disconnected${reason ? ` — ${reason}` : ''}`);
+  };
+  options.onError = (err) => {
+    if (gen !== generation) return;
+    setStatus(`Stream error — ${messageOf(err)}`);
+  };
+
+  window.phoneLinkHandle = window.WsScrcpy.startStream(streamEl, DEVICE_ID, options);
+}
+
 if (!isUsableContext(location.protocol, location.hostname)) {
   setStatus('Insecure origin — open http://127.0.0.1:8000/ (or https) so the browser can decode the stream.');
 } else if (!window.WsScrcpy || typeof window.WsScrcpy.startStream !== 'function') {
@@ -110,18 +154,7 @@ if (!isUsableContext(location.protocol, location.hostname)) {
 } else {
   setStatus('Connecting to phone…');
   try {
-    const options = buildStreamOptions({ deviceId: DEVICE_ID });
-    options.onConnect = (info) => {
-      labelToolbox();
-      setStatus(`Connected${info?.resolution ? ` — ${info.resolution}` : ''}`);
-    };
-    options.onDisconnect = (reason) => {
-      setStatus(`Disconnected${reason ? ` — ${reason}` : ''}`);
-    };
-    options.onError = (err) => {
-      setStatus(`Stream error — ${messageOf(err)}`);
-    };
-    window.phoneLinkHandle = window.WsScrcpy.startStream(streamEl, DEVICE_ID, options);
+    startStream();
   } catch (err) {
     setStatus(`${ENGINE_UNAVAILABLE} ${messageOf(err)}`);
   }

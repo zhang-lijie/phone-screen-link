@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { buildPlan, copyWeb, main } from '../scripts/start.mjs';
+import { buildPlan, copyWeb, engineEnv, main } from '../scripts/start.mjs';
 
 test('plan enforces usb before copying and starting the engine', () => {
   const plan = buildPlan({ engineDir: '/x/engine', webDir: '/x/web' });
@@ -87,6 +87,7 @@ function fakeRuntime(overrides = {}) {
     spawn: (command, args, options) => {
       calls.order.push('spawn');
       calls.spawn.push({ command, args, cwd: options.cwd, stdio: options.stdio });
+      calls.spawnEnv = options.env;
       return child;
     },
     waitForEngine: async () => {},
@@ -101,8 +102,25 @@ function fakeRuntime(overrides = {}) {
   return { deps, calls, handlers, child, bridge };
 }
 
-test('main installs signal handlers before spawning and cleans up when readiness rejects', async () => {
-  const { deps, calls, handlers } = fakeRuntime({
+test('the engine is spawned with proxy-aware fetch settings when a proxy is configured', () => {
+  // Node ignores HTTP(S)_PROXY for fetch by default, and the engine awaits an
+  // optional dependency download before it serves — without these the fetch
+  // hangs past the readiness deadline on a proxied network.
+  const withProxy = engineEnv({ HTTPS_PROXY: 'http://127.0.0.1:31181' });
+  assert.equal(withProxy.NODE_USE_ENV_PROXY, '1');
+  assert.match(withProxy.NODE_OPTIONS, /--use-system-ca/);
+
+  assert.deepEqual(engineEnv({}), {});
+  assert.deepEqual(engineEnv({ PATH: '/usr/bin' }), {});
+});
+
+test('existing NODE_OPTIONS are preserved when the proxy settings are added', () => {
+  const env = engineEnv({ HTTPS_PROXY: 'http://127.0.0.1:31181', NODE_OPTIONS: '--max-old-space-size=512' });
+  assert.match(env.NODE_OPTIONS, /--max-old-space-size=512/);
+  assert.match(env.NODE_OPTIONS, /--use-system-ca/);
+});
+
+test('main installs signal handlers before spawning and cleans up when readiness rejects', async () => {  const { deps, calls, handlers } = fakeRuntime({
     waitForEngine: async () => { throw new Error('readiness failed'); },
   });
 
