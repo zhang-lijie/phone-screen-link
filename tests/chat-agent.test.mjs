@@ -96,6 +96,102 @@ test('agent loop: lock detection also understands prose state output', async () 
   assert.equal(unlockedDeps.chatCalls.length, 1);
 });
 
+test('agent loop: negation prose cannot fail the lock gate open', async () => {
+  const lockedTexts = [
+    'Screen is locked (not unlocked)',
+    'Device is not unlocked.',
+    'unlock required',
+    'screen off',
+  ];
+  for (const stateText of lockedTexts) {
+    const deps = fakeDeps({ stateText });
+    const result = await runAgentTurn({ config: makeConfig(), userText: 'hi', lang: 'en', deps });
+    assert.equal(deps.chatCalls.length, 0, `"${stateText}" must be treated as locked`);
+    assert.deepEqual(result.steps, []);
+    assert.match(result.reply, /locked or asleep/i);
+  }
+
+  const unlockedTexts = ['Device is unlocked, screen on.', 'locked: false', 'The device is not locked.'];
+  for (const stateText of unlockedTexts) {
+    const deps = fakeDeps({ stateText, responses: [{ content: 'ok', toolCalls: [] }] });
+    const result = await runAgentTurn({ config: makeConfig(), userText: 'hi', lang: 'en', deps });
+    assert.equal(result.reply, 'ok', `"${stateText}" must be treated as unlocked`);
+    assert.equal(deps.chatCalls.length, 1);
+  }
+});
+
+test('agent loop: a hanging model call times out with a readable error', async () => {
+  const deps = fakeDeps({});
+  deps.chatCompletion = () => new Promise(() => {}); // never resolves, ignores the signal
+  deps.timeoutMs = 50;
+
+  await assert.rejects(
+    runAgentTurn({ config: makeConfig(), userText: 'hi', lang: 'en', deps }),
+    /timed out after 50ms/i,
+  );
+});
+
+test('agent loop: every model call carries an abort signal', async () => {
+  const deps = fakeDeps({ responses: [{ content: 'ok', toolCalls: [] }] });
+  await runAgentTurn({ config: makeConfig(), userText: 'hi', lang: 'en', deps });
+  assert.equal(deps.chatCalls.length, 1);
+  assert.ok(deps.chatCalls[0].signal instanceof AbortSignal, 'model call must receive an AbortSignal');
+});
+
+test('agent loop: missing tool_call ids are synthesized consistently across assistant and tool messages', async () => {
+  const deps = fakeDeps({
+    responses: [
+      {
+        content: null,
+        toolCalls: [
+          { name: 'tap', arguments: { x: 1, y: 2 } }, // id missing entirely
+          { id: '', name: 'tap', arguments: { x: 3, y: 4 } }, // id empty
+        ],
+      },
+      { content: null, toolCalls: [{ name: 'tap', arguments: { x: 5, y: 6 } }] },
+      { content: 'done', toolCalls: [] },
+    ],
+  });
+
+  const result = await runAgentTurn({ config: makeConfig(), userText: 'tap thrice', lang: 'en', deps });
+  assert.equal(result.reply, 'done');
+
+  const second = deps.chatCalls[1].messages;
+  const assistant = second.find((m) => m.role === 'assistant' && Array.isArray(m.tool_calls));
+  assert.deepEqual(assistant.tool_calls.map((c) => c.id), ['call_0_0', 'call_0_1']);
+  const toolIds = second.filter((m) => m.role === 'tool').map((m) => m.tool_call_id);
+  assert.deepEqual(toolIds, ['call_0_0', 'call_0_1'], 'tool results must echo the synthesized ids');
+
+  const third = deps.chatCalls[2].messages;
+  const assistant2 = third.filter((m) => m.role === 'assistant' && Array.isArray(m.tool_calls)).at(-1);
+  assert.deepEqual(assistant2.tool_calls.map((c) => c.id), ['call_1_0'], 'ids must be unique per step');
+  assert.ok(third.some((m) => m.role === 'tool' && m.tool_call_id === 'call_1_0'));
+});
+
+test('agent loop: empty tool output gets a placeholder, empty screenshot keeps its caption', async () => {
+  const tapDeps = fakeDeps({
+    responses: [
+      { content: null, toolCalls: [{ id: 't1', name: 'tap', arguments: { x: 1, y: 2 } }] },
+      { content: 'done', toolCalls: [] },
+    ],
+    toolResults: { tap: { content: [] } },
+  });
+  await runAgentTurn({ config: makeConfig(), userText: 'tap', lang: 'en', deps: tapDeps });
+  const tapTool = tapDeps.chatCalls[1].messages.find((m) => m.role === 'tool');
+  assert.equal(tapTool.content, '(no output)');
+
+  const shotDeps = fakeDeps({
+    responses: [
+      { content: null, toolCalls: [{ id: 's1', name: 'screenshot', arguments: {} }] },
+      { content: 'done', toolCalls: [] },
+    ],
+    toolResults: { screenshot: { content: [] } },
+  });
+  await runAgentTurn({ config: makeConfig(), userText: 'look', lang: 'en', deps: shotDeps });
+  const shotTool = shotDeps.chatCalls[1].messages.find((m) => m.role === 'tool');
+  assert.equal(shotTool.content, 'Screenshot captured.');
+});
+
 test('agent loop: refuses non-whitelisted tool without calling ghost and says so in the reply', async () => {
   const deps = fakeDeps({
     responses: [

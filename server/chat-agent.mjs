@@ -6,6 +6,7 @@ import { chatCompletion as defaultChatCompletion } from './model-client.mjs';
 import { filterToolDefinitions, isAllowedTool, validateToolArgs } from '../shared/chat-tools.mjs';
 
 const DEFAULT_MAX_STEPS = 8;
+const DEFAULT_MODEL_TIMEOUT_MS = 60_000;
 
 const STRINGS = {
   zh: {
@@ -71,8 +72,14 @@ function isPhoneLocked(result) {
   } catch {
     // fall through to prose matching
   }
-  if (/unlocked|not locked|locked["']?\s*[:=]\s*false/i.test(text)) return false;
-  if (/locked|screen off|asleep/i.test(text)) return true;
+  // Explicit negatives first, so prose like `locked: false` is not swallowed
+  // by the \blocked\b indicator below.
+  if (/locked["']?\s*[:=]\s*false|\bnot locked\b/i.test(text)) return false;
+  // Locked-true indicators are checked BEFORE any "unlocked" pattern, with
+  // word boundaries so "unlocked" does not substring-match \blocked\b:
+  // negations like "locked (not unlocked)" must fail closed, not open.
+  if (/\blocked\b|screen off|asleep|not unlocked|unlock required/i.test(text)) return true;
+  if (/\bunlocked\b/i.test(text)) return false;
   return true; // unrecognized shape: fail closed
 }
 
@@ -105,7 +112,37 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
         apiKey: params.apiKey,
         messages: params.messages,
         tools: params.tools,
+        signal: params.signal,
       }));
+
+  // Spec §5.5: every model call is bounded. The AbortSignal cancels the real
+  // fetch; the race additionally bounds completions that ignore the signal
+  // and turns the abort into a readable error the bridge surfaces as 502.
+  const timeoutMs = Number.isFinite(deps.timeoutMs) && deps.timeoutMs > 0
+    ? deps.timeoutMs
+    : DEFAULT_MODEL_TIMEOUT_MS;
+
+  async function completeStep(params) {
+    let timer;
+    try {
+      return await Promise.race([
+        complete({ ...params, signal: AbortSignal.timeout(timeoutMs) }),
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(new Error(`Model request timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+          );
+        }),
+      ]);
+    } catch (err) {
+      if (err?.name === 'TimeoutError' || err?.name === 'AbortError') {
+        throw new Error(`Model request timed out after ${timeoutMs}ms`);
+      }
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
   const t = strings(lang);
   const maxSteps = Number.isFinite(config?.maxSteps) && config.maxSteps >= 1
@@ -128,7 +165,7 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
   const steps = [];
 
   for (let step = 0; step < maxSteps; step += 1) {
-    const response = await complete({
+    const response = await completeStep({
       baseUrl: config?.baseUrl,
       model: config?.model,
       apiKey: config?.apiKey,
@@ -144,11 +181,16 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
       return { reply: content, steps };
     }
 
+    // Some endpoints omit tool_call ids; strict OpenAI-compatible servers
+    // reject empty or mismatched ids, so synthesize stable per-step ones and
+    // reuse them verbatim in the role:'tool' responses below.
+    const calls = toolCalls.map((call, i) => ({ ...call, id: call.id || `call_${step}_${i}` }));
+
     messages.push({
       role: 'assistant',
       content: typeof response.content === 'string' ? response.content : null,
-      tool_calls: toolCalls.map((call) => ({
-        id: call.id ?? '',
+      tool_calls: calls.map((call) => ({
+        id: call.id,
         type: 'function',
         function: { name: call.name, arguments: JSON.stringify(call.arguments ?? {}) },
       })),
@@ -159,7 +201,7 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
     // the whole batch of tool results.
     const imageParts = [];
 
-    for (const call of toolCalls) {
+    for (const call of calls) {
       const name = call.name;
       const args = call.arguments ?? {};
 
@@ -180,8 +222,10 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
       const text = textOf(result);
       messages.push({
         role: 'tool',
-        tool_call_id: call.id ?? '',
-        content: name === 'screenshot' && text === '' ? 'Screenshot captured.' : text,
+        tool_call_id: call.id,
+        // Empty content is invalid on strict endpoints; give the model an
+        // explicit placeholder instead of an empty string.
+        content: text !== '' ? text : (name === 'screenshot' ? 'Screenshot captured.' : '(no output)'),
       });
 
       if (name === 'screenshot') {
