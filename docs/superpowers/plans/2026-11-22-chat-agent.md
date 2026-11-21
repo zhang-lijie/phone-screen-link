@@ -133,7 +133,7 @@ Run: `node --test tests/bridge.test.mjs`
 Expected: FAIL（新路由 404）
 
 - [ ] **Step 3: 实现路由**
-在 `handleRequest` 的 CORS/OPTIONS 分支把 `/api/chat-config` 纳入；GET 返回 `chatConfig.publicConfig()`；POST 调 `chatConfig.save(body)` 后返回 `publicConfig()`；忽略 body 里的 `enabled`。
+在 `handleRequest` 的 CORS/OPTIONS 分支把 `/api/chat-config` 纳入；GET 返回 `chatConfig.publicConfig()`；POST 调 `chatConfig.save(body)` 后返回 `publicConfig()`。`enabled` 是可写字段（设置面板开关）；信任边界在后续 Task 7 的 `/chat` 请求体（忽略其中任何 enabled/配置字段，只读后端配置），不在此配置路由。此任务使用最终签名 `createBridge({ adb, host, port, chatConfig, chat })`，`chat` 可选、本任务不实现 `/chat` 路由。
 
 - [ ] **Step 4: 跑测试确认通过**
 Expected: PASS
