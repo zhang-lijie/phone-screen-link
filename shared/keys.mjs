@@ -115,6 +115,17 @@ export const MESSAGES = {
     'engine.clickToCopy': 'click to copy',
     'engine.locked': 'device is locked — unlock it to see the screen',
     'engine.sketch': 'Created with Sketch.',
+    // Quality stats are drawn directly onto the touch canvas with fillText.
+    'stat.resolution': 'Resolution:',
+    'stat.videoCodec': 'Video codec:',
+    'stat.encoder': 'Encoder:',
+    'stat.bitrate': 'Bitrate:',
+    'stat.inputBytes': 'Input bytes:',
+    'stat.inputFps': 'Input   FPS:',
+    'stat.droppedFps': 'Dropped FPS:',
+    'stat.decodedFps': 'Decoded FPS:',
+    'stat.notSupported': 'Not supported',
+    'stat.avg': 'avg:',
   },
   zh: {
     'app.title': '手机投屏联动',
@@ -196,6 +207,16 @@ export const MESSAGES = {
     'engine.clickToCopy': '点击复制',
     'engine.locked': '手机已锁定 — 请解锁后查看屏幕',
     'engine.sketch': '由 Sketch 创建。',
+    'stat.resolution': '分辨率:',
+    'stat.videoCodec': '视频编码:',
+    'stat.encoder': '编码器:',
+    'stat.bitrate': '码率:',
+    'stat.inputBytes': '输入字节:',
+    'stat.inputFps': '输入帧率:',
+    'stat.droppedFps': '丢帧率:',
+    'stat.decodedFps': '解码帧率:',
+    'stat.notSupported': '不支持',
+    'stat.avg': '平均:',
   },
 };
 
@@ -224,6 +245,33 @@ export const ENGINE_TEXT_KEYS = Object.freeze({
   'device is locked — unlock it to see the screen': 'engine.locked',
   'Created with Sketch.': 'engine.sketch',
 });
+
+// The stats overlay draws its own English labels with canvas.fillText, so it
+// never shows up in a DOM audit. Translate each line by its label prefix.
+const STAT_LABELS = [
+  ['Resolution:', 'stat.resolution'],
+  ['Video codec:', 'stat.videoCodec'],
+  ['Encoder:', 'stat.encoder'],
+  ['Bitrate:', 'stat.bitrate'],
+  ['Input bytes:', 'stat.inputBytes'],
+  ['Input   FPS:', 'stat.inputFps'],
+  ['Dropped FPS:', 'stat.droppedFps'],
+  ['Decoded FPS:', 'stat.decodedFps'],
+];
+
+export function translateStatLine(text, lang) {
+  const line = String(text ?? '');
+  if (lang === 'en' || !line) return line;
+  if (line.trim() === MESSAGES.en['stat.notSupported']) return translate(lang, 'stat.notSupported');
+  let result = line;
+  for (const [source, key] of STAT_LABELS) {
+    if (result.startsWith(source)) {
+      result = translate(lang, key) + result.slice(source.length);
+      break;
+    }
+  }
+  return result.replace(/\s*\(avg: ([^)]*)\)/g, `（${translate(lang, 'stat.avg')} $1）`);
+}
 
 export function translate(lang, key, vars = {}) {
   const template = (MESSAGES[lang] ?? MESSAGES.en)[key] ?? MESSAGES.en[key] ?? key;

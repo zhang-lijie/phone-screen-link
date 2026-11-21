@@ -22,6 +22,7 @@ import {
   saveSettings,
   sizeLadder,
   translate,
+  translateStatLine,
 } from '../shared/keys.mjs';
 
 test('key codes match android', () => {
@@ -153,6 +154,20 @@ test('translations are complete and interpolate variables', () => {
   // Unknown keys and languages degrade to the key name / English, never crash.
   assert.equal(translate('en', 'not.a.key'), 'not.a.key');
   assert.equal(translate('fr', 'status.connecting'), MESSAGES.en['status.connecting']);
+});
+
+test('canvas-drawn quality stats are translated without touching their values', () => {
+  assert.equal(translateStatLine('Resolution:  522x1080', 'en'), 'Resolution:  522x1080');
+  assert.equal(translateStatLine('Resolution:  522x1080', 'zh'), '分辨率:  522x1080');
+  assert.equal(translateStatLine('Video codec: H265', 'zh'), '视频编码: H265');
+  assert.equal(translateStatLine('Encoder:     c2.android.hevc.encoder', 'zh'), '编码器:     c2.android.hevc.encoder');
+  assert.equal(translateStatLine('Bitrate:     8.0 MiB/s', 'zh'), '码率:     8.0 MiB/s');
+  assert.equal(translateStatLine('Input bytes:  1.2 MiB (avg: 3.4 MiB/s)', 'zh'), '输入字节:  1.2 MiB（平均: 3.4 MiB/s）');
+  assert.equal(translateStatLine('Input   FPS:  30 (avg: 29.8)', 'zh'), '输入帧率:  30（平均: 29.8）');
+  assert.equal(translateStatLine('Dropped FPS:   0 (avg:  0.0)', 'zh'), '丢帧率:   0（平均:  0.0）');
+  assert.equal(translateStatLine('Decoded FPS:  30 (avg: 29.9)', 'zh'), '解码帧率:  30（平均: 29.9）');
+  assert.equal(translateStatLine('Not supported', 'zh'), '不支持');
+  assert.equal(translateStatLine('something else', 'zh'), 'something else');
 });
 
 test('every engine-owned English string has a translation in both languages', () => {

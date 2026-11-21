@@ -14,6 +14,7 @@ import {
   saveSettings,
   sizeLadder,
   translate,
+  translateStatLine,
 } from './keys.js';
 
 const DEVICE_ID = '2FD0221C09004177';
@@ -198,6 +199,24 @@ function localizeEngineDom() {
     const key = ENGINE_TEXT_KEYS[source];
     if (key) node.nodeValue = node.nodeValue.replace(source, t(key));
   }
+
+  localizeStatsCanvas();
+}
+
+// Quality stats are painted with fillText on the touch canvas, not in the DOM.
+// Wrap that canvas's context so the engine keeps drawing its numbers but the
+// labels come out in the active language. The closure reads `lang` at draw
+// time, so a language switch needs no re-patching.
+const patchedStatsCanvases = new WeakSet();
+
+function localizeStatsCanvas() {
+  const canvas = streamEl.querySelector('canvas.touch-layer');
+  if (!canvas || patchedStatsCanvases.has(canvas)) return;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return;
+  const originalFillText = ctx.fillText.bind(ctx);
+  ctx.fillText = (text, x, y, ...rest) => originalFillText(translateStatLine(text, lang), x, y, ...rest);
+  patchedStatsCanvases.add(canvas);
 }
 
 // The engine owns the rail, so our entry is injected into its DOM. It is a
