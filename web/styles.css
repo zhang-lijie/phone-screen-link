@@ -151,6 +151,8 @@ body {
    loads after the engine's, so these win on equal specificity. */
 #stream .control-buttons-list {
   flex-shrink: 0;
+  /* Independent of the UI font scale: enlarging UI text must not grow the
+     rail. This setting is the fixed ceiling for the rail's size. */
   width: calc(2.75rem * var(--rail-scale));
   max-width: calc(2.75rem * var(--rail-scale));
   padding: calc(6px * var(--rail-scale)) 0;
@@ -199,7 +201,7 @@ body {
    data-label is filled in by app.js; without it the entry stays icon-only. */
 #stream .control-button[data-label]::after {
   content: attr(data-label);
-  font: 500 calc(8px * var(--ui-font-scale))/1 system-ui, -apple-system, sans-serif;
+  font: 500 calc(8px * var(--rail-scale))/1 system-ui, -apple-system, sans-serif;
   letter-spacing: 0.04em;
   color: var(--ui-text-muted);
 }
@@ -416,7 +418,8 @@ body {
   margin-top: calc(2px * var(--status-scale));
   padding-left: 4px;
   color: var(--ui-text-muted);
-  font-size: calc(12px * var(--ui-font-scale) * var(--status-scale));
+  /* Fixed by the status setting alone; UI font size never pushes it up. */
+  font-size: calc(12px * var(--status-scale));
   max-height: calc(20px * var(--status-scale));
   overflow: hidden;
   letter-spacing: 0.1em;
