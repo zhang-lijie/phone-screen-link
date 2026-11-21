@@ -27,6 +27,7 @@ function postKey(address, key, extraHeaders = {}) {
 }
 
 const ALLOWED_ORIGIN = 'http://127.0.0.1:8000';
+const LOCALHOST_ORIGIN = 'http://localhost:8000';
 
 test('health reports online', async () => {
   await withBridge({}, async (address) => {
@@ -172,6 +173,14 @@ test('authorized origin receives ACAO on success and error responses', async () 
   });
 });
 
+test('localhost origin receives ACAO on keyevent responses', async () => {
+  await withBridge({}, async (address) => {
+    const ok = await postKey(address, 'home', { origin: LOCALHOST_ORIGIN });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.headers.get('access-control-allow-origin'), LOCALHOST_ORIGIN);
+  });
+});
+
 test('unauthorized and absent origins receive no ACAO', async () => {
   await withBridge({}, async (address) => {
     for (const headers of [{ origin: 'http://evil.example' }, {}]) {
@@ -203,5 +212,18 @@ test('OPTIONS preflight for the authorized origin returns 204 with narrow allow 
     assert.equal(health.status, 204);
     assert.equal(health.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
     assert.equal(health.headers.get('access-control-allow-methods'), 'GET, OPTIONS');
+  });
+});
+
+test('OPTIONS preflight for the localhost origin returns 204 with narrow allow headers', async () => {
+  await withBridge({}, async (address) => {
+    const keyevent = await fetch(`${address}/keyevent`, {
+      method: 'OPTIONS',
+      headers: { origin: LOCALHOST_ORIGIN, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' },
+    });
+    assert.equal(keyevent.status, 204);
+    assert.equal(keyevent.headers.get('access-control-allow-origin'), LOCALHOST_ORIGIN);
+    assert.equal(keyevent.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
+    assert.equal(keyevent.headers.get('access-control-allow-headers'), 'content-type');
   });
 });

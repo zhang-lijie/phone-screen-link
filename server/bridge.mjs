@@ -2,7 +2,7 @@ import http from 'node:http';
 import { KEY_CODES } from '../shared/keys.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
-const ALLOWED_ORIGIN = 'http://127.0.0.1:8000';
+const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
 const MAX_BODY_BYTES = 64 * 1024;
 const TOO_LARGE = Symbol('too-large');
 const INVALID_JSON = Symbol('invalid-json');
@@ -56,8 +56,9 @@ export function createBridge({ adb, host, port }) {
     try {
       const { pathname } = new URL(req.url, 'http://localhost');
 
-      if (req.headers.origin === ALLOWED_ORIGIN) {
-        res.setHeader('Access-Control-Allow-Origin', ALLOWED_ORIGIN);
+      const origin = req.headers.origin;
+      if (ALLOWED_ORIGINS.has(origin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
       }
 
       if (req.method === 'OPTIONS' && (pathname === '/health' || pathname === '/keyevent')) {
