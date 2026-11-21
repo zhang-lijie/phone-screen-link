@@ -11,6 +11,7 @@ const ENGINE_URL = 'http://127.0.0.1:8000/';
 const USB_RECHECK_MS = 5_000;
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 250;
+const ABORTED = Symbol('startup-aborted');
 
 export function buildPlan({ engineDir, webDir }) {
   return [
@@ -54,47 +55,125 @@ async function waitForEngine(url) {
   throw new Error(`engine did not become ready at ${url}`);
 }
 
-export async function main() {
-  const projectDir = dirname(engineDir());
+// Dependencies are injectable so startup failures and signals can be exercised
+// without a real device, engine, or bridge.
+export async function main(deps = {}) {
+  const {
+    adb: adbClient = adb,
+    createBridge: makeBridge = createBridge,
+    spawn: spawnChild = spawn,
+    waitForEngine: checkEngine = waitForEngine,
+    engineDir: getEngineDir = engineDir,
+    copyWeb: copyFiles = copyWeb,
+    setTimer = setInterval,
+    clearTimer = clearInterval,
+    log = console.log,
+    error = console.error,
+    onSignal = (signal, handler) => process.once(signal, handler),
+    offSignal = (signal, handler) => process.removeListener(signal, handler),
+  } = deps;
+
+  const projectDir = dirname(getEngineDir());
   const [, copyStep, spawnStep, bridgeStep] = buildPlan({
-    engineDir: engineDir(),
+    engineDir: getEngineDir(),
     webDir: join(projectDir, 'web'),
   });
 
-  await adb.ensureUsbOnly();
+  await adbClient.ensureUsbOnly();
 
-  copyWeb(copyStep, join(spawnStep.cwd, 'dist', 'public'));
+  copyFiles(copyStep, join(spawnStep.cwd, 'dist', 'public'));
 
-  const engine = spawn(spawnStep.command, spawnStep.args, {
-    cwd: spawnStep.cwd,
-    stdio: 'inherit',
-  });
+  let engine;
+  let bridge;
+  let bridgeStart;
+  let usbInterval;
+  let bridgeStopped = false;
+  let engineKilled = false;
+  let cleanupTail = Promise.resolve();
+  let aborted = false;
+  let abortStartup;
+  const startupAbort = new Promise((resolve) => { abortStartup = resolve; });
 
-  const bridge = createBridge({ adb, port: bridgeStep.port });
-  const { address } = await bridge.start();
-  console.log(`control bridge listening at ${address}`);
-
-  await waitForEngine(ENGINE_URL);
-
-  const usbInterval = setInterval(() => {
-    adb.ensureUsbOnly().catch((err) => console.error('USB re-check failed:', err));
-  }, USB_RECHECK_MS);
-
-  const shutdown = async () => {
-    clearInterval(usbInterval);
-    try {
-      await bridge.stop();
-    } finally {
-      engine.kill();
-    }
-  };
-  for (const signal of ['SIGINT', 'SIGTERM']) {
-    process.once(signal, () => {
-      shutdown().catch((err) => {
-        console.error(err);
-        process.exitCode = 1;
-      });
+  // Serialized and re-entrant: every caller re-checks current state, so a
+  // resource created after an earlier cleanup is still released. Safe to call
+  // from a signal handler, the failure path, and the finally block.
+  function cleanup() {
+    const run = async () => {
+      if (usbInterval !== undefined) {
+        clearTimer(usbInterval);
+        usbInterval = undefined;
+      }
+      if (bridgeStart) {
+        const starting = bridgeStart;
+        bridgeStart = undefined;
+        try {
+          await starting;
+        } catch {
+          // A failed start has no server to close.
+        }
+      }
+      try {
+        if (bridge && !bridgeStopped) {
+          bridgeStopped = true;
+          await bridge.stop();
+        }
+      } finally {
+        // The child must die even if stopping the bridge fails.
+        if (engine && !engineKilled) {
+          engineKilled = true;
+          engine.kill();
+        }
+      }
+    };
+    cleanupTail = cleanupTail.then(run, run).catch((err) => {
+      error('cleanup failed:', err);
     });
+    return cleanupTail;
+  }
+
+  function handleSignal() {
+    aborted = true;
+    abortStartup();
+    return cleanup();
+  }
+
+  const signals = ['SIGINT', 'SIGTERM'];
+  // Installed before spawn so an early Ctrl-C cannot hit Node's default exit
+  // and orphan the child or leave a listening bridge behind.
+  for (const signal of signals) onSignal(signal, handleSignal);
+
+  let running = false;
+  try {
+    engine = spawnChild(spawnStep.command, spawnStep.args, {
+      cwd: spawnStep.cwd,
+      stdio: 'inherit',
+    });
+    if (aborted) throw new Error('startup aborted');
+
+    bridge = makeBridge({ adb: adbClient, port: bridgeStep.port });
+    bridgeStart = bridge.start();
+    const { address } = await bridgeStart;
+    bridgeStart = undefined;
+    log(`control bridge listening at ${address}`);
+    if (aborted) throw new Error('startup aborted');
+
+    const readiness = checkEngine(ENGINE_URL);
+    readiness.catch(() => {}); // consumed by the race if an abort wins first
+    const ready = await Promise.race([readiness, startupAbort.then(() => ABORTED)]);
+    if (ready === ABORTED || aborted) throw new Error('startup aborted');
+
+    usbInterval = setTimer(() => {
+      adbClient.ensureUsbOnly().catch((err) => error('USB re-check failed:', err));
+    }, USB_RECHECK_MS);
+    running = true;
+  } catch (err) {
+    await cleanup();
+    throw err;
+  } finally {
+    if (!running) {
+      await cleanup();
+      for (const signal of signals) offSignal(signal, handleSignal);
+    }
   }
 }
 
