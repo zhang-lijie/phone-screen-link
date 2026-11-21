@@ -396,3 +396,168 @@ test('chat config: routes return 503 when no chatConfig store is wired', async (
     assert.deepEqual(await post.json(), { error: 'chat config unavailable' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// /chat route (Task 7)
+// ---------------------------------------------------------------------------
+
+function postChat(address, body, headers = {}) {
+  return fetch(`${address}/chat`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...headers },
+    body: typeof body === 'string' ? body : JSON.stringify(body),
+  });
+}
+
+// Fake agent: counts run() invocations so tests can prove the model layer is
+// never reached when the backend config gates the request.
+function fakeChat(result) {
+  const chat = {
+    calls: [],
+    run: async (message, lang) => {
+      chat.calls.push({ message, lang });
+      return result ?? { reply: '好的，已回到桌面', steps: [{ tool: 'press_home', ok: true }] };
+    },
+  };
+  return chat;
+}
+
+function enabledChatConfig(t) {
+  const chatConfig = tempChatConfig(t);
+  chatConfig.save({ enabled: true, model: 'qwen3' });
+  return chatConfig;
+}
+
+test('chat: POST /chat returns reply and steps from the injected agent', async (t) => {
+  const chatConfig = enabledChatConfig(t);
+  const chat = fakeChat();
+  await withBridge({ chatConfig, chat }, async (address) => {
+    const res = await postChat(address, { message: '回到桌面', lang: 'zh' }, { origin: ALLOWED_ORIGIN });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+    assert.deepEqual(await res.json(), { reply: '好的，已回到桌面', steps: [{ tool: 'press_home', ok: true }] });
+    assert.deepEqual(chat.calls, [{ message: '回到桌面', lang: 'zh' }]);
+  });
+});
+
+test('chat: POST /chat passes only message and lang to the agent; body config fields are ignored', async (t) => {
+  // Disabled backend config: nothing in the body may switch chat on.
+  const chatConfig = tempChatConfig(t);
+  const chat = fakeChat();
+  const sneaky = {
+    message: 'hi',
+    lang: 'en',
+    enabled: true,
+    model: 'evil-model',
+    baseUrl: 'http://evil.example',
+    apiKey: 'sk-stolen',
+  };
+  await withBridge({ chatConfig, chat }, async (address) => {
+    const res = await postChat(address, sneaky, { origin: ALLOWED_ORIGIN });
+    assert.equal(res.status, 503);
+    assert.deepEqual(chat.calls, []);
+
+    // Now enable on the backend: the same body succeeds, and the agent still
+    // receives only message and lang.
+    chatConfig.save({ enabled: true, model: 'qwen3' });
+    const ok = await postChat(address, sneaky, { origin: ALLOWED_ORIGIN });
+    assert.equal(ok.status, 200);
+    assert.deepEqual(chat.calls, [{ message: 'hi', lang: 'en' }]);
+  });
+});
+
+test('chat: POST /chat returns 503 without running the agent when enabled is false', async (t) => {
+  const chatConfig = tempChatConfig(t); // DEFAULT: enabled:false, model:''
+  chatConfig.save({ model: 'qwen3' }); // model set, but still disabled
+  const chat = fakeChat();
+  await withBridge({ chatConfig, chat }, async (address) => {
+    const res = await postChat(address, { message: '打开设置', lang: 'zh' });
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { error: 'chat disabled' });
+    assert.deepEqual(chat.calls, []);
+  });
+});
+
+test('chat: POST /chat returns 503 without running the agent when model is empty', async (t) => {
+  const chatConfig = tempChatConfig(t);
+  chatConfig.save({ enabled: true }); // enabled, but model stays ''
+  const chat = fakeChat();
+  await withBridge({ chatConfig, chat }, async (address) => {
+    const res = await postChat(address, { message: '打开设置', lang: 'zh' });
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { error: 'chat disabled' });
+    assert.deepEqual(chat.calls, []);
+  });
+});
+
+test('chat: POST /chat returns 400 when message is missing or not a string', async (t) => {
+  const chatConfig = enabledChatConfig(t);
+  await withBridge({ chatConfig }, async (address) => {
+    for (const body of [{}, { message: 42 }, { message: null }, { lang: 'zh' }]) {
+      const res = await postChat(address, body);
+      assert.equal(res.status, 400);
+      assert.deepEqual(await res.json(), { error: 'message required' });
+    }
+  });
+});
+
+test('chat: POST /chat rejects invalid json and oversized bodies', async (t) => {
+  const chatConfig = enabledChatConfig(t);
+  const chat = fakeChat();
+  await withBridge({ chatConfig, chat }, async (address) => {
+    const invalid = await postChat(address, '{not valid json');
+    assert.equal(invalid.status, 400);
+    assert.deepEqual(await invalid.json(), { error: 'invalid json' });
+
+    const oversized = await fetch(`${address}/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: 'x'.repeat(64 * 1024 + 1),
+    });
+    assert.equal(oversized.status, 413);
+    assert.deepEqual(await oversized.json(), { error: 'payload too large' });
+    assert.deepEqual(chat.calls, []);
+  });
+});
+
+test('chat: POST /chat returns 503 when the agent or config store is not wired', async (t) => {
+  const chatConfig = enabledChatConfig(t);
+  const chat = fakeChat();
+  await withBridge({ chatConfig }, async (address) => {
+    const res = await postChat(address, { message: '回到桌面', lang: 'zh' });
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { error: 'chat unavailable' });
+  });
+
+  await withBridge({ chat }, async (address) => {
+    const res = await postChat(address, { message: '回到桌面', lang: 'zh' });
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { error: 'chat unavailable' });
+    assert.deepEqual(chat.calls, []);
+  });
+});
+
+test('chat: agent failure surfaces as 500 without leaking internals', async (t) => {
+  const chatConfig = enabledChatConfig(t);
+  const chat = { run: async () => { throw new Error('model unreachable'); } };
+  await withBridge({ chatConfig, chat }, async (address) => {
+    const res = await postChat(address, { message: '回到桌面', lang: 'zh' });
+    assert.equal(res.status, 500);
+    assert.deepEqual(await res.json(), { error: 'internal error' });
+  });
+});
+
+test('chat: OPTIONS preflight allows POST', async () => {
+  await withBridge({}, async (address) => {
+    for (const origin of [ALLOWED_ORIGIN, LOCALHOST_ORIGIN]) {
+      const res = await fetch(`${address}/chat`, {
+        method: 'OPTIONS',
+        headers: { origin, 'access-control-request-method': 'POST', 'access-control-request-headers': 'content-type' },
+      });
+      assert.equal(res.status, 204);
+      assert.equal(res.headers.get('access-control-allow-origin'), origin);
+      assert.equal(res.headers.get('access-control-allow-methods'), 'POST, OPTIONS');
+      assert.equal(res.headers.get('access-control-allow-headers'), 'content-type');
+    }
+  });
+});

@@ -1,5 +1,6 @@
 engine/
 node_modules/
+state/
 *.log
 
 .worktrees/

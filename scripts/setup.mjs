@@ -36,7 +36,29 @@ function applyLoopbackPatch() {
   console.log(`patched ${LOOPBACK_PATCH.file} to bind 127.0.0.1`);
 }
 
+export function checkGhostToolchain({ exec = execFileSync, log = console.log } = {}) {
+  const probe = (command) => {
+    try {
+      exec(command, ['--version'], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (probe('uvx')) return 'uvx';
+  if (probe('uv')) return 'uv';
+  log('warning: neither `uvx` nor `uv` was found on PATH.');
+  log('  The chat agent drives the phone through ghost-in-the-droid, started as');
+  log('  `uvx --from ghost-in-the-droid android-agent-mcp`. Install uv to enable chat:');
+  log('    curl -LsSf https://astral.sh/uv/install.sh | sh');
+  log('  Mirrors and button controls keep working without it; only /chat is disabled.');
+  return null;
+}
+
 export function setup() {
+  // Advisory only: a missing ghost toolchain must not block building the engine.
+  checkGhostToolchain();
+
   const distEntry = join(engineDir(), 'dist', 'index.js');
   if (existsSync(distEntry)) {
     console.log(`engine already built at ${distEntry}; skipping setup`);

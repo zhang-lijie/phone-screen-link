@@ -9,6 +9,7 @@ const INVALID_JSON = Symbol('invalid-json');
 const PREFLIGHT_METHODS = {
   '/health': 'GET, OPTIONS',
   '/keyevent': 'POST, OPTIONS',
+  '/chat': 'POST, OPTIONS',
   '/api/chat-config': 'GET, POST, OPTIONS',
 };
 
@@ -52,7 +53,9 @@ function readJsonBody(req, res) {
   });
 }
 
-// `chat` is accepted for the future /chat route (Task 7) and unused here.
+// `chat` is `{ run(userText, lang) }`, wired in scripts/start.mjs around the
+// agent loop. `chatConfig` is the backend store: it gates /chat and backs the
+// /api/chat-config routes.
 export function createBridge({ adb, host, port, chatConfig, chat }) {
   const bindHost = host ?? DEFAULT_HOST;
   let server;
@@ -100,6 +103,40 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
         }
         await adb.keyEvent(key);
         sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/chat') {
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        // The request body is never trusted for configuration: only `message`
+        // and `lang` are read from it. Enablement and model come from the
+        // backend store and are checked before the agent can reach the model.
+        if (body === null || typeof body !== 'object') {
+          sendJson(res, 400, { error: 'message required' });
+          return;
+        }
+        const message = body.message;
+        if (typeof message !== 'string') {
+          sendJson(res, 400, { error: 'message required' });
+          return;
+        }
+        const lang = typeof body.lang === 'string' ? body.lang : undefined;
+        if (!chat || !chatConfig) {
+          sendJson(res, 503, { error: 'chat unavailable' });
+          return;
+        }
+        const config = chatConfig.load();
+        if (config.enabled !== true || typeof config.model !== 'string' || config.model === '') {
+          sendJson(res, 503, { error: 'chat disabled' });
+          return;
+        }
+        const { reply, steps } = await chat.run(message, lang);
+        sendJson(res, 200, { reply, steps });
         return;
       }
 
