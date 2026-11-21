@@ -213,7 +213,29 @@ function labelToolbox() {
     const labelKey = TOOLBOX_LABELS.get(title);
     if (labelKey) el.setAttribute('data-label', t(labelKey));
   }
+  swapStatsAndDpad(list);
   addSettingsButton(list);
+}
+
+// The engine emits the stats toggle before the touch/D-pad toggle. Put touch
+// first, moving each label together with its hidden checkbox. Mark the list so
+// the MutationObserver does not repeat (or fight with) this rearrangement.
+function swapStatsAndDpad(list) {
+  if (list.dataset.swapped === '1') return;
+  const find = (key) => [...list.querySelectorAll('label.control-button')].find((el) => {
+    const title = el.dataset.sourceTitle ?? el.getAttribute('title');
+    return TOOLBOX_LABELS.get(title) === key;
+  });
+  const statsLabel = find('tool.stats');
+  const dpadLabel = find('tool.dpad');
+  if (!statsLabel || !dpadLabel) return;
+  const statsInput = statsLabel.previousElementSibling;
+  const dpadInput = dpadLabel.previousElementSibling;
+  if (!statsInput || statsInput.tagName !== 'INPUT' || !dpadInput || dpadInput.tagName !== 'INPUT') return;
+
+  list.insertBefore(dpadLabel, statsInput);
+  list.insertBefore(dpadInput, dpadLabel);
+  list.dataset.swapped = '1';
 }
 
 // The engine also puts English text in tooltips, the lock notice and the
