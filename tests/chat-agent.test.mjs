@@ -241,6 +241,117 @@ test('agent loop: a tool error is recorded as ok:false and the model keeps drivi
   assert.match(toolMessage.content, /gesture failed/);
 });
 
+test('agent loop: one vision user message with all image parts comes after every tool response', async () => {
+  const deps = fakeDeps({
+    responses: [
+      {
+        content: null,
+        toolCalls: [
+          { id: 's1', name: 'screenshot', arguments: {} },
+          { id: 't1', name: 'tap', arguments: { x: 3, y: 4 } },
+        ],
+      },
+      { content: 'seen and tapped', toolCalls: [] },
+    ],
+    toolResults: {
+      screenshot: { content: [{ type: 'image', data: 'aaE=', mimeType: 'image/png' }] },
+      tap: { content: [{ type: 'text', text: 'Tapped (3, 4)' }] },
+    },
+  });
+
+  const result = await runAgentTurn({ config: makeConfig(), userText: 'look then tap', lang: 'en', deps });
+
+  assert.deepEqual(result.steps, [
+    { tool: 'screenshot', ok: true },
+    { tool: 'tap', ok: true },
+  ]);
+  assert.equal(result.reply, 'seen and tapped');
+
+  const second = deps.chatCalls[1].messages;
+  const roles = second.map((m) => `${m.role}:${Array.isArray(m.tool_calls) ? m.tool_calls.length : '-'}`);
+  const assistantIndex = roles.findIndex((r) => r === 'assistant:2');
+  assert.ok(assistantIndex >= 0, 'assistant turn with two tool_calls missing');
+  const toolIndexes = second
+    .map((m, i) => (m.role === 'tool' ? i : -1))
+    .filter((i) => i >= 0);
+  assert.deepEqual(toolIndexes, [assistantIndex + 1, assistantIndex + 2], 'tool responses must follow the assistant turn back to back');
+  const visionIndexes = second
+    .map((m, i) => (Array.isArray(m.content) && m.content.some((p) => p && p.type === 'image_url') ? i : -1))
+    .filter((i) => i >= 0);
+  assert.deepEqual(visionIndexes, [assistantIndex + 3], 'exactly one vision user message, after all tool responses');
+  const vision = second[assistantIndex + 3];
+  assert.equal(vision.role, 'user');
+  const imageParts = vision.content.filter((p) => p.type === 'image_url');
+  assert.equal(imageParts.length, 1);
+  assert.equal(imageParts[0].image_url.url, 'data:image/png;base64,aaE=');
+
+  // A second screenshot in the same turn must not create a second user message.
+  const deps2 = fakeDeps({
+    responses: [
+      {
+        content: null,
+        toolCalls: [
+          { id: 's1', name: 'screenshot', arguments: {} },
+          { id: 't1', name: 'tap', arguments: { x: 1, y: 1 } },
+          { id: 's2', name: 'screenshot', arguments: {} },
+        ],
+      },
+      { content: 'two shots', toolCalls: [] },
+    ],
+    toolResults: {
+      screenshot: { content: [{ type: 'image', data: 'aaE=', mimeType: 'image/jpeg' }] },
+      tap: { content: [{ type: 'text', text: 'ok' }] },
+    },
+  });
+  await runAgentTurn({ config: makeConfig(), userText: 'x', lang: 'en', deps: deps2 });
+  const msgs2 = deps2.chatCalls[1].messages;
+  const vision2 = msgs2.filter(
+    (m) => Array.isArray(m.content) && m.content.some((p) => p && p.type === 'image_url'),
+  );
+  assert.equal(vision2.length, 1, 'all image parts belong in a single user vision message');
+  assert.equal(
+    vision2[0].content.filter((p) => p.type === 'image_url').length,
+    2,
+  );
+  assert.ok(
+    msgs2.at(-1) === vision2[0],
+    'the vision user message must be the last message of the turn',
+  );
+});
+
+test('agent loop: an errored or unreadable get_phone_state fails closed as locked', async () => {
+  const errorDeps = fakeDeps({});
+  const innerCall = errorDeps.callTool;
+  errorDeps.callTool = async (name, args) => {
+    if (name !== 'get_phone_state') return innerCall(name, args);
+    errorDeps.ghostCalls.push([name, args]);
+    return { content: [{ type: 'text', text: 'adb device offline' }], isError: true };
+  };
+
+  const errored = await runAgentTurn({
+    config: makeConfig(),
+    userText: 'tap something',
+    lang: 'zh',
+    deps: errorDeps,
+  });
+  assert.equal(errorDeps.chatCalls.length, 0, 'unreadable state must not reach the model');
+  assert.deepEqual(errorDeps.ghostCalls, [['get_phone_state', {}]], 'no action tool may run');
+  assert.deepEqual(errored.steps, []);
+  assert.match(errored.reply, /解锁/);
+
+  const proseDeps = fakeDeps({ stateText: 'adb device offline' });
+  const unreadable = await runAgentTurn({
+    config: makeConfig(),
+    userText: 'open settings',
+    lang: 'en',
+    deps: proseDeps,
+  });
+  assert.equal(proseDeps.chatCalls.length, 0);
+  assert.deepEqual(proseDeps.ghostCalls, [['get_phone_state', {}]]);
+  assert.deepEqual(unreadable.steps, []);
+  assert.match(unreadable.reply, /locked or asleep/i);
+});
+
 test('agent loop: system prompt is localized and requires same-language replies and no unlock', async () => {
   const zhDeps = fakeDeps({ responses: [{ content: '你好', toolCalls: [] }] });
   await runAgentTurn({ config: makeConfig(), userText: '你好', lang: 'zh', deps: zhDeps });

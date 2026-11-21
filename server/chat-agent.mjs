@@ -54,7 +54,10 @@ function truthyLocked(value) {
 
 // Lock state truth comes from ghost's get_phone_state only. ghost tools often
 // return prose, some return JSON; structuredContent is the MCP standard slot.
+// Anything we cannot read is treated as locked (fail closed): a possibly
+// locked/asleep device must never reach the model or action tools.
 function isPhoneLocked(result) {
+  if (result?.isError === true) return true;
   const structured = result?.structuredContent;
   if (structured && typeof structured === 'object' && Object.hasOwn(structured, 'locked')) {
     return truthyLocked(structured.locked);
@@ -70,7 +73,7 @@ function isPhoneLocked(result) {
   }
   if (/unlocked|not locked|locked["']?\s*[:=]\s*false/i.test(text)) return false;
   if (/locked|screen off|asleep/i.test(text)) return true;
-  return false; // unknown state: let the model proceed, it sees the raw text
+  return true; // unrecognized shape: fail closed
 }
 
 // screenshot comes back as MCP image content; OpenAI vision needs a data URI.
@@ -83,6 +86,11 @@ function imageDataUriOf(result) {
     .map((p) => p.text.trim())
     .find((t) => /^data:image\/[a-z0-9.+-]+;base64,/i.test(t));
   return inline ?? null;
+}
+
+function imagePartOf(result) {
+  const url = imageDataUriOf(result);
+  return url ? { type: 'image_url', image_url: { url } } : null;
 }
 
 export async function runAgentTurn({ config, ghost, userText, lang, deps = {} }) {
@@ -146,6 +154,11 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
       })),
     });
 
+    // All role:'tool' responses must precede any new user message on strict
+    // OpenAI endpoints, so image parts are collected and appended once after
+    // the whole batch of tool results.
+    const imageParts = [];
+
     for (const call of toolCalls) {
       const name = call.name;
       const args = call.arguments ?? {};
@@ -172,17 +185,16 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
       });
 
       if (name === 'screenshot') {
-        const dataUri = imageDataUriOf(result);
-        if (dataUri) {
-          messages.push({
-            role: 'user',
-            content: [
-              { type: 'text', text: 'screenshot result:' },
-              { type: 'image_url', image_url: { url: dataUri } },
-            ],
-          });
-        }
+        const part = imagePartOf(result);
+        if (part) imageParts.push(part);
       }
+    }
+
+    if (imageParts.length > 0) {
+      messages.push({
+        role: 'user',
+        content: [{ type: 'text', text: 'screenshot result:' }, ...imageParts],
+      });
     }
   }
 
