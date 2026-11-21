@@ -31,6 +31,29 @@
     </div>
     <div id="status" role="status" aria-live="polite"></div>
   </main>
+  <!-- Chat entry point. Hidden until GET /api/chat-config reports enabled. -->
+  <button type="button" id="chat-fab" class="chat-fab" hidden>
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-9 9H6v-2h5v2zm7 0h-5v-2h5v2z"/>
+    </svg>
+  </button>
+  <section id="chat-panel" class="chat-panel" role="dialog" aria-labelledby="chat-title" hidden>
+    <header class="chat-head">
+      <h2 id="chat-title" data-i18n="chat.title">Chat assistant</h2>
+      <button type="button" id="chat-close" data-i18n-aria="chat.close" aria-label="Close chat">&times;</button>
+    </header>
+    <div id="chat-messages" class="chat-messages">
+      <p id="chat-empty" class="chat-empty" data-i18n="chat.empty">Send a message to control the phone.</p>
+    </div>
+    <p id="chat-status" class="chat-status" role="status" aria-live="polite"></p>
+    <form id="chat-form" class="chat-form">
+      <input type="text" id="chat-input" data-i18n-placeholder="chat.placeholder" placeholder="Ask something" autocomplete="off">
+      <button type="submit" id="chat-send" data-i18n="chat.send">Send</button>
+    </form>
+    <footer class="chat-actions">
+      <button type="button" id="chat-clear" data-i18n="chat.clear">Clear chat</button>
+    </footer>
+  </section>
   <div id="settings-overlay" class="settings-overlay" hidden>
     <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="settings-head">
@@ -123,6 +146,38 @@
           <option value="both" data-i18n="settings.navBoth">Icon &amp; text</option>
         </select>
       </label>
+      <!-- Chat group. Saved on its own against the backend so changing chat
+           never restarts the stream; values come from GET /api/chat-config. -->
+      <h3 class="settings-group" data-i18n="chat.settings.group">Chat</h3>
+      <label class="setting-row setting-row--check">
+        <span data-i18n="chat.settings.enabled">Enable chat</span>
+        <input type="checkbox" id="set-chat-enabled">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="chat.settings.baseUrl">Model base URL</span>
+        <input type="url" id="set-chat-base-url" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="chat.settings.model">Model name</span>
+        <input type="text" id="set-chat-model" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="chat.settings.apiKey">API Key</span>
+        <input type="password" id="set-chat-api-key" autocomplete="new-password">
+      </label>
+      <label class="setting-row setting-row--check">
+        <span data-i18n="chat.settings.screenshot">Send screenshots to the model</span>
+        <input type="checkbox" id="set-chat-screenshot">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="chat.settings.maxSteps">Max steps per request</span>
+        <input type="number" id="set-chat-max-steps" min="1" max="32" step="1">
+      </label>
+      <p class="settings-note" data-i18n="chat.settings.note">Chat settings are stored by the local backend.</p>
+      <div class="settings-actions chat-settings-save">
+        <span id="chat-settings-status" class="chat-settings-status" role="status" aria-live="polite"></span>
+        <button type="button" id="chat-settings-save" data-i18n="chat.settings.save">Save chat settings</button>
+      </div>
       <p class="settings-note" data-i18n="settings.note">Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.</p>
       <footer class="settings-actions">
         <button type="button" id="settings-reset" data-i18n="settings.reset">Reset</button>

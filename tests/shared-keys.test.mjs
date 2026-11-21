@@ -194,6 +194,30 @@ test('translations are complete and interpolate variables', () => {
   assert.equal(translate('fr', 'status.connecting'), MESSAGES.en['status.connecting']);
 });
 
+test('chat strings exist in both languages and interpolate', () => {
+  // The chat feature owns its own key namespace; every chat.* key must be
+  // shipped in both languages (the parity test enforces the sets, this one
+  // enforces that the namespace actually exists and names the required UI
+  // strings: button, title, placeholder, status, errors, settings labels).
+  const chatKeys = Object.keys(MESSAGES.en).filter((key) => key.startsWith('chat.'));
+  assert.ok(chatKeys.length >= 20, 'the chat feature ships its own strings');
+  for (const key of chatKeys) {
+    assert.ok(MESSAGES.zh[key], `${key} has a Chinese value`);
+  }
+  const required = [
+    'chat.button', 'chat.title', 'chat.placeholder', 'chat.send', 'chat.clear',
+    'chat.running', 'chat.error.network', 'chat.error.request', 'chat.error.disabled',
+    'chat.settings.group', 'chat.settings.enabled', 'chat.settings.baseUrl',
+    'chat.settings.model', 'chat.settings.apiKey', 'chat.settings.screenshot',
+    'chat.settings.maxSteps', 'chat.settings.save',
+  ];
+  for (const key of required) {
+    assert.ok(MESSAGES.en[key] && MESSAGES.zh[key], `${key} is shipped in both languages`);
+  }
+  assert.equal(translate('zh', 'chat.error.request', { status: 503, error: 'boom' }), '请求失败（503）— boom');
+  assert.equal(translate('en', 'chat.settings.saveFailed', { error: 'nope' }), 'Save failed — nope');
+});
+
 test('canvas-drawn quality stats are translated without touching their values', () => {
   assert.equal(translateStatLine('Resolution:  522x1080', 'en'), 'Resolution:  522x1080');
   assert.equal(translateStatLine('Resolution:  522x1080', 'zh'), '分辨率:  522x1080');

@@ -18,7 +18,10 @@ import {
 } from './keys.js';
 
 const DEVICE_ID = '2FD0221C09004177';
-const BRIDGE_URL = 'http://127.0.0.1:8100/keyevent';
+const BRIDGE_BASE = 'http://127.0.0.1:8100';
+const BRIDGE_URL = `${BRIDGE_BASE}/keyevent`;
+const CHAT_CONFIG_URL = `${BRIDGE_BASE}/api/chat-config`;
+const CHAT_URL = `${BRIDGE_BASE}/chat`;
 const SCREEN_STATE_POLL_MS = 3000;
 
 const streamEl = document.getElementById('stream');
@@ -101,6 +104,7 @@ function fillSettingsForm(values = settings) {
 
 function openSettings() {
   fillSettingsForm();
+  fillChatForm();
   overlay.hidden = false;
   formFields.resolution.focus();
 }
@@ -148,6 +152,7 @@ overlay.addEventListener('click', (event) => {
 window.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   if (!overlay.hidden) closeSettings();
+  else if (!chatPanel.hidden) chatPanel.hidden = true;
   else if (document.body.classList.contains('screen-fullscreen')) setFullscreen(false);
 });
 document.getElementById('settings-reset').addEventListener('click', () => {
@@ -179,11 +184,17 @@ function applyLanguage() {
   for (const el of document.querySelectorAll('[data-i18n-aria]')) {
     el.setAttribute('aria-label', t(el.dataset.i18nAria));
   }
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) {
+    el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
+  }
   lockMessage = lockHint(screenState, lang);
   renderStatus();
   setFullscreen(document.body.classList.contains('screen-fullscreen'));
   labelToolbox();
   localizeEngineDom();
+  updateChatLabels();
+  renderChatStatus();
+  renderChatSaveStatus();
 }
 
 // Every status update funnels through here as a key + variables, so a language
@@ -405,6 +416,217 @@ for (const button of document.querySelectorAll('[data-key]')) {
     }
   });
 }
+
+// ---------------------------------------------------------------------------
+// Chat. The configuration lives on the backend (/api/chat-config); this page
+// only mirrors it. Chat is a separate entry point: every call here is guarded
+// and reports into the chat panel only, so a broken chat can never take the
+// stream, the toolbox or the key buttons down.
+// ---------------------------------------------------------------------------
+const CHAT_MAX_BUBBLES = 100;
+
+const chatFab = document.getElementById('chat-fab');
+const chatPanel = document.getElementById('chat-panel');
+const chatMessagesEl = document.getElementById('chat-messages');
+const chatEmptyEl = document.getElementById('chat-empty');
+const chatStatusEl = document.getElementById('chat-status');
+const chatInput = document.getElementById('chat-input');
+const chatSendButton = document.getElementById('chat-send');
+const chatSaveStatusEl = document.getElementById('chat-settings-status');
+const chatFormFields = {
+  enabled: document.getElementById('set-chat-enabled'),
+  baseUrl: document.getElementById('set-chat-base-url'),
+  model: document.getElementById('set-chat-model'),
+  apiKey: document.getElementById('set-chat-api-key'),
+  screenshot: document.getElementById('set-chat-screenshot'),
+  maxSteps: document.getElementById('set-chat-max-steps'),
+};
+
+// Last publicConfig from the backend ({enabled, baseUrl, model, maxSteps,
+// screenshot, hasApiKey}); null until the first GET succeeds. History is
+// display-only and lives until reload, per the design doc.
+let chatConfig = null;
+let chatRunning = false;
+let chatSaveStatus = { key: '', vars: {} };
+
+function applyChatVisibility() {
+  // Icon hidden while disabled: no entry point means no accidental 503s.
+  const show = Boolean(chatConfig?.enabled);
+  chatFab.hidden = !show;
+  if (!show) chatPanel.hidden = true;
+}
+
+function updateChatLabels() {
+  const label = t('chat.button');
+  chatFab.title = label;
+  chatFab.setAttribute('aria-label', label);
+  // The backend never echoes the key back, only whether one is stored.
+  chatFormFields.apiKey.placeholder = chatConfig?.hasApiKey
+    ? t('chat.settings.apiKeySet')
+    : t('chat.settings.apiKeyHint');
+}
+
+function renderChatStatus() {
+  chatStatusEl.textContent = chatRunning ? t('chat.running') : '';
+  chatSendButton.disabled = chatRunning;
+  chatInput.disabled = chatRunning;
+}
+
+function renderChatSaveStatus() {
+  chatSaveStatusEl.textContent = chatSaveStatus.key ? t(chatSaveStatus.key, chatSaveStatus.vars) : '';
+}
+
+function syncChatEmpty() {
+  chatEmptyEl.hidden = Boolean(chatMessagesEl.querySelector('.chat-msg'));
+}
+
+function addChatBubble(kind, text, steps) {
+  const bubble = document.createElement('div');
+  bubble.className = `chat-msg chat-msg--${kind}`;
+  const body = document.createElement('p');
+  body.textContent = text;
+  bubble.appendChild(body);
+  if (Array.isArray(steps) && steps.length > 0) {
+    const line = document.createElement('div');
+    line.className = 'chat-steps';
+    for (const step of steps) {
+      const chip = document.createElement('span');
+      chip.className = step.ok ? 'chat-step' : 'chat-step chat-step--fail';
+      chip.textContent = `${step.tool ?? '?'} ${step.ok ? '✓' : '✗'}`;
+      line.appendChild(chip);
+    }
+    bubble.appendChild(line);
+  }
+  chatMessagesEl.appendChild(bubble);
+  // A long session only ever keeps the tail on screen.
+  let count = chatMessagesEl.querySelectorAll('.chat-msg').length;
+  while (count-- > CHAT_MAX_BUBBLES) {
+    chatMessagesEl.querySelector('.chat-msg').remove();
+  }
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  syncChatEmpty();
+}
+
+function chatErrorText(res, payload) {
+  const error = typeof payload?.error === 'string' ? payload.error : '';
+  if (error === 'chat disabled') return t('chat.error.disabled');
+  if (error === 'chat unavailable') return t('chat.error.unavailable');
+  return t('chat.error.request', { status: res.status, error });
+}
+
+async function sendChatMessage() {
+  const message = chatInput.value.trim();
+  if (!message || chatRunning) return;
+  chatInput.value = '';
+  addChatBubble('user', message);
+  chatRunning = true;
+  renderChatStatus();
+  try {
+    // lang carries the UI language so the backend answers in kind.
+    const res = await fetch(CHAT_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message, lang }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      addChatBubble('error', chatErrorText(res, payload));
+    } else {
+      // runAgentTurn always answers with a non-empty string; anything else
+      // means the backend is not what we expect.
+      const reply = typeof payload.reply === 'string' && payload.reply !== ''
+        ? payload.reply
+        : t('chat.error.unavailable');
+      addChatBubble('assistant', reply, payload.steps);
+    }
+  } catch (err) {
+    addChatBubble('error', t('chat.error.network', { error: messageOf(err) }));
+  } finally {
+    chatRunning = false;
+    renderChatStatus();
+    chatInput.focus();
+  }
+}
+
+document.getElementById('chat-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  sendChatMessage();
+});
+chatFab.addEventListener('click', () => {
+  if (chatPanel.hidden) {
+    chatPanel.hidden = false;
+    chatInput.focus();
+  } else {
+    chatPanel.hidden = true;
+  }
+});
+document.getElementById('chat-close').addEventListener('click', () => {
+  chatPanel.hidden = true;
+});
+document.getElementById('chat-clear').addEventListener('click', () => {
+  for (const el of chatMessagesEl.querySelectorAll('.chat-msg')) el.remove();
+  syncChatEmpty();
+  chatInput.focus();
+});
+
+async function refreshChatConfig() {
+  try {
+    const res = await fetch(CHAT_CONFIG_URL);
+    chatConfig = res.ok ? await res.json() : null;
+  } catch {
+    // Bridge down: no chat icon, everything else unaffected.
+    chatConfig = null;
+  }
+  applyChatVisibility();
+  updateChatLabels();
+}
+
+function fillChatForm() {
+  chatFormFields.enabled.checked = Boolean(chatConfig?.enabled);
+  chatFormFields.baseUrl.value = chatConfig?.baseUrl ?? '';
+  chatFormFields.model.value = chatConfig?.model ?? '';
+  chatFormFields.apiKey.value = '';
+  chatFormFields.screenshot.checked = chatConfig?.screenshot ?? true;
+  chatFormFields.maxSteps.value = String(chatConfig?.maxSteps ?? 8);
+  updateChatLabels();
+}
+
+async function saveChatSettings() {
+  const patch = {
+    enabled: chatFormFields.enabled.checked,
+    baseUrl: chatFormFields.baseUrl.value.trim(),
+    model: chatFormFields.model.value.trim(),
+    screenshot: chatFormFields.screenshot.checked,
+  };
+  // The store accepts typed fields only; a garbage step count is dropped
+  // rather than posted. The key is sent only when the user typed one, so
+  // the stored value survives every other edit untouched.
+  const maxSteps = Number.parseInt(chatFormFields.maxSteps.value, 10);
+  if (Number.isFinite(maxSteps) && maxSteps >= 1) patch.maxSteps = maxSteps;
+  if (chatFormFields.apiKey.value !== '') patch.apiKey = chatFormFields.apiKey.value;
+  try {
+    const res = await fetch(CHAT_CONFIG_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.error ? `${res.status} — ${detail.error}` : String(res.status));
+    }
+    chatConfig = await res.json();
+    applyChatVisibility();
+    fillChatForm();
+    chatSaveStatus = { key: 'chat.settings.saved', vars: {} };
+  } catch (err) {
+    chatSaveStatus = { key: 'chat.settings.saveFailed', vars: { error: messageOf(err) } };
+  }
+  renderChatSaveStatus();
+}
+
+document.getElementById('chat-settings-save').addEventListener('click', saveChatSettings);
+
+refreshChatConfig();
 
 const RETRY_DELAY_MS = 1200;
 
