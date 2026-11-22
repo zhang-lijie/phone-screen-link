@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BITRATE_CHOICES,
+  CHAT_DOCK_KEY,
   CHAT_POSITION_KEY,
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
@@ -20,6 +21,7 @@ import {
   STATUS_SCALES,
   UI_FONT_SCALES,
   buildStreamOptions,
+  canDock,
   clampPanelPosition,
   effectiveLanguage,
   isDegradedStream,
@@ -28,8 +30,11 @@ import {
   lockHint,
   negotiatedMaxDimension,
   normalizeSettings,
+  readChatDock,
   readChatPosition,
   saveSettings,
+  shouldCenterDock,
+  writeChatDock,
   writeChatPosition,
   sizeLadder,
   translate,
@@ -290,4 +295,28 @@ test('chat drag: position storage accepts finite numbers, rejects garbage', () =
   assert.equal(readChatPosition(storage), null);
   store.set(CHAT_POSITION_KEY, 'not json');
   assert.equal(readChatPosition(storage), null);
+});
+
+test('chat dock: width gate, persistence and centering rule', () => {
+  assert.equal(canDock(719), false);
+  assert.equal(canDock(720), true);
+  assert.equal(canDock(1280), true);
+
+  const store = new Map();
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+  };
+  assert.equal(readChatDock(storage), false);
+  writeChatDock(storage, true);
+  assert.equal(readChatDock(storage), true);
+  assert.ok(store.has(CHAT_DOCK_KEY));
+  writeChatDock(storage, false);
+  assert.equal(readChatDock(storage), false);
+  store.set(CHAT_DOCK_KEY, 'garbage');
+  assert.equal(readChatDock(storage), false);
+
+  assert.equal(shouldCenterDock(300, 500), true, 'wider chat centers the pair');
+  assert.equal(shouldCenterDock(500, 300), false, 'narrower chat stays left');
+  assert.equal(shouldCenterDock(400, 400), false);
 });

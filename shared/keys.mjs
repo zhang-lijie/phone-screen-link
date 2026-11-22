@@ -124,6 +124,9 @@ export const MESSAGES = {
     'chat.button': 'Chat assistant',
     'chat.title': 'Chat assistant',
     'chat.close': 'Close chat',
+    'chat.dock': 'Dock chat beside the screen',
+    'chat.undock': 'Undock chat',
+    'chat.dockNarrow': 'Side-by-side needs a window at least 720px wide',
     'chat.placeholder': 'Ask something, e.g. "go to the home screen"',
     'chat.send': 'Send',
     'chat.clear': 'Clear chat',
@@ -278,6 +281,9 @@ export const MESSAGES = {
     'chat.button': '聊天助手',
     'chat.title': '聊天助手',
     'chat.close': '关闭聊天',
+    'chat.dock': '与画面并排显示',
+    'chat.undock': '取消并排显示',
+    'chat.dockNarrow': '窗口宽度至少 720px 才能并排显示',
     'chat.placeholder': '输入指令，例如「回到桌面」',
     'chat.send': '发送',
     'chat.clear': '清空对话',
@@ -490,6 +496,34 @@ export function saveSettings(storage, settings) {
 
 // "auto" walks the measured ladder; a fixed resolution is used as-is, so the
 // user's explicit choice is not silently replaced.
+// Chat dock (side-by-side) mode. Kept in localStorage like the drag position.
+export const CHAT_DOCK_KEY = 'phone-link-chat-docked';
+export const MIN_DOCK_WIDTH = 720;
+
+export function canDock(viewportWidth) {
+  return Number.isFinite(viewportWidth) && viewportWidth >= MIN_DOCK_WIDTH;
+}
+
+export function readChatDock(storage) {
+  try {
+    return storage?.getItem(CHAT_DOCK_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function writeChatDock(storage, docked) {
+  try {
+    storage?.setItem(CHAT_DOCK_KEY, docked ? 'true' : 'false');
+  } catch {
+    // Storage disabled: the dock mode simply won't survive a reload.
+  }
+}
+
+export function shouldCenterDock(streamWidth, chatWidth) {
+  return chatWidth > streamWidth;
+}
+
 // Chat panel drag position. The panel is non-modal and can be moved freely,
 // but its head (the drag handle, ~40px tall) must stay on screen so the user
 // can always grab it again. Horizontally a 40px strip stays visible.

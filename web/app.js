@@ -4,8 +4,12 @@
 import {
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
+  canDock,
   clampPanelPosition,
+  readChatDock,
   readChatPosition,
+  shouldCenterDock,
+  writeChatDock,
   writeChatPosition,
   buildStreamOptions,
   effectiveLanguage,
@@ -149,7 +153,8 @@ fullscreenToggle.addEventListener('click', () => {
 });
 
 // Real browser fullscreen via the Fullscreen API (F11-style), distinct from the
-// CSS pseudo-fullscreen above. The button sits at the top-right of #stream.
+// CSS pseudo-fullscreen above. Fullscreen the whole page (not just #stream) so
+// the chat panel stays visible in both floating and docked modes.
 const browserFullscreenToggle = document.getElementById('browser-fullscreen-toggle');
 let fullscreenWarned = false;
 
@@ -165,7 +170,7 @@ browserFullscreenToggle.addEventListener('click', async () => {
     if (document.fullscreenElement) {
       await document.exitFullscreen();
     } else {
-      await streamEl.requestFullscreen();
+      await document.documentElement.requestFullscreen();
     }
   } catch {
     setStatus('status.fullscreenFailed');
@@ -583,6 +588,7 @@ function updateChatLabels() {
   const label = t('chat.button');
   chatFab.title = label;
   chatFab.setAttribute('aria-label', label);
+  setChatDockButton();
   // The backend never echoes the key back, only whether one is stored.
   chatFormFields.apiKey.placeholder = chatConfig?.hasApiKey
     ? t('chat.settings.apiKeySet')
@@ -676,8 +682,78 @@ document.getElementById('chat-form').addEventListener('submit', (event) => {
   sendChatMessage();
 });
 // The chat head is the drag handle; buttons inside it stay clickable. Pointer
-// events cover mouse, touch and pen with one code path.
+// events cover mouse, touch and pen with one code path. Docked mode turns the
+// panel into a layout column, so dragging is disabled there.
 const chatHead = chatPanel.querySelector('.chat-head');
+const chatDockButton = document.getElementById('chat-dock');
+let chatDocked = false;
+
+function setChatDockButton() {
+  const label = t(chatDocked ? 'chat.undock' : 'chat.dock');
+  chatDockButton.title = label;
+  chatDockButton.setAttribute('aria-label', label);
+  chatDockButton.disabled = !canDock(window.innerWidth);
+}
+
+function updateDockCentering() {
+  if (!chatDocked) return;
+  const streamWidth = streamEl.getBoundingClientRect().width;
+  const chatWidth = chatPanel.getBoundingClientRect().width;
+  document.body.classList.toggle('chat-centered', shouldCenterDock(streamWidth, chatWidth));
+}
+
+function enterChatDock() {
+  if (chatDocked || !canDock(window.innerWidth)) {
+    if (!canDock(window.innerWidth)) setStatus('chat.dockNarrow');
+    return;
+  }
+  // Lock the current picture width (canvas plus rail) so the mirrored screen
+  // keeps its visible size while the chat panel takes the remaining space.
+  const canvas = streamEl.querySelector('canvas.video-layer');
+  const rail = streamEl.querySelector('.control-buttons-list');
+  const canvasWidth = canvas ? canvas.getBoundingClientRect().width : 0;
+  const railWidth = rail ? rail.getBoundingClientRect().width : 0;
+  const lockedWidth = Math.max(240, Math.round(canvasWidth + railWidth));
+  document.body.style.setProperty('--dock-stream-width', `${lockedWidth}px`);
+  // Drag offsets are meaningless in a layout column; clear them for the dock.
+  chatPanel.style.left = '';
+  chatPanel.style.top = '';
+  chatPanel.style.right = '';
+  chatPanel.style.bottom = '';
+  chatDocked = true;
+  document.body.classList.add('chat-docked');
+  writeChatDock(localStorage, true);
+  setChatDockButton();
+  updateDockCentering();
+}
+
+function exitChatDock() {
+  if (!chatDocked) return;
+  chatDocked = false;
+  document.body.classList.remove('chat-docked', 'chat-centered');
+  document.body.style.removeProperty('--dock-stream-width');
+  writeChatDock(localStorage, false);
+  // Restore the user's previous floating position, if any.
+  const saved = readChatPosition(localStorage);
+  if (saved) applyChatPosition(saved);
+  else {
+    chatPanel.style.left = '';
+    chatPanel.style.top = '';
+    chatPanel.style.right = '';
+    chatPanel.style.bottom = '';
+  }
+  setChatDockButton();
+}
+
+function closeChat() {
+  exitChatDock();
+  chatPanel.hidden = true;
+}
+
+chatDockButton.addEventListener('click', () => {
+  if (chatDocked) exitChatDock();
+  else enterChatDock();
+});
 
 function applyChatPosition(position) {
   const rect = chatPanel.getBoundingClientRect();
@@ -694,7 +770,7 @@ function applyChatPosition(position) {
 let chatDrag = null;
 
 chatHead.addEventListener('pointerdown', (event) => {
-  if (event.button !== 0 || event.target.closest('button')) return;
+  if (chatDocked || event.button !== 0 || event.target.closest('button')) return;
   const rect = chatPanel.getBoundingClientRect();
   // Switch from the docked right/bottom anchor to explicit left/top.
   chatPanel.style.left = `${rect.left}px`;
@@ -741,6 +817,16 @@ chatHead.addEventListener('pointerup', endChatDrag);
 chatHead.addEventListener('pointercancel', endChatDrag);
 
 window.addEventListener('resize', () => {
+  if (chatDocked) {
+    if (!canDock(window.innerWidth)) {
+      exitChatDock();
+      setStatus('chat.dockNarrow');
+    } else {
+      setChatDockButton();
+      updateDockCentering();
+    }
+    return;
+  }
   const saved = readChatPosition(localStorage);
   if (saved && !chatPanel.hidden) applyChatPosition(saved);
 });
@@ -748,16 +834,17 @@ window.addEventListener('resize', () => {
 chatFab.addEventListener('click', () => {
   if (chatPanel.hidden) {
     chatPanel.hidden = false;
-    const saved = readChatPosition(localStorage);
-    if (saved) applyChatPosition(saved);
+    if (readChatDock(localStorage) && canDock(window.innerWidth)) enterChatDock();
+    else {
+      const saved = readChatPosition(localStorage);
+      if (saved) applyChatPosition(saved);
+    }
     chatInput.focus();
   } else {
-    chatPanel.hidden = true;
+    closeChat();
   }
 });
-document.getElementById('chat-close').addEventListener('click', () => {
-  chatPanel.hidden = true;
-});
+document.getElementById('chat-close').addEventListener('click', closeChat);
 document.getElementById('chat-clear').addEventListener('click', () => {
   for (const el of chatMessagesEl.querySelectorAll('.chat-msg')) el.remove();
   syncChatEmpty();

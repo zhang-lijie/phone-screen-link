@@ -773,3 +773,86 @@ body.nav-text-only #stream .control-button[data-label]::after {
   color: var(--ui-text-muted);
   font-size: calc(11px * var(--ui-font-scale));
 }
+
+/* ---- Chat dock (side-by-side) mode ------------------------------------ */
+/* In floating mode the panel is fixed and the stage holds only the stream.
+   Docked, the stage becomes a row: stream on the left at its locked picture
+   width, chat on the right filling the rest. */
+.stage {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 10px;
+  align-items: stretch;
+}
+
+#stream {
+  min-width: 0;
+}
+
+.chat-head-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.chat-head-actions button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chat-head-actions button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.chat-head-actions button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+body.chat-docked .stage {
+  justify-content: flex-start;
+}
+
+body.chat-docked.chat-centered .stage {
+  justify-content: center;
+}
+
+body.chat-docked #stream {
+  flex: 0 0 auto;
+  width: var(--dock-stream-width, 320px);
+  min-width: 0;
+}
+
+body.chat-docked .chat-panel {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+  flex: 1 1 auto;
+  width: auto;
+  height: auto;
+  min-width: 0;
+}
+
+/* Pseudo fullscreen in dock mode must fullscreen the whole shell so the chat
+   panel stays beside the picture; keep the rail visible so the locked picture
+   width still fits. */
+body.chat-docked.screen-fullscreen .shell {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  height: 100vh;
+  padding: 0;
+}
+
+body.chat-docked.screen-fullscreen #stream {
+  position: relative;
+  inset: auto;
+  z-index: auto;
+}
+
+body.chat-docked.screen-fullscreen #stream .control-buttons-list {
+  display: block;
+}

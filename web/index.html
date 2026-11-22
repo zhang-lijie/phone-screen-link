@@ -22,6 +22,7 @@
       <button type="button" data-key="volume_up" data-i18n="key.volume_up">VOL+</button>
       <button type="button" data-key="power" data-i18n="key.power">POWER</button>
     </div>
+    <div class="stage">
     <div id="stream" data-i18n-aria="nav.screen" aria-label="Phone screen">
       <button type="button" id="fullscreen-toggle" class="fullscreen-toggle" title="窗口全屏" aria-label="窗口全屏">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
@@ -34,6 +35,31 @@
         </svg>
       </button>
     </div>
+    <section id="chat-panel" class="chat-panel" role="dialog" aria-labelledby="chat-title" hidden>
+      <header class="chat-head">
+        <h2 id="chat-title" data-i18n="chat.title">Chat assistant</h2>
+        <div class="chat-head-actions">
+          <button type="button" id="chat-dock" title="Dock chat beside the screen" aria-label="Dock chat beside the screen">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path d="M3 4h8v16H3V4zm10 0h8v16h-8V4z"/>
+            </svg>
+          </button>
+          <button type="button" id="chat-close" data-i18n-aria="chat.close" aria-label="Close chat">&times;</button>
+        </div>
+      </header>
+      <div id="chat-messages" class="chat-messages">
+        <p id="chat-empty" class="chat-empty" data-i18n="chat.empty">Send a message to control the phone.</p>
+      </div>
+      <p id="chat-status" class="chat-status" role="status" aria-live="polite"></p>
+      <form id="chat-form" class="chat-form">
+        <input type="text" id="chat-input" data-i18n-placeholder="chat.placeholder" placeholder="Ask something" autocomplete="off">
+        <button type="submit" id="chat-send" data-i18n="chat.send">Send</button>
+      </form>
+      <footer class="chat-actions">
+        <button type="button" id="chat-clear" data-i18n="chat.clear">Clear chat</button>
+      </footer>
+    </section>
+    </div>
     <div id="status" role="status" aria-live="polite"></div>
   </main>
   <!-- Chat entry point. Hidden until GET /api/chat-config reports enabled. -->
@@ -42,23 +68,6 @@
       <path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-9 9H6v-2h5v2zm7 0h-5v-2h5v2z"/>
     </svg>
   </button>
-  <section id="chat-panel" class="chat-panel" role="dialog" aria-labelledby="chat-title" hidden>
-    <header class="chat-head">
-      <h2 id="chat-title" data-i18n="chat.title">Chat assistant</h2>
-      <button type="button" id="chat-close" data-i18n-aria="chat.close" aria-label="Close chat">&times;</button>
-    </header>
-    <div id="chat-messages" class="chat-messages">
-      <p id="chat-empty" class="chat-empty" data-i18n="chat.empty">Send a message to control the phone.</p>
-    </div>
-    <p id="chat-status" class="chat-status" role="status" aria-live="polite"></p>
-    <form id="chat-form" class="chat-form">
-      <input type="text" id="chat-input" data-i18n-placeholder="chat.placeholder" placeholder="Ask something" autocomplete="off">
-      <button type="submit" id="chat-send" data-i18n="chat.send">Send</button>
-    </form>
-    <footer class="chat-actions">
-      <button type="button" id="chat-clear" data-i18n="chat.clear">Clear chat</button>
-    </footer>
-  </section>
   <div id="settings-overlay" class="settings-overlay" hidden>
     <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="settings-head">
