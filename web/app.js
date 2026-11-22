@@ -95,6 +95,7 @@ const formFields = {
   statusScale: document.getElementById('set-status-scale'),
   navButtonMode: document.getElementById('set-nav-button-mode'),
   wheelSteps: document.getElementById('set-wheel-steps'),
+  volume: document.getElementById('set-volume'),
 };
 
 function fillSettingsForm(values = settings) {
@@ -102,6 +103,7 @@ function fillSettingsForm(values = settings) {
   formFields.maxFps.value = String(values.maxFps);
   formFields.bitrate.value = String(values.bitrate);
   formFields.audio.checked = values.audio;
+  formFields.volume.value = String(values.volume ?? 100);
   formFields.language.value = values.language;
   formFields.uiFontSize.value = String(values.uiFontSize);
   formFields.uiFontColor.value = values.uiFontColor;
@@ -139,6 +141,17 @@ fullscreenToggle.addEventListener('click', () => {
   setFullscreen(!document.body.classList.contains('screen-fullscreen'));
 });
 
+// Phone audio plays in the browser via the engine's AudioPlayer; its volume is
+// a browser-local setting (0..100) applied immediately, no stream restart.
+function applyAudioVolume() {
+  const v = Math.max(0, Math.min(1, Number(settings.volume ?? 100) / 100));
+  window.phoneLinkHandle?.setAudioVolume?.(v);
+}
+document.getElementById('set-volume').addEventListener('input', (event) => {
+  const v = Number(event.target.value);
+  window.phoneLinkHandle?.setAudioVolume?.(v / 100);
+});
+
 function readSettingsForm() {
   return normalizeSettings({
     resolution: formFields.resolution.value,
@@ -154,6 +167,7 @@ function readSettingsForm() {
     statusScale: Number(formFields.statusScale.value),
     navButtonMode: formFields.navButtonMode.value,
     wheelSteps: Number(formFields.wheelSteps.value),
+    volume: Number(formFields.volume.value),
   });
 }
 
@@ -661,6 +675,7 @@ function startStream() {
 
   options.onConnect = (info) => {
     if (gen !== generation) return;
+    applyAudioVolume();
     labelToolbox();
     const degraded = isDegradedStream(info?.resolution, size);
     const canRetry = attempts < ladder.length;
@@ -694,6 +709,7 @@ function startStream() {
 
 function applySettings() {
   settings = saveSettings(localStorage, readSettingsForm());
+  applyAudioVolume();
   ladder = sizeLadder(settings);
   applyLanguage();
   closeSettings();

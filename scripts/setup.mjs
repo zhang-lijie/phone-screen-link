@@ -21,6 +21,70 @@ export const LOOPBACK_PATCH = {
 // Scale wheel-scroll distance by a runtime global so the web page can turn a
 // single wheel tick into a larger phone-screen scroll without re-dispatching
 // N synthetic events (which scrcpy coalesces and delays).
+// Expose audio volume on the public stream handle so the web page can mute or
+// adjust the phone audio that the engine decodes and plays in the browser.
+export const AUDIO_VOLUME_PATCHES = [
+  {
+    file: 'src/app/googDevice/client/StreamClientScrcpy.ts',
+    from: `    public setDpadMode(enabled: boolean): void {
+        this.touchHandler?.setDpadMode(enabled);
+    }`,
+    to: `    public setAudioVolume(volume: number): void {
+        this.audioPlayer?.setVolume(volume);
+    }
+
+    public setDpadMode(enabled: boolean): void {
+        this.touchHandler?.setDpadMode(enabled);
+    }`,
+  },
+  {
+    file: 'src/app/public/types.ts',
+    from: `export interface StreamHandle {
+    stop(): void;
+    readonly isConnected: boolean;
+    readonly deviceId: string;
+}`,
+    to: `export interface StreamHandle {
+    stop(): void;
+    readonly isConnected: boolean;
+    readonly deviceId: string;
+    setAudioVolume?(volume: number): void;
+}`,
+  },
+  {
+    file: 'src/app/public/startStream.ts',
+    from: `    try {
+        const { instance, stop } = StreamClientScrcpy.start(`,
+    to: `    let streamInstance: any;
+    try {
+        const { instance, stop } = StreamClientScrcpy.start(`,
+  },
+  {
+    file: 'src/app/public/startStream.ts',
+    from: `        stopFn = () => {
+            stop();
+            container.removeAttribute(ACTIVE_STREAM_ATTR);
+        };`,
+    to: `        streamInstance = instance;
+        stopFn = () => {
+            stop();
+            container.removeAttribute(ACTIVE_STREAM_ATTR);
+        };`,
+  },
+  {
+    file: 'src/app/public/startStream.ts',
+    from: `    return {
+        stop(): void {
+            if (stopped) return;`,
+    to: `    return {
+        setAudioVolume(volume: number): void {
+            streamInstance?.setAudioVolume?.(volume);
+        },
+        stop(): void {
+            if (stopped) return;`,
+  },
+];
+
 export const WHEEL_SCALE_PATCH = {
   file: 'src/app/interactionHandler/FeaturedInteractionHandler.ts',
   from: `            const hScroll = event.deltaX > 0 ? -1 : event.deltaX < 0 ? 1 : 0;
@@ -51,6 +115,7 @@ function applyPatch(patch, description) {
 function applyEnginePatches() {
   applyPatch(LOOPBACK_PATCH, 'bind 127.0.0.1');
   applyPatch(WHEEL_SCALE_PATCH, 'wheel scroll scale');
+  for (const patch of AUDIO_VOLUME_PATCHES) applyPatch(patch, 'audio volume handle');
 }
 
 export function checkGhostToolchain({ exec = execFileSync, log = console.log } = {}) {

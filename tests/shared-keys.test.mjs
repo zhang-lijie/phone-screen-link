@@ -82,6 +82,10 @@ test('wheel steps are a small validated set, defaulting to 2', () => {
   assert.equal(normalizeSettings({ wheelSteps: 1 }).wheelSteps, 1);
   assert.equal(normalizeSettings({ wheelSteps: 5 }).wheelSteps, 5);
   assert.equal(normalizeSettings({ wheelSteps: 10 }).wheelSteps, 10);
+  assert.equal(normalizeSettings({ volume: 50 }).volume, 50);
+  assert.equal(normalizeSettings({ volume: 200 }).volume, 100);
+  assert.equal(normalizeSettings({ volume: -5 }).volume, 0);
+  assert.equal(normalizeSettings().volume, 100);
   assert.equal(normalizeSettings({ wheelSteps: 11 }).wheelSteps, 2);
   assert.equal(normalizeSettings({ wheelSteps: 0 }).wheelSteps, 2);
   assert.equal(normalizeSettings({ wheelSteps: '3' }).wheelSteps, 3);

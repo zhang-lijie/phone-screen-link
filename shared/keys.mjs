@@ -87,6 +87,7 @@ export const MESSAGES = {
     'settings.railScale': 'Nav bar max size',
     'settings.statusScale': 'Status bar max size',
     'settings.wheelSteps': 'Wheel scroll multiplier',
+    'settings.volume': 'Browser volume',
     'settings.wheel1': '1x',
     'settings.wheel2': '2x',
     'settings.wheel3': '3x',
@@ -237,6 +238,7 @@ export const MESSAGES = {
     'settings.railScale': '导航条最大尺寸',
     'settings.statusScale': '状态条最大尺寸',
     'settings.wheelSteps': '滚轮滚动倍率',
+    'settings.volume': '浏览器播放音量',
     'settings.wheel1': '1×',
     'settings.wheel2': '2×',
     'settings.wheel3': '3×',
@@ -416,6 +418,7 @@ export const DEFAULT_SETTINGS = {
   statusScale: 1,
   navButtonMode: 'both',
   wheelSteps: 2,
+  volume: 100,
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
 
@@ -428,6 +431,12 @@ export const DEFAULT_WHEEL_STEPS = 2;
 
 function pick(value, choices, fallback) {
   return choices.includes(value) ? value : fallback;
+}
+
+function clampVolume(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.volume;
+  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 export function normalizeSettings(raw = {}) {
@@ -445,6 +454,7 @@ export function normalizeSettings(raw = {}) {
     statusScale: pick(Number(raw?.statusScale), STATUS_SCALES, DEFAULT_SETTINGS.statusScale),
     navButtonMode: pick(raw?.navButtonMode, NAV_BUTTON_MODES, DEFAULT_SETTINGS.navButtonMode),
     wheelSteps: pick(Number(raw?.wheelSteps), WHEEL_SCALE_CHOICES, DEFAULT_SETTINGS.wheelSteps),
+    volume: clampVolume(raw?.volume),
   };
 }
 
