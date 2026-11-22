@@ -90,7 +90,13 @@ export const MESSAGES = {
     'settings.wheel1': '1 step',
     'settings.wheel2': '2 steps',
     'settings.wheel3': '3 steps',
+    'settings.wheel4': '4 steps',
     'settings.wheel5': '5 steps',
+    'settings.wheel6': '6 steps',
+    'settings.wheel7': '7 steps',
+    'settings.wheel8': '8 steps',
+    'settings.wheel9': '9 steps',
+    'settings.wheel10': '10 steps',
     'settings.groupStream': 'Stream',
     'settings.groupControl': 'Control',
     'settings.groupDisplay': 'Display',
@@ -234,7 +240,13 @@ export const MESSAGES = {
     'settings.wheel1': '1 步',
     'settings.wheel2': '2 步',
     'settings.wheel3': '3 步',
+    'settings.wheel4': '4 步',
     'settings.wheel5': '5 步',
+    'settings.wheel6': '6 步',
+    'settings.wheel7': '7 步',
+    'settings.wheel8': '8 步',
+    'settings.wheel9': '9 步',
+    'settings.wheel10': '10 步',
     'settings.groupStream': '投屏设置',
     'settings.groupControl': '控制设置',
     'settings.groupDisplay': '显示设置',
@@ -411,7 +423,7 @@ export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
 // scrolled per browser wheel event. The engine converts one browser wheel
 // tick into a single "swipe" message, so the phone screen (1152 CSS px tall)
 // needs ~20 ticks to scroll fully — hence a multiplier here.
-export const WHEEL_SCALE_CHOICES = [1, 2, 3, 5];
+export const WHEEL_SCALE_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
 export const DEFAULT_WHEEL_STEPS = 2;
 
 function pick(value, choices, fallback) {

@@ -75,14 +75,15 @@ test('the size ladder runs best first and a fixed resolution is requestable', ()
 });
 
 test('wheel steps are a small validated set, defaulting to 2', () => {
-  assert.deepEqual(WHEEL_SCALE_CHOICES, [1, 2, 3, 5]);
+  assert.deepEqual(WHEEL_SCALE_CHOICES, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(DEFAULT_WHEEL_STEPS, 2);
   assert.equal(DEFAULT_SETTINGS.wheelSteps, 2);
   assert.equal(normalizeSettings().wheelSteps, 2);
   assert.equal(normalizeSettings({ wheelSteps: 1 }).wheelSteps, 1);
   assert.equal(normalizeSettings({ wheelSteps: 5 }).wheelSteps, 5);
+  assert.equal(normalizeSettings({ wheelSteps: 10 }).wheelSteps, 10);
+  assert.equal(normalizeSettings({ wheelSteps: 11 }).wheelSteps, 2);
   assert.equal(normalizeSettings({ wheelSteps: 0 }).wheelSteps, 2);
-  assert.equal(normalizeSettings({ wheelSteps: 4 }).wheelSteps, 2);
   assert.equal(normalizeSettings({ wheelSteps: '3' }).wheelSteps, 3);
 });
 
