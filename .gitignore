@@ -1,4 +1,5 @@
 engine/
+engine
 node_modules/
 state/
 *.log

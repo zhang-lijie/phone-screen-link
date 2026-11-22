@@ -165,6 +165,29 @@ export const KEYBOARD_FOCUS_PATCH = {
         const keyCode = KeyToCodeMap.get(keyboardEvent.code);`,
 };
 
+// UHID input is an alternative keyboard path enabled from the engine toolbox.
+// It bypasses KeyInputHandler entirely, so it needs the same focus guard or
+// typing in the chat/settings fields still drives the phone.
+const UHID_EDITABLE_GUARD = `        const target = event.target;
+        if (
+            target instanceof HTMLElement &&
+            (target.isContentEditable ||
+                target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.tagName === 'SELECT')
+        ) {
+            return;
+        }
+`;
+
+export const UHID_KEYBOARD_FOCUS_PATCHES = ['KeyDown', 'KeyUp'].map((suffix) => ({
+  file: 'src/app/googDevice/UhidKeyboardHandler.ts',
+  from: `    private on${suffix}(event: KeyboardEvent): void {
+        event.preventDefault();`,
+  to: `    private on${suffix}(event: KeyboardEvent): void {
+${UHID_EDITABLE_GUARD}        event.preventDefault();`,
+}));
+
 function run(command, args, cwd) {
   console.log(`+ ${command} ${args.join(' ')}`);
   execFileSync(command, args, { cwd, stdio: 'inherit' });
@@ -187,6 +210,7 @@ function applyEnginePatches() {
   applyPatch(LOOPBACK_PATCH, 'bind 127.0.0.1');
   applyPatch(WHEEL_SCALE_PATCH, 'wheel scroll scale');
   applyPatch(KEYBOARD_FOCUS_PATCH, 'keyboard focus handoff');
+  for (const patch of UHID_KEYBOARD_FOCUS_PATCHES) applyPatch(patch, 'UHID keyboard focus handoff');
   for (const patch of AUDIO_VOLUME_PATCHES) applyPatch(patch, 'audio volume handle');
   for (const patch of RESIZE_PATCHES) applyPatch(patch, 'resize handle');
 }

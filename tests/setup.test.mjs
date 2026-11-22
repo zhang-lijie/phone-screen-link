@@ -6,6 +6,7 @@ import {
   engineDir,
   LOOPBACK_PATCH,
   KEYBOARD_FOCUS_PATCH,
+  UHID_KEYBOARD_FOCUS_PATCHES,
   checkGhostToolchain,
 } from '../scripts/setup.mjs';
 
@@ -27,6 +28,22 @@ test('keyboard-focus patch guards KeyInputHandler for editable targets', () => {
   assert.match(KEYBOARD_FOCUS_PATCH.from, /KeyToCodeMap\.get\(keyboardEvent\.code\)/);
   for (const needle of ['isContentEditable', 'INPUT', 'TEXTAREA', 'SELECT', 'return;']) {
     assert.ok(KEYBOARD_FOCUS_PATCH.to.includes(needle), `patch must include ${needle}`);
+  }
+});
+
+test('UHID keyboard-focus patches guard keydown and keyup for editable targets', () => {
+  assert.equal(UHID_KEYBOARD_FOCUS_PATCHES.length, 2);
+  for (const patch of UHID_KEYBOARD_FOCUS_PATCHES) {
+    assert.equal(patch.file, 'src/app/googDevice/UhidKeyboardHandler.ts');
+    assert.match(patch.from, /private onKey(Down|Up)\(event: KeyboardEvent\): void/);
+    assert.match(patch.from, /event\.preventDefault\(\)/);
+    for (const needle of ['isContentEditable', 'INPUT', 'TEXTAREA', 'SELECT', 'return;']) {
+      assert.ok(patch.to.includes(needle), `patch must include ${needle}`);
+    }
+    assert.ok(
+      patch.to.indexOf('return;') < patch.to.indexOf('event.preventDefault()'),
+      'guard must run before preventDefault',
+    );
   }
 });
 
