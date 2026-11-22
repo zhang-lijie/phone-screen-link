@@ -143,6 +143,28 @@ export const WHEEL_SCALE_PATCH = {
             const vScroll = (event.deltaY > 0 ? -1 : event.deltaY < 0 ? 1 : 0) * scale;`,
 };
 
+// Focus decides who owns the keyboard: while a text field has focus, its keys
+// must stay in the browser instead of being forwarded to the phone.
+export const KEYBOARD_FOCUS_PATCH = {
+  file: 'src/app/googDevice/KeyInputHandler.ts',
+  from: `    private static handler = (event: Event): void => {
+        const keyboardEvent = event as KeyboardEvent;
+        const keyCode = KeyToCodeMap.get(keyboardEvent.code);`,
+  to: `    private static handler = (event: Event): void => {
+        const keyboardEvent = event as KeyboardEvent;
+        const target = keyboardEvent.target;
+        if (
+            target instanceof HTMLElement &&
+            (target.isContentEditable ||
+                target.tagName === 'INPUT' ||
+                target.tagName === 'TEXTAREA' ||
+                target.tagName === 'SELECT')
+        ) {
+            return;
+        }
+        const keyCode = KeyToCodeMap.get(keyboardEvent.code);`,
+};
+
 function run(command, args, cwd) {
   console.log(`+ ${command} ${args.join(' ')}`);
   execFileSync(command, args, { cwd, stdio: 'inherit' });
@@ -164,6 +186,7 @@ function applyPatch(patch, description) {
 function applyEnginePatches() {
   applyPatch(LOOPBACK_PATCH, 'bind 127.0.0.1');
   applyPatch(WHEEL_SCALE_PATCH, 'wheel scroll scale');
+  applyPatch(KEYBOARD_FOCUS_PATCH, 'keyboard focus handoff');
   for (const patch of AUDIO_VOLUME_PATCHES) applyPatch(patch, 'audio volume handle');
   for (const patch of RESIZE_PATCHES) applyPatch(patch, 'resize handle');
 }
