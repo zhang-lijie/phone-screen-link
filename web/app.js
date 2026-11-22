@@ -32,53 +32,13 @@ const statusEl = document.getElementById('status');
 // click and cover the picture. Keep the mousedown control, drop only the menu.
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 
-// Wheel-scroll amplification. The engine converts one browser wheel tick into
-// a single "swipe" message, so the phone screen (1152 CSS px tall) needs ~20
-// ticks to scroll fully. When the user opts into N steps per tick, intercept
-// the wheel on the touch layer (capture: before the engine's body listener)
-// and re-dispatch N synthetic events. The engine throttles same-direction
-// events within 30 ms, so spacing the copies 40 ms apart keeps all of them
-// from reaching ghost.
-let wheelBurstActive = false;
-streamEl.addEventListener('wheel', (event) => {
-  if (event.__wheelAmplified) return; // our own synthetic copy, let it through
-  const steps = Math.max(1, Number(settings.wheelSteps ?? 1));
-  if (steps <= 1) return; // native behavior, engine's own handler
-  if (event.target !== streamEl.querySelector('canvas.touch-layer')) return;
-  event.preventDefault();
-  event.stopPropagation(); // the engine's handler only runs on dispatch
-  if (wheelBurstActive) return;
-  wheelBurstActive = true;
-  setTimeout(() => { wheelBurstActive = false; }, steps * 90 + 120);
-  let fired = 0;
-  const tick = () => {
-    if (fired >= steps) return;
-    fired += 1;
-    // Re-query on every dispatch: applySettings() replaces the canvas, so a
-    // captured `event.target` can be detached by the time the delayed ticks
-    // fire — dispatching on a detached node never reaches the engine's body
-    // listener. Use the original coords, which stay valid in the new layout.
-    const target = streamEl.querySelector('canvas.touch-layer');
-    if (target) {
-      const copy = new WheelEvent('wheel', {
-        bubbles: true,
-        cancelable: true,
-        composed: true,
-        clientX: event.clientX,
-        clientY: event.clientY,
-        deltaX: event.deltaX,
-        deltaY: event.deltaY,
-        deltaMode: event.deltaMode,
-      });
-      copy.__wheelAmplified = true;
-      target.dispatchEvent(copy);
-    }
-    // Space copies well past the engine's 30 ms throttle and scrcpy's input
-    // burst coalescing; ~90 ms keeps each swipe a distinct scroll motion.
-    if (fired < steps) setTimeout(tick, 90);
-  };
-  tick();
-}, true);
+// Wheel-scroll amplitude: a single wheel tick maps to `wheelSteps` times the
+// engine's default scroll distance. The engine reads window.__wheelScrollScale
+// (patched in via scripts/setup.mjs), so changing the setting takes effect
+// immediately without re-dispatching N events or restarting the stream.
+function applyWheelScale() {
+  window.__wheelScrollScale = Math.max(1, Number(settings.wheelSteps) || 1);
+}
 
 // The engine builds its own toolbox (screenshot, clipboard, stats, input
 // modes). Its icons carry an English tooltip but no visible text, so the
@@ -104,6 +64,7 @@ const TOOLBOX_LABELS = new Map([
 // Settings come from localStorage and are validated before they reach the
 // engine — a stale/tampered value must not break the stream or the UI.
 let settings = loadSettings(localStorage);
+applyWheelScale();
 let ladder = sizeLadder(settings);
 let lang = effectiveLanguage(settings, navigator.language);
 let screenState = {};
@@ -212,6 +173,7 @@ document.getElementById('settings-reset').addEventListener('click', () => {
 document.getElementById('settings-apply').addEventListener('click', applySettings);
 
 function applyTypography() {
+  applyWheelScale();
   const root = document.documentElement;
   root.style.setProperty('--ui-font-scale', String(settings.uiFontSize));
   root.style.setProperty('--ui-text-color', settings.uiFontColor);
