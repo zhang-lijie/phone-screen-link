@@ -88,7 +88,9 @@ export function validateToolArgs(name, args, definitions) {
   }
 
   const schema = def.inputSchema ?? {};
-  const required = Array.isArray(schema.required) ? schema.required : [];
+  // `device` is injected by the MCP client from the configured serial. It is
+  // a transport concern, so the model is not required to supply it.
+  const required = (Array.isArray(schema.required) ? schema.required : []).filter((f) => f !== 'device');
   for (const field of required) {
     if (!Object.hasOwn(args, field)) {
       return { ok: false, error: `${name} requires field: ${field}` };
@@ -97,6 +99,7 @@ export function validateToolArgs(name, args, definitions) {
 
   const properties = schema.properties ?? {};
   for (const [field, prop] of Object.entries(properties)) {
+    if (field === 'device') continue;
     if (!Object.hasOwn(args, field) || !prop || typeof prop.type !== 'string') continue;
     if (!typeMatches(args[field], prop.type)) {
       return { ok: false, error: `${name}.${field} must be a ${prop.type}` };

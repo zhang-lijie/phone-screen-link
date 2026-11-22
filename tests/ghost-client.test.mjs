@@ -115,11 +115,11 @@ test('ghost client: callTool() passes { name, arguments } to the MCP client and 
   deps.clients[0].callToolResult = { content: [{ type: 'text', text: 'screen on' }] };
 
   const result = await client.callTool('get_phone_state', {});
-  assert.deepEqual(deps.clients[0].callToolCalls, [{ name: 'get_phone_state', arguments: {} }]);
+  assert.deepEqual(deps.clients[0].callToolCalls, [{ name: 'get_phone_state', arguments: { device: SERIAL } }]);
   assert.deepEqual(result, { content: [{ type: 'text', text: 'screen on' }] });
 
   await client.callTool('tap', { x: 10, y: 20 });
-  assert.deepEqual(deps.clients[0].callToolCalls[1], { name: 'tap', arguments: { x: 10, y: 20 } });
+  assert.deepEqual(deps.clients[0].callToolCalls[1], { name: 'tap', arguments: { x: 10, y: 20, device: SERIAL } });
 });
 
 test('ghost client: stop() closes the client and is safe to call repeatedly', async () => {
@@ -204,4 +204,26 @@ test('ghost client: start() can be repeated after stop()', async () => {
   await client.start();
   assert.equal(deps.transports.length, 2);
   assert.equal(deps.clients[1].connects[0], deps.transports[1]);
+});
+
+test('ghost client: callTool overrides a wrong device with the configured serial', async () => {
+  const deps = makeDeps();
+  const client = createGhostClient({ serial: SERIAL }, deps);
+  await client.start();
+  deps.clients[0].tools = [
+    { name: 'tap', inputSchema: { type: 'object', properties: { device: { type: 'string' }, x: { type: 'integer' } }, required: ['device', 'x'] } },
+    { name: 'wait', inputSchema: { type: 'object', properties: { seconds: { type: 'number' } }, required: ['seconds'] } },
+  ];
+  await client.listTools();
+
+  await client.callTool('tap', { device: 'wrong-serial', x: 5 });
+  assert.deepEqual(deps.clients[0].callToolCalls[0], {
+    name: 'tap', arguments: { device: SERIAL, x: 5 },
+  });
+
+  // Tools that do not require a device must not receive an extra argument.
+  await client.callTool('wait', { seconds: 1 });
+  assert.deepEqual(deps.clients[0].callToolCalls[1], {
+    name: 'wait', arguments: { seconds: 1 },
+  });
 });

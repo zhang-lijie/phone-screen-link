@@ -106,7 +106,10 @@ function fakeRuntime(overrides = {}) {
     publicConfig: () => ({}),
   };
   const deps = {
-    adb: { ensureUsbOnly: async () => { calls.ensureUsb += 1; } },
+    adb: {
+      ensureUsbOnly: async () => { calls.ensureUsb += 1; },
+      isLocked: async () => true,
+    },
     engineDir: () => '/x/engine',
     copyWeb: () => { calls.copy += 1; },
     createGhostClient: (options) => { calls.ghostOptions = options; return ghost; },
@@ -279,7 +282,7 @@ test('chat.run goes through the agent loop and the phone-state gate', async () =
 
   assert.match(turn.reply, /解锁/);
   assert.deepEqual(turn.steps, []);
-  assert.deepEqual(calls.ghostCalls.map((c) => c.name), ['get_phone_state']);
+  assert.deepEqual(calls.ghostCalls.map((c) => c.name), [], 'lock check uses ADB, not a ghost tool');
   assert.equal(calls.ghostListTools, 0);
 
   await handlers.get('SIGINT')();

@@ -124,3 +124,18 @@ test('chat tools: validateToolArgs rejects a denied tool even when its definitio
   assert.equal(result.ok, false);
   assert.match(result.error, /shell/);
 });
+
+test('chat tools: device is transport-injected and not required from the model', () => {
+  const defs = [{
+    name: 'tap',
+    inputSchema: {
+      type: 'object',
+      properties: { device: { type: 'string' }, x: { type: 'integer' }, y: { type: 'integer' } },
+      required: ['device', 'x', 'y'],
+    },
+  }];
+  // The model only supplies business arguments; the MCP client fills device.
+  assert.deepEqual(validateToolArgs('tap', { x: 1, y: 2 }, defs), { ok: true });
+  // A wrong type from the model is still caught for real business fields.
+  assert.equal(validateToolArgs('tap', { x: '1', y: 2 }, defs).ok, false);
+});

@@ -44,6 +44,19 @@ export function createAdb(runner = defaultRunner) {
     async isOnline() {
       return (await list()).includes(DEFAULT_USB_SERIAL);
     },
+
+    // Real lock/sleep state from ADB. ghost's get_phone_state returns the
+    // current app/activity only (no lock info), so the chat gate uses this
+    // instead. Unreadable state fails closed: a possibly locked device must
+    // never reach the model or action tools.
+    async isLocked() {
+      const serialArgs = ['-s', DEFAULT_USB_SERIAL, 'shell'];
+      const power = await runner([...serialArgs, 'dumpsys', 'power']);
+      const wake = /mWakefulness=(\w+)/.exec(power)?.[1];
+      if (wake !== 'Awake') return true; // asleep or unreadable
+      const trust = await runner([...serialArgs, 'dumpsys', 'trust']);
+      return /deviceLocked=1\b/.test(trust);
+    },
   };
 }
 

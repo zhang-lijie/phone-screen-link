@@ -49,40 +49,6 @@ function textOf(result) {
     .join('\n');
 }
 
-function truthyLocked(value) {
-  return value === true || String(value).toLowerCase() === 'true';
-}
-
-// Lock state truth comes from ghost's get_phone_state only. ghost tools often
-// return prose, some return JSON; structuredContent is the MCP standard slot.
-// Anything we cannot read is treated as locked (fail closed): a possibly
-// locked/asleep device must never reach the model or action tools.
-function isPhoneLocked(result) {
-  if (result?.isError === true) return true;
-  const structured = result?.structuredContent;
-  if (structured && typeof structured === 'object' && Object.hasOwn(structured, 'locked')) {
-    return truthyLocked(structured.locked);
-  }
-  const text = textOf(result);
-  try {
-    const parsed = JSON.parse(text);
-    if (parsed && typeof parsed === 'object' && Object.hasOwn(parsed, 'locked')) {
-      return truthyLocked(parsed.locked);
-    }
-  } catch {
-    // fall through to prose matching
-  }
-  // Explicit negatives first, so prose like `locked: false` is not swallowed
-  // by the \blocked\b indicator below.
-  if (/locked["']?\s*[:=]\s*false|\bnot locked\b/i.test(text)) return false;
-  // Locked-true indicators are checked BEFORE any "unlocked" pattern, with
-  // word boundaries so "unlocked" does not substring-match \blocked\b:
-  // negations like "locked (not unlocked)" must fail closed, not open.
-  if (/\blocked\b|screen off|asleep|not unlocked|unlock required/i.test(text)) return true;
-  if (/\bunlocked\b/i.test(text)) return false;
-  return true; // unrecognized shape: fail closed
-}
-
 // screenshot comes back as MCP image content; OpenAI vision needs a data URI.
 function imageDataUriOf(result) {
   const parts = Array.isArray(result?.content) ? result.content : [];
@@ -149,9 +115,20 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
     ? Math.floor(config.maxSteps)
     : DEFAULT_MAX_STEPS;
 
-  // Backend-side lock gate: never call the model or any action tool when locked.
-  const state = await callTool('get_phone_state', {});
-  if (isPhoneLocked(state)) {
+  // Backend-side lock gate: never call the model or any action tool when
+  // locked/asleep. The check is injected by the caller (ADB-backed in
+  // production) because ghost's get_phone_state reports the current app,
+  // not lock state. A missing or failing checker fails closed.
+  let locked = true;
+  try {
+    if (typeof deps.isLocked === 'function') {
+      const value = await deps.isLocked();
+      locked = typeof value === 'boolean' ? value : true;
+    }
+  } catch {
+    locked = true;
+  }
+  if (locked) {
     return { reply: t.locked, steps: [] };
   }
 

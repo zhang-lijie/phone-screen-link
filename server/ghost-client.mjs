@@ -21,6 +21,9 @@ export function createGhostClient(
   const TransportImpl = deps.StdioClientTransport ?? StdioClientTransport;
 
   let client = null;
+  // Names of tools whose schema requires a `device` argument. Populated by
+  // listTools(); null until then (we inject conservatively in that case).
+  let deviceRequiredTools = null;
 
   async function start() {
     if (client) return;
@@ -61,11 +64,23 @@ export function createGhostClient(
 
   async function listTools() {
     const result = await requireClient().listTools();
-    return Array.isArray(result?.tools) ? result.tools : [];
+    const tools = Array.isArray(result?.tools) ? result.tools : [];
+    deviceRequiredTools = new Set(
+      tools
+        .filter((tool) => Array.isArray(tool?.inputSchema?.required) && tool.inputSchema.required.includes('device'))
+        .map((tool) => tool.name),
+    );
+    return tools;
   }
 
   async function callTool(name, toolArgs = {}) {
-    return requireClient().callTool({ name, arguments: toolArgs });
+    const args = { ...toolArgs };
+    // ghost tools are device-scoped. Inject/override the serial so neither
+    // internal calls nor model-generated calls can target the wrong device.
+    if (serial && (deviceRequiredTools === null || deviceRequiredTools.has(name))) {
+      args.device = serial;
+    }
+    return requireClient().callTool({ name, arguments: args });
   }
 
   return { start, stop, listTools, callTool };

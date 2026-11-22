@@ -237,7 +237,16 @@ export async function main(deps = {}) {
     // The bridge passes the config it already loaded for the enablement gate;
     // re-loading here would race a concurrent settings save (TOCTOU).
     const chat = ghost
-      ? { run: (userText, lang, config) => runAgentTurn({ config, ghost, userText, lang }) }
+      ? {
+          run: (userText, lang, config) => runAgentTurn({
+            config,
+            ghost,
+            userText,
+            lang,
+            // Real lock/sleep state comes from ADB; ghost has no lock tool.
+            deps: { isLocked: () => adbClient.isLocked() },
+          }),
+        }
       : undefined;
 
     bridge = makeBridge({ adb: adbClient, port: bridgeStep.port, chatConfig, chat });

@@ -18,20 +18,22 @@ function ghostTools() {
   ];
 }
 
-function fakeDeps({ stateText = '{"locked": false}', responses = [], toolResults = {} } = {}) {
+function fakeDeps({ locked = false, responses = [], toolResults = {} } = {}) {
   const deps = {
     listToolsCalls: 0,
+    isLockedCalls: 0,
     ghostCalls: [],
     chatCalls: [],
+    async isLocked() {
+      deps.isLockedCalls += 1;
+      return locked;
+    },
     async listTools() {
       deps.listToolsCalls += 1;
       return ghostTools();
     },
     async callTool(name, args) {
       deps.ghostCalls.push([name, args]);
-      if (name === 'get_phone_state') {
-        return { content: [{ type: 'text', text: stateText }] };
-      }
       return toolResults[name] ?? { content: [{ type: 'text', text: `${name} done` }] };
     },
     async chatCompletion(params) {
@@ -57,7 +59,7 @@ function makeConfig(overrides = {}) {
 
 test('agent loop: locked phone returns unlock hint without calling the model', async () => {
   const deps = fakeDeps({
-    stateText: '{"locked": true, "screenOn": false}',
+    locked: true,
     responses: [{ content: 'must not be reached', toolCalls: [] }],
   });
 
@@ -71,13 +73,14 @@ test('agent loop: locked phone returns unlock hint without calling the model', a
 
   assert.equal(deps.chatCalls.length, 0, 'model must not be called while locked');
   assert.equal(deps.listToolsCalls, 0, 'tools must not even be listed while locked');
-  assert.deepEqual(deps.ghostCalls, [['get_phone_state', {}]]);
+  assert.deepEqual(deps.ghostCalls, []);
+  assert.equal(deps.isLockedCalls, 1);
   assert.deepEqual(result.steps, []);
   assert.match(result.reply, /解锁/);
 });
 
-test('agent loop: lock detection also understands prose state output', async () => {
-  const lockedDeps = fakeDeps({ stateText: 'The device is currently locked.' });
+test('agent loop: lock gate uses the injected lock checker', async () => {
+  const lockedDeps = fakeDeps({ locked: true });
   const locked = await runAgentTurn({
     config: makeConfig(),
     userText: 'open settings',
@@ -88,7 +91,7 @@ test('agent loop: lock detection also understands prose state output', async () 
   assert.equal(lockedDeps.chatCalls.length, 0);
 
   const unlockedDeps = fakeDeps({
-    stateText: 'Device is unlocked, screen on.',
+    locked: false,
     responses: [{ content: 'ok', toolCalls: [] }],
   });
   const unlocked = await runAgentTurn({ config: makeConfig(), userText: 'hi', lang: 'en', deps: unlockedDeps });
@@ -96,27 +99,14 @@ test('agent loop: lock detection also understands prose state output', async () 
   assert.equal(unlockedDeps.chatCalls.length, 1);
 });
 
-test('agent loop: negation prose cannot fail the lock gate open', async () => {
-  const lockedTexts = [
-    'Screen is locked (not unlocked)',
-    'Device is not unlocked.',
-    'unlock required',
-    'screen off',
-  ];
-  for (const stateText of lockedTexts) {
-    const deps = fakeDeps({ stateText });
+test('agent loop: lock gate fails closed if the lock checker throws', async () => {
+  for (const fail of [async () => { throw new Error('adb offline'); }, async () => undefined]) {
+    const deps = fakeDeps({ responses: [{ content: 'must not be reached', toolCalls: [] }] });
+    deps.isLocked = fail;
     const result = await runAgentTurn({ config: makeConfig(), userText: 'hi', lang: 'en', deps });
-    assert.equal(deps.chatCalls.length, 0, `"${stateText}" must be treated as locked`);
+    assert.equal(deps.chatCalls.length, 0);
     assert.deepEqual(result.steps, []);
     assert.match(result.reply, /locked or asleep/i);
-  }
-
-  const unlockedTexts = ['Device is unlocked, screen on.', 'locked: false', 'The device is not locked.'];
-  for (const stateText of unlockedTexts) {
-    const deps = fakeDeps({ stateText, responses: [{ content: 'ok', toolCalls: [] }] });
-    const result = await runAgentTurn({ config: makeConfig(), userText: 'hi', lang: 'en', deps });
-    assert.equal(result.reply, 'ok', `"${stateText}" must be treated as unlocked`);
-    assert.equal(deps.chatCalls.length, 1);
   }
 });
 
@@ -202,7 +192,7 @@ test('agent loop: refuses non-whitelisted tool without calling ghost and says so
 
   const result = await runAgentTurn({ config: makeConfig(), userText: '运行命令', lang: 'zh', deps });
 
-  assert.deepEqual(deps.ghostCalls, [['get_phone_state', {}]], 'shell must never reach ghost');
+  assert.deepEqual(deps.ghostCalls, [], 'shell must never reach ghost');
   assert.deepEqual(result.steps, [{ tool: 'shell', ok: false }]);
   assert.match(result.reply, /shell/);
   assert.match(result.reply, /拒绝/);
@@ -220,10 +210,7 @@ test('agent loop: runs a valid tap via ghost then returns the final text', async
 
   const result = await runAgentTurn({ config: makeConfig(), userText: '点一下 (10,20)', lang: 'zh', deps });
 
-  assert.deepEqual(deps.ghostCalls, [
-    ['get_phone_state', {}],
-    ['tap', { x: 10, y: 20 }],
-  ]);
+  assert.deepEqual(deps.ghostCalls, [['tap', { x: 10, y: 20 }]]);
   assert.deepEqual(result.steps, [{ tool: 'tap', ok: true }]);
   assert.equal(result.reply, '已点击目标');
 
@@ -253,7 +240,7 @@ test('agent loop: invalid tool arguments never reach ghost and the reply explain
 
   const result = await runAgentTurn({ config: makeConfig(), userText: '点一下', lang: 'zh', deps });
 
-  assert.deepEqual(deps.ghostCalls, [['get_phone_state', {}]], 'bad args must not reach ghost');
+  assert.deepEqual(deps.ghostCalls, [], 'bad args must not reach ghost');
   assert.deepEqual(result.steps, [{ tool: 'tap', ok: false }]);
   assert.match(result.reply, /requires field: y/);
 });
@@ -314,7 +301,7 @@ test('agent loop: screenshot disabled in config means the tool is not offered an
 
   const sentNames = deps.chatCalls[0].tools.map((t) => t.function.name);
   assert.ok(!sentNames.includes('screenshot'), 'disabled screenshot must not be offered');
-  assert.deepEqual(deps.ghostCalls, [['get_phone_state', {}]], 'disabled screenshot must not run');
+  assert.deepEqual(deps.ghostCalls, [], 'disabled screenshot must not run');
   assert.deepEqual(result.steps, [{ tool: 'screenshot', ok: false }]);
   assert.match(result.reply, /screenshot/);
 });
@@ -415,37 +402,12 @@ test('agent loop: one vision user message with all image parts comes after every
   );
 });
 
-test('agent loop: an errored or unreadable get_phone_state fails closed as locked', async () => {
-  const errorDeps = fakeDeps({});
-  const innerCall = errorDeps.callTool;
-  errorDeps.callTool = async (name, args) => {
-    if (name !== 'get_phone_state') return innerCall(name, args);
-    errorDeps.ghostCalls.push([name, args]);
-    return { content: [{ type: 'text', text: 'adb device offline' }], isError: true };
-  };
-
-  const errored = await runAgentTurn({
-    config: makeConfig(),
-    userText: 'tap something',
-    lang: 'zh',
-    deps: errorDeps,
-  });
-  assert.equal(errorDeps.chatCalls.length, 0, 'unreadable state must not reach the model');
-  assert.deepEqual(errorDeps.ghostCalls, [['get_phone_state', {}]], 'no action tool may run');
-  assert.deepEqual(errored.steps, []);
-  assert.match(errored.reply, /解锁/);
-
-  const proseDeps = fakeDeps({ stateText: 'adb device offline' });
-  const unreadable = await runAgentTurn({
-    config: makeConfig(),
-    userText: 'open settings',
-    lang: 'en',
-    deps: proseDeps,
-  });
-  assert.equal(proseDeps.chatCalls.length, 0);
-  assert.deepEqual(proseDeps.ghostCalls, [['get_phone_state', {}]]);
-  assert.deepEqual(unreadable.steps, []);
-  assert.match(unreadable.reply, /locked or asleep/i);
+test('agent loop: no ghost lock-state tool call is needed before the model runs', async () => {
+  const deps = fakeDeps({ responses: [{ content: 'ok', toolCalls: [] }] });
+  const result = await runAgentTurn({ config: makeConfig(), userText: 'hi', lang: 'en', deps });
+  assert.equal(result.reply, 'ok');
+  assert.equal(deps.isLockedCalls, 1);
+  assert.equal(deps.ghostCalls.length, 0, 'no bogus lock-state tool call before the model');
 });
 
 test('agent loop: system prompt is localized and requires same-language replies and no unlock', async () => {
