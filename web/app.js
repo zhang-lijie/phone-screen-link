@@ -41,6 +41,7 @@ document.addEventListener('contextmenu', (event) => event.preventDefault());
 // from reaching ghost.
 let wheelBurstActive = false;
 streamEl.addEventListener('wheel', (event) => {
+  if (event.__wheelAmplified) return; // our own synthetic copy, let it through
   const steps = Math.max(1, Number(settings.wheelSteps ?? 1));
   if (steps <= 1) return; // native behavior, engine's own handler
   if (event.target !== streamEl.querySelector('canvas.touch-layer')) return;
@@ -48,22 +49,33 @@ streamEl.addEventListener('wheel', (event) => {
   event.stopPropagation(); // the engine's handler only runs on dispatch
   if (wheelBurstActive) return;
   wheelBurstActive = true;
-  setTimeout(() => { wheelBurstActive = false; }, steps * 40 + 120);
+  setTimeout(() => { wheelBurstActive = false; }, steps * 90 + 120);
   let fired = 0;
   const tick = () => {
     if (fired >= steps) return;
     fired += 1;
-    event.target.dispatchEvent(new WheelEvent('wheel', {
-      bubbles: true,
-      cancelable: true,
-      composed: true,
-      clientX: event.clientX,
-      clientY: event.clientY,
-      deltaX: event.deltaX,
-      deltaY: event.deltaY,
-      deltaMode: event.deltaMode,
-    }));
-    if (fired < steps) setTimeout(tick, 40);
+    // Re-query on every dispatch: applySettings() replaces the canvas, so a
+    // captured `event.target` can be detached by the time the delayed ticks
+    // fire — dispatching on a detached node never reaches the engine's body
+    // listener. Use the original coords, which stay valid in the new layout.
+    const target = streamEl.querySelector('canvas.touch-layer');
+    if (target) {
+      const copy = new WheelEvent('wheel', {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        clientX: event.clientX,
+        clientY: event.clientY,
+        deltaX: event.deltaX,
+        deltaY: event.deltaY,
+        deltaMode: event.deltaMode,
+      });
+      copy.__wheelAmplified = true;
+      target.dispatchEvent(copy);
+    }
+    // Space copies well past the engine's 30 ms throttle and scrcpy's input
+    // burst coalescing; ~90 ms keeps each swipe a distinct scroll motion.
+    if (fired < steps) setTimeout(tick, 90);
   };
   tick();
 }, true);
