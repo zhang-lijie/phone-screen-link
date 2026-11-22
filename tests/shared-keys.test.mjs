@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BITRATE_CHOICES,
+  CHAT_POSITION_KEY,
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
   FPS_CHOICES,
@@ -19,6 +20,7 @@ import {
   STATUS_SCALES,
   UI_FONT_SCALES,
   buildStreamOptions,
+  clampPanelPosition,
   effectiveLanguage,
   isDegradedStream,
   isUsableContext,
@@ -26,7 +28,9 @@ import {
   lockHint,
   negotiatedMaxDimension,
   normalizeSettings,
+  readChatPosition,
   saveSettings,
+  writeChatPosition,
   sizeLadder,
   translate,
   translateStatLine,
@@ -262,4 +266,28 @@ test('every engine-owned English string has a translation in both languages', ()
   assert.equal(ENGINE_TEXT_KEYS['Device clipboard ready —'], 'engine.clipboardReady');
   assert.equal(ENGINE_TEXT_KEYS['device is locked — unlock it to see the screen'], 'engine.locked');
   assert.equal(translate('zh', ENGINE_TEXT_KEYS['Refresh stream']), '刷新画面');
+});
+
+test('chat drag: clampPanelPosition keeps part of the panel on screen', () => {
+  // 340x440 panel in a 1280x800 viewport with a 40px visible margin.
+  assert.deepEqual(clampPanelPosition(100, 120, 340, 440, 1280, 800), { x: 100, y: 120 });
+  // The drag handle (head) must remain reachable, so y never goes above 0.
+  assert.deepEqual(clampPanelPosition(-1000, -1000, 340, 440, 1280, 800), { x: -300, y: 0 });
+  assert.deepEqual(clampPanelPosition(9999, 9999, 340, 440, 1280, 800), { x: 1240, y: 760 });
+});
+
+test('chat drag: position storage accepts finite numbers, rejects garbage', () => {
+  const store = new Map();
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+  };
+  assert.equal(readChatPosition(storage), null);
+  writeChatPosition(storage, { x: 12, y: 34 });
+  assert.deepEqual(readChatPosition(storage), { x: 12, y: 34 });
+  assert.ok(store.has(CHAT_POSITION_KEY));
+  store.set(CHAT_POSITION_KEY, '{"x":"bad","y":34}');
+  assert.equal(readChatPosition(storage), null);
+  store.set(CHAT_POSITION_KEY, 'not json');
+  assert.equal(readChatPosition(storage), null);
 });

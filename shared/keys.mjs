@@ -490,6 +490,42 @@ export function saveSettings(storage, settings) {
 
 // "auto" walks the measured ladder; a fixed resolution is used as-is, so the
 // user's explicit choice is not silently replaced.
+// Chat panel drag position. The panel is non-modal and can be moved freely,
+// but its head (the drag handle, ~40px tall) must stay on screen so the user
+// can always grab it again. Horizontally a 40px strip stays visible.
+export const CHAT_POSITION_KEY = 'phone-link-chat-position';
+
+export function clampPanelPosition(x, y, width, height, viewportWidth, viewportHeight) {
+  const margin = 40;
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+  return {
+    x: clamp(x, margin - width, viewportWidth - margin),
+    y: clamp(y, 0, viewportHeight - margin),
+  };
+}
+
+export function readChatPosition(storage) {
+  try {
+    const raw = storage?.getItem(CHAT_POSITION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {
+    // Corrupt or unavailable storage: fall back to the docked position.
+  }
+  return null;
+}
+
+export function writeChatPosition(storage, position) {
+  try {
+    storage?.setItem(CHAT_POSITION_KEY, JSON.stringify({ x: position.x, y: position.y }));
+  } catch {
+    // Storage disabled: the position simply won't survive a reload.
+  }
+}
+
 export function sizeLadder(settings) {
   const s = normalizeSettings(settings);
   return s.resolution === 'auto' ? [...STREAM_SIZE_LADDER] : [Number(s.resolution)];

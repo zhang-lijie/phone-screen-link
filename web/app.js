@@ -4,6 +4,9 @@
 import {
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
+  clampPanelPosition,
+  readChatPosition,
+  writeChatPosition,
   buildStreamOptions,
   effectiveLanguage,
   isDegradedStream,
@@ -672,9 +675,81 @@ document.getElementById('chat-form').addEventListener('submit', (event) => {
   event.preventDefault();
   sendChatMessage();
 });
+// The chat head is the drag handle; buttons inside it stay clickable. Pointer
+// events cover mouse, touch and pen with one code path.
+const chatHead = chatPanel.querySelector('.chat-head');
+
+function applyChatPosition(position) {
+  const rect = chatPanel.getBoundingClientRect();
+  const bounded = clampPanelPosition(
+    position.x, position.y, rect.width, rect.height,
+    window.innerWidth, window.innerHeight,
+  );
+  chatPanel.style.left = `${bounded.x}px`;
+  chatPanel.style.top = `${bounded.y}px`;
+  chatPanel.style.right = 'auto';
+  chatPanel.style.bottom = 'auto';
+}
+
+let chatDrag = null;
+
+chatHead.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0 || event.target.closest('button')) return;
+  const rect = chatPanel.getBoundingClientRect();
+  // Switch from the docked right/bottom anchor to explicit left/top.
+  chatPanel.style.left = `${rect.left}px`;
+  chatPanel.style.top = `${rect.top}px`;
+  chatPanel.style.right = 'auto';
+  chatPanel.style.bottom = 'auto';
+  chatDrag = {
+    id: event.pointerId,
+    pointerX: event.clientX,
+    pointerY: event.clientY,
+    panelX: rect.left,
+    panelY: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+  chatHead.setPointerCapture(event.pointerId);
+  chatHead.classList.add('dragging');
+  event.preventDefault();
+});
+
+chatHead.addEventListener('pointermove', (event) => {
+  if (!chatDrag || event.pointerId !== chatDrag.id) return;
+  const next = clampPanelPosition(
+    chatDrag.panelX + event.clientX - chatDrag.pointerX,
+    chatDrag.panelY + event.clientY - chatDrag.pointerY,
+    chatDrag.width, chatDrag.height,
+    window.innerWidth, window.innerHeight,
+  );
+  chatPanel.style.left = `${next.x}px`;
+  chatPanel.style.top = `${next.y}px`;
+});
+
+function endChatDrag(event) {
+  if (!chatDrag || event.pointerId !== chatDrag.id) return;
+  chatDrag = null;
+  chatHead.classList.remove('dragging');
+  writeChatPosition(localStorage, {
+    x: Number.parseFloat(chatPanel.style.left) || 0,
+    y: Number.parseFloat(chatPanel.style.top) || 0,
+  });
+}
+
+chatHead.addEventListener('pointerup', endChatDrag);
+chatHead.addEventListener('pointercancel', endChatDrag);
+
+window.addEventListener('resize', () => {
+  const saved = readChatPosition(localStorage);
+  if (saved && !chatPanel.hidden) applyChatPosition(saved);
+});
+
 chatFab.addEventListener('click', () => {
   if (chatPanel.hidden) {
     chatPanel.hidden = false;
+    const saved = readChatPosition(localStorage);
+    if (saved) applyChatPosition(saved);
     chatInput.focus();
   } else {
     chatPanel.hidden = true;
