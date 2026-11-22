@@ -139,6 +139,7 @@ function setFullscreen(active) {
   const label = t(active ? 'fullscreen.exit' : 'fullscreen.enter');
   fullscreenToggle.title = label;
   fullscreenToggle.setAttribute('aria-label', label);
+  fullscreenToggle.dataset.label = label;
 }
 
 fullscreenToggle.addEventListener('click', () => {
@@ -155,6 +156,7 @@ function updateBrowserFullscreenLabel() {
   const label = t(active ? 'fullscreen.browserExit' : 'fullscreen.browserEnter');
   browserFullscreenToggle.title = label;
   browserFullscreenToggle.setAttribute('aria-label', label);
+  browserFullscreenToggle.dataset.label = label;
 }
 
 browserFullscreenToggle.addEventListener('click', async () => {
