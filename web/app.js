@@ -17,7 +17,9 @@ import {
   translateStatLine,
 } from './keys.js';
 
-const DEVICE_ID = '2FD0221C09004177';
+// Loaded from the backend /health endpoint at startup so swapping phones
+// needs only the PHONE_SERIAL env var, no code edit here.
+let DEVICE_ID = window.__PHONE_SERIAL || '2FD0221C09004177';
 const BRIDGE_BASE = 'http://127.0.0.1:8100';
 const BRIDGE_URL = `${BRIDGE_BASE}/keyevent`;
 const CHAT_CONFIG_URL = `${BRIDGE_BASE}/api/chat-config`;
@@ -96,6 +98,7 @@ const formFields = {
   navButtonMode: document.getElementById('set-nav-button-mode'),
   wheelSteps: document.getElementById('set-wheel-steps'),
   volume: document.getElementById('set-volume'),
+  autoResizeWindow: document.getElementById('set-auto-resize-window'),
 };
 
 function fillSettingsForm(values = settings) {
@@ -104,6 +107,7 @@ function fillSettingsForm(values = settings) {
   formFields.bitrate.value = String(values.bitrate);
   formFields.audio.checked = values.audio;
   formFields.volume.value = String(values.volume ?? 100);
+  formFields.autoResizeWindow.checked = values.autoResizeWindow ?? true;
   formFields.language.value = values.language;
   formFields.uiFontSize.value = String(values.uiFontSize);
   formFields.uiFontColor.value = values.uiFontColor;
@@ -141,6 +145,93 @@ fullscreenToggle.addEventListener('click', () => {
   setFullscreen(!document.body.classList.contains('screen-fullscreen'));
 });
 
+// Real browser fullscreen via the Fullscreen API (F11-style), distinct from the
+// CSS pseudo-fullscreen above. The button sits at the top-right of #stream.
+const browserFullscreenToggle = document.getElementById('browser-fullscreen-toggle');
+let fullscreenWarned = false;
+
+function updateBrowserFullscreenLabel() {
+  const active = !!document.fullscreenElement;
+  const label = t(active ? 'fullscreen.browserExit' : 'fullscreen.browserEnter');
+  browserFullscreenToggle.title = label;
+  browserFullscreenToggle.setAttribute('aria-label', label);
+}
+
+browserFullscreenToggle.addEventListener('click', async () => {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await streamEl.requestFullscreen();
+    }
+  } catch {
+    setStatus('status.fullscreenFailed');
+  }
+});
+document.addEventListener('fullscreenchange', updateBrowserFullscreenLabel);
+
+// Resize the browser window to match the stream's orientation. Only works in
+// environments that allow scripted window resizing (app mode / script-opened
+// windows); ordinary tabs ignore resizeTo, so we detect that and hint once.
+let lastOrientation = null;
+
+function orientationOf(info) {
+  if (!info) return null;
+  let w; let h;
+  if (typeof info.width === 'number' && typeof info.height === 'number') {
+    ({ width: w, height: h } = info);
+  } else {
+    const match = /^(\d+)\s*x\s*(\d+)$/.exec(info.resolution ?? '');
+    if (!match) return null;
+    w = Number(match[1]);
+    h = Number(match[2]);
+  }
+  return { w, h, landscape: w >= h };
+}
+
+function autoResizeWindow(w, h, landscape) {
+  const availW = screen.availWidth || screen.width;
+  const availH = screen.availHeight || screen.height;
+  // Fill 90% of the screen on the limiting axis, then derive the other axis
+  // from the encoded aspect ratio, and add space for the tool rail/status bar.
+  const railExtra = Math.round(60 * (Number(settings.railScale) || 1));
+  const chromeExtra = 44;
+  let targetW;
+  let targetH;
+  if (landscape) {
+    targetW = Math.round(availW * 0.9);
+    targetH = Math.round(targetW * (h / w)) + chromeExtra;
+  } else {
+    targetH = Math.round(availH * 0.9);
+    targetW = Math.round(targetH * (w / h)) + railExtra;
+  }
+  targetW = Math.min(Math.max(targetW, 320), availW);
+  targetH = Math.min(Math.max(targetH, 240), availH);
+
+  const beforeW = innerWidth;
+  window.resizeTo(targetW, targetH);
+  setTimeout(() => {
+    if (innerWidth === beforeW && !fullscreenWarned) {
+      fullscreenWarned = true;
+      setStatus('status.windowResizeUnsupported');
+    }
+  }, 120);
+}
+
+function handleStreamOrientation(info) {
+  const o = orientationOf(info?.resolution);
+  if (!o) return;
+  if (lastOrientation === null) {
+    lastOrientation = o.landscape; // first connection: keep the user's window
+    return;
+  }
+  if (o.landscape === lastOrientation) return;
+  lastOrientation = o.landscape;
+  if (settings.autoResizeWindow && !document.fullscreenElement) {
+    autoResizeWindow(o.w, o.h, o.landscape);
+  }
+}
+
 // Phone audio plays in the browser via the engine's AudioPlayer; its volume is
 // a browser-local setting (0..100) applied immediately, no stream restart.
 function applyAudioVolume() {
@@ -168,6 +259,7 @@ function readSettingsForm() {
     navButtonMode: formFields.navButtonMode.value,
     wheelSteps: Number(formFields.wheelSteps.value),
     volume: Number(formFields.volume.value),
+    autoResizeWindow: formFields.autoResizeWindow.checked,
   });
 }
 
@@ -217,6 +309,7 @@ function applyLanguage() {
   lockMessage = lockHint(screenState, lang);
   renderStatus();
   setFullscreen(document.body.classList.contains('screen-fullscreen'));
+  updateBrowserFullscreenLabel();
   labelToolbox();
   localizeEngineDom();
   updateChatLabels();
@@ -694,6 +787,7 @@ function startStream() {
     setStatus('status.connected', {
       resolution: `${resolution}${degraded ? t('status.lowRes') : ''}`,
     });
+    handleStreamOrientation(info);
   };
   options.onDisconnect = (reason) => {
     if (gen !== generation) return;
@@ -702,6 +796,10 @@ function startStream() {
   options.onError = (err) => {
     if (gen !== generation) return;
     setStatus('status.error', { error: messageOf(err) });
+  };
+  options.onResize = (info) => {
+    if (gen !== generation) return;
+    handleStreamOrientation(info);
   };
 
   window.phoneLinkHandle = window.WsScrcpy.startStream(streamEl, DEVICE_ID, options);
@@ -730,11 +828,29 @@ function applySettings() {
 
 applyLanguage();
 
-if (!isUsableContext(location.protocol, location.hostname)) {
-  setStatus('status.insecure');
-} else if (!window.WsScrcpy || typeof window.WsScrcpy.startStream !== 'function') {
-  setStatus('status.engineDown');
-} else {
+async function boot() {
+  if (!isUsableContext(location.protocol, location.hostname)) {
+    setStatus('status.insecure');
+    return;
+  }
+  if (!window.WsScrcpy || typeof window.WsScrcpy.startStream !== 'function') {
+    setStatus('status.engineDown');
+    return;
+  }
+  // Ask the local bridge which device serial is configured, so changing
+  // phones is a backend env-var change only.
+  try {
+    const res = await fetch(`${BRIDGE_BASE}/health`);
+    if (res.ok) {
+      const info = await res.json();
+      if (typeof info.serial === 'string' && info.serial) {
+        DEVICE_ID = info.serial;
+        window.__PHONE_SERIAL = info.serial;
+      }
+    }
+  } catch {
+    // Bridge not up yet: keep the fallback serial.
+  }
   setStatus('status.connectPhone');
   try {
     startStream();
@@ -742,3 +858,5 @@ if (!isUsableContext(location.protocol, location.hostname)) {
     setStatus('status.engineDownError', { error: messageOf(err) });
   }
 }
+
+boot();

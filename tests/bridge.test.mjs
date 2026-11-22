@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge } from '../server/bridge.mjs';
+import { DEFAULT_USB_SERIAL } from '../server/adb.mjs';
 import { DEFAULT_CHAT_CONFIG, createChatConfigStore } from '../server/chat-config.mjs';
 
 const fakeAdb = {
@@ -37,14 +38,14 @@ test('health reports online', async () => {
   await withBridge({}, async (address) => {
     const res = await fetch(`${address}/health`);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ok: true, online: true });
+    assert.deepEqual(await res.json(), { ok: true, online: true, serial: DEFAULT_USB_SERIAL });
   });
 });
 
 test('health reports offline from adb', async () => {
   await withBridge({ adb: { isOnline: async () => false, keyEvent: fakeAdb.keyEvent } }, async (address) => {
     const res = await fetch(`${address}/health`);
-    assert.deepEqual(await res.json(), { ok: true, online: false });
+    assert.deepEqual(await res.json(), { ok: true, online: false, serial: DEFAULT_USB_SERIAL });
   });
 });
 
@@ -155,7 +156,7 @@ test('multi-chunk oversized body returns a single 413 without crashing the bridg
 
     // The service must still be alive and serving after the oversized POST.
     const res = await fetch(`${address}/health`);
-    assert.deepEqual(await res.json(), { ok: true, online: true });
+    assert.deepEqual(await res.json(), { ok: true, online: true, serial: DEFAULT_USB_SERIAL });
   });
 });
 

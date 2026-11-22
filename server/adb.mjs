@@ -2,7 +2,8 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { KEY_CODES } from '../shared/keys.mjs';
 
-export const DEFAULT_USB_SERIAL = '2FD0221C09004177';
+// Device serial can be set via env so swapping phones needs no code change.
+export const DEFAULT_USB_SERIAL = process.env.PHONE_SERIAL || '2FD0221C09004177';
 export const WIFI_ADDRESS = '192.168.3.123:5555';
 
 const execFileAsync = promisify(execFile);

@@ -85,6 +85,55 @@ export const AUDIO_VOLUME_PATCHES = [
   },
 ];
 
+// Expose session resize (device rotation) through the public stream handle so
+// the web page can react to portrait/landscape changes.
+export const RESIZE_PATCHES = [
+  {
+    file: 'src/app/googDevice/client/StreamClientScrcpy.ts',
+    from: `    private onSessionChange = (change: { width: number; height: number }): void => {
+        console.log(TAG, \`Session resized: \${change.width}x\${change.height}\`);`,
+    to: `    public onResizeReceived?: ((info: { width: number; height: number }) => void) | undefined;
+
+    private onSessionChange = (change: { width: number; height: number }): void => {
+        console.log(TAG, \`Session resized: \${change.width}x\${change.height}\`);
+        this.onResizeReceived?.(change);`,
+  },
+  {
+    file: 'src/app/public/types.ts',
+    from: `    onError?: ((err: Error) => void) | undefined;`,
+    to: `    onError?: ((err: Error) => void) | undefined;
+    onResize?: ((info: { width: number; height: number }) => void) | undefined;`,
+  },
+  {
+    file: 'src/app/public/startStream.ts',
+    from: `    onMetadataReceived?: (info: StreamInfo) => void;
+    onErrorReceived?: (err: Error) => void;
+}`,
+    to: `    onMetadataReceived?: (info: StreamInfo) => void;
+    onErrorReceived?: (err: Error) => void;
+    onResizeReceived?: (info: { width: number; height: number }) => void;
+}`,
+  },
+  {
+    file: 'src/app/public/startStream.ts',
+    from: `        hooked.onErrorReceived = (err: Error) => {
+            // A failed stream reports here INSTEAD of the disconnect callback
+            // above, so it must clear the flag too.
+            isConnected = false;
+            options.onError?.(err);
+        };`,
+    to: `        hooked.onErrorReceived = (err: Error) => {
+            // A failed stream reports here INSTEAD of the disconnect callback
+            // above, so it must clear the flag too.
+            isConnected = false;
+            options.onError?.(err);
+        };
+        hooked.onResizeReceived = (info: { width: number; height: number }) => {
+            options.onResize?.(info);
+        };`,
+  },
+];
+
 export const WHEEL_SCALE_PATCH = {
   file: 'src/app/interactionHandler/FeaturedInteractionHandler.ts',
   from: `            const hScroll = event.deltaX > 0 ? -1 : event.deltaX < 0 ? 1 : 0;
@@ -116,6 +165,7 @@ function applyEnginePatches() {
   applyPatch(LOOPBACK_PATCH, 'bind 127.0.0.1');
   applyPatch(WHEEL_SCALE_PATCH, 'wheel scroll scale');
   for (const patch of AUDIO_VOLUME_PATCHES) applyPatch(patch, 'audio volume handle');
+  for (const patch of RESIZE_PATCHES) applyPatch(patch, 'resize handle');
 }
 
 export function checkGhostToolchain({ exec = execFileSync, log = console.log } = {}) {

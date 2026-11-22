@@ -1,5 +1,6 @@
 import http from 'node:http';
 import { KEY_CODES } from '../shared/keys.mjs';
+import { DEFAULT_USB_SERIAL } from './adb.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
@@ -91,7 +92,7 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
       }
 
       if (req.method === 'GET' && pathname === '/health') {
-        sendJson(res, 200, { ok: true, online: await adb.isOnline() });
+        sendJson(res, 200, { ok: true, online: await adb.isOnline(), serial: DEFAULT_USB_SERIAL });
         return;
       }
 

@@ -88,6 +88,11 @@ export const MESSAGES = {
     'settings.statusScale': 'Status bar max size',
     'settings.wheelSteps': 'Wheel scroll multiplier',
     'settings.volume': 'Browser volume',
+    'settings.autoResizeWindow': 'Resize window on orientation change',
+    'status.windowResizeUnsupported': 'This tab cannot resize windows — use the fullscreen button at the top right',
+    'fullscreen.browserEnter': 'Fullscreen (browser)',
+    'fullscreen.browserExit': 'Exit fullscreen (browser)',
+    'status.fullscreenFailed': 'Fullscreen was blocked by the browser',
     'settings.wheel1': '1x',
     'settings.wheel2': '2x',
     'settings.wheel3': '3x',
@@ -109,8 +114,8 @@ export const MESSAGES = {
     'settings.fontSmall': 'Small',
     'settings.fontNormal': 'Default',
     'settings.fontLarge': 'Large',
-    'fullscreen.enter': 'Fullscreen',
-    'fullscreen.exit': 'Exit fullscreen',
+    'fullscreen.enter': 'Browser fullscreen',
+    'fullscreen.exit': 'Exit browser fullscreen',
     'settings.note': 'Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.',
     'settings.reset': 'Reset',
     'settings.apply': 'Apply & restart',
@@ -239,6 +244,11 @@ export const MESSAGES = {
     'settings.statusScale': '状态条最大尺寸',
     'settings.wheelSteps': '滚轮滚动倍率',
     'settings.volume': '浏览器播放音量',
+    'settings.autoResizeWindow': '画面方向变化时调整窗口',
+    'status.windowResizeUnsupported': '当前标签页无法调整窗口大小 — 请使用右上角的全屏按钮',
+    'fullscreen.browserEnter': '全屏（浏览器）',
+    'fullscreen.browserExit': '退出全屏（浏览器）',
+    'status.fullscreenFailed': '浏览器拒绝了全屏请求',
     'settings.wheel1': '1×',
     'settings.wheel2': '2×',
     'settings.wheel3': '3×',
@@ -260,8 +270,8 @@ export const MESSAGES = {
     'settings.fontSmall': '小',
     'settings.fontNormal': '默认',
     'settings.fontLarge': '大',
-    'fullscreen.enter': '全屏',
-    'fullscreen.exit': '退出全屏',
+    'fullscreen.enter': '浏览器全屏',
+    'fullscreen.exit': '退出浏览器全屏',
     'settings.note': '自动模式先尝试 1280，被手机拒绝时会自动降档。应用设置会重启画面。',
     'settings.reset': '恢复默认',
     'settings.apply': '应用并重启',
@@ -419,6 +429,7 @@ export const DEFAULT_SETTINGS = {
   navButtonMode: 'both',
   wheelSteps: 2,
   volume: 100,
+  autoResizeWindow: true,
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
 
@@ -455,6 +466,7 @@ export function normalizeSettings(raw = {}) {
     navButtonMode: pick(raw?.navButtonMode, NAV_BUTTON_MODES, DEFAULT_SETTINGS.navButtonMode),
     wheelSteps: pick(Number(raw?.wheelSteps), WHEEL_SCALE_CHOICES, DEFAULT_SETTINGS.wheelSteps),
     volume: clampVolume(raw?.volume),
+    autoResizeWindow: typeof raw?.autoResizeWindow === 'boolean' ? raw.autoResizeWindow : DEFAULT_SETTINGS.autoResizeWindow,
   };
 }
 

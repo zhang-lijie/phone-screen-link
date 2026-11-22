@@ -23,9 +23,14 @@
       <button type="button" data-key="power" data-i18n="key.power">POWER</button>
     </div>
     <div id="stream" data-i18n-aria="nav.screen" aria-label="Phone screen">
-      <button type="button" id="fullscreen-toggle" class="fullscreen-toggle" title="全屏" aria-label="全屏">
+      <button type="button" id="fullscreen-toggle" class="fullscreen-toggle" title="浏览器全屏" aria-label="浏览器全屏">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-          <path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/>
+          <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
+        </svg>
+      </button>
+      <button type="button" id="browser-fullscreen-toggle" class="fullscreen-toggle browser-fullscreen-toggle" title="全屏" aria-label="全屏">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
         </svg>
       </button>
     </div>
@@ -122,6 +127,10 @@
           <option value="9" data-i18n="settings.wheel9">9x</option>
           <option value="10" data-i18n="settings.wheel10">10x</option>
         </select>
+      </label>
+      <label class="setting-row setting-row--check">
+        <span data-i18n="settings.autoResizeWindow">Resize window on orientation change</span>
+        <input type="checkbox" id="set-auto-resize-window">
       </label>
 
       <!-- Group: 显示设置 -->
