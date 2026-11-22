@@ -164,6 +164,19 @@ body.screen-fullscreen #stream .control-buttons-list {
   box-shadow: 0 0 0 2px #fff;
 }
 
+.settings-group {
+  margin: 10px 0 4px;
+  padding: 8px 0 0;
+  border-top: 1px solid #23262d;
+  font: 500 10.5px/1 system-ui, -apple-system, sans-serif;
+  letter-spacing: 0.06em;
+  color: var(--ui-text-muted);
+}
+
+.settings-group:first-of-type {
+  border-top: none;
+}
+
 /* The engine's control rail: narrow icons beside the picture. Our stylesheet
    loads after the engine's, so these win on equal specificity. */
 #stream .control-buttons-list {

@@ -32,6 +32,42 @@ const statusEl = document.getElementById('status');
 // click and cover the picture. Keep the mousedown control, drop only the menu.
 document.addEventListener('contextmenu', (event) => event.preventDefault());
 
+// Wheel-scroll amplification. The engine converts one browser wheel tick into
+// a single "swipe" message, so the phone screen (1152 CSS px tall) needs ~20
+// ticks to scroll fully. When the user opts into N steps per tick, intercept
+// the wheel on the touch layer (capture: before the engine's body listener)
+// and re-dispatch N synthetic events. The engine throttles same-direction
+// events within 30 ms, so spacing the copies 40 ms apart keeps all of them
+// from reaching ghost.
+let wheelBurstActive = false;
+streamEl.addEventListener('wheel', (event) => {
+  const steps = Math.max(1, Number(settings.wheelSteps ?? 1));
+  if (steps <= 1) return; // native behavior, engine's own handler
+  if (event.target !== streamEl.querySelector('canvas.touch-layer')) return;
+  event.preventDefault();
+  event.stopPropagation(); // the engine's handler only runs on dispatch
+  if (wheelBurstActive) return;
+  wheelBurstActive = true;
+  setTimeout(() => { wheelBurstActive = false; }, steps * 40 + 120);
+  let fired = 0;
+  const tick = () => {
+    if (fired >= steps) return;
+    fired += 1;
+    event.target.dispatchEvent(new WheelEvent('wheel', {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      deltaX: event.deltaX,
+      deltaY: event.deltaY,
+      deltaMode: event.deltaMode,
+    }));
+    if (fired < steps) setTimeout(tick, 40);
+  };
+  tick();
+}, true);
+
 // The engine builds its own toolbox (screenshot, clipboard, stats, input
 // modes). Its icons carry an English tooltip but no visible text, so the
 // labels are mapped here to translation keys and rendered via data-label.
@@ -85,6 +121,7 @@ const formFields = {
   railScale: document.getElementById('set-rail-scale'),
   statusScale: document.getElementById('set-status-scale'),
   navButtonMode: document.getElementById('set-nav-button-mode'),
+  wheelSteps: document.getElementById('set-wheel-steps'),
 };
 
 function fillSettingsForm(values = settings) {
@@ -100,6 +137,7 @@ function fillSettingsForm(values = settings) {
   formFields.railScale.value = String(values.railScale);
   formFields.statusScale.value = String(values.statusScale);
   formFields.navButtonMode.value = values.navButtonMode;
+  formFields.wheelSteps.value = String(values.wheelSteps);
 }
 
 function openSettings() {
@@ -142,6 +180,7 @@ function readSettingsForm() {
     railScale: Number(formFields.railScale.value),
     statusScale: Number(formFields.statusScale.value),
     navButtonMode: formFields.navButtonMode.value,
+    wheelSteps: Number(formFields.wheelSteps.value),
   });
 }
 

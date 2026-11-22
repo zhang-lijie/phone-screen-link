@@ -11,6 +11,8 @@ import {
   NAV_BUTTON_MODES,
   RAIL_SCALES,
   RESOLUTION_CHOICES,
+  WHEEL_SCALE_CHOICES,
+  DEFAULT_WHEEL_STEPS,
   SETTINGS_STORAGE_KEY,
   STREAM_SIZE_LADDER,
   STATS_FONT_SCALES,
@@ -72,6 +74,18 @@ test('the size ladder runs best first and a fixed resolution is requestable', ()
   assert.equal(o.bitrate, 4_000_000);
 });
 
+test('wheel steps are a small validated set, defaulting to 2', () => {
+  assert.deepEqual(WHEEL_SCALE_CHOICES, [1, 2, 3, 5]);
+  assert.equal(DEFAULT_WHEEL_STEPS, 2);
+  assert.equal(DEFAULT_SETTINGS.wheelSteps, 2);
+  assert.equal(normalizeSettings().wheelSteps, 2);
+  assert.equal(normalizeSettings({ wheelSteps: 1 }).wheelSteps, 1);
+  assert.equal(normalizeSettings({ wheelSteps: 5 }).wheelSteps, 5);
+  assert.equal(normalizeSettings({ wheelSteps: 0 }).wheelSteps, 2);
+  assert.equal(normalizeSettings({ wheelSteps: 4 }).wheelSteps, 2);
+  assert.equal(normalizeSettings({ wheelSteps: '3' }).wheelSteps, 3);
+});
+
 test('settings are normalized before reaching the engine', () => {
   assert.deepEqual(normalizeSettings(), DEFAULT_SETTINGS);
   assert.deepEqual(normalizeSettings({ resolution: 'bogus', maxFps: 999, bitrate: 'x', audio: 'yes', language: 'fr' }), DEFAULT_SETTINGS);
@@ -91,9 +105,9 @@ test('settings persist in localStorage and bad data falls back to defaults', () 
   };
   assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
 
-  const chosen = saveSettings(storage, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en' });
+  const chosen = saveSettings(storage, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en', wheelSteps: 5 });
   assert.deepEqual(chosen, {
-    ...DEFAULT_SETTINGS, resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en',
+    ...DEFAULT_SETTINGS, resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en', wheelSteps: 5,
   });
   assert.deepEqual(loadSettings(storage), chosen);
   assert.ok(data.has(SETTINGS_STORAGE_KEY));

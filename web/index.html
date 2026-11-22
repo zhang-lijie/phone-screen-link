@@ -60,6 +60,9 @@
         <h2 id="settings-title" data-i18n="settings.title">Stream settings</h2>
         <button type="button" id="settings-close" data-i18n-aria="settings.close" aria-label="Close settings">&times;</button>
       </header>
+
+      <!-- Group: 投屏设置 -->
+      <h3 class="settings-group" data-i18n="settings.groupStream">Stream</h3>
       <label class="setting-row">
         <span data-i18n="settings.resolution">Resolution</span>
         <select id="set-resolution">
@@ -86,18 +89,33 @@
           <option value="16000000" data-i18n="settings.br16">16 Mbps</option>
         </select>
       </label>
+
+      <!-- Group: 控制设置 -->
+      <h3 class="settings-group" data-i18n="settings.groupControl">Control</h3>
       <label class="setting-row setting-row--check">
         <span data-i18n="settings.audio">Audio</span>
         <input type="checkbox" id="set-audio">
       </label>
       <label class="setting-row">
-        <span data-i18n="settings.language">Language</span>
-        <select id="set-language">
-          <option value="auto" data-i18n="settings.langAuto">Follow browser</option>
-          <option value="zh" data-i18n="settings.langZh">中文</option>
-          <option value="en" data-i18n="settings.langEn">English</option>
+        <span data-i18n="settings.navButtonMode">Nav button display</span>
+        <select id="set-nav-button-mode">
+          <option value="icon" data-i18n="settings.navIcon">Icon</option>
+          <option value="text" data-i18n="settings.navText">Text</option>
+          <option value="both" data-i18n="settings.navBoth">Icon &amp; text</option>
         </select>
       </label>
+      <label class="setting-row">
+        <span data-i18n="settings.wheelSteps">Steps per wheel event</span>
+        <select id="set-wheel-steps">
+          <option value="1" data-i18n="settings.wheel1">1 step</option>
+          <option value="2" data-i18n="settings.wheel2">2 steps</option>
+          <option value="3" data-i18n="settings.wheel3">3 steps</option>
+          <option value="5" data-i18n="settings.wheel5">5 steps</option>
+        </select>
+      </label>
+
+      <!-- Group: 显示设置 -->
+      <h3 class="settings-group" data-i18n="settings.groupDisplay">Display</h3>
       <label class="setting-row">
         <span data-i18n="settings.uiFontSize">UI font size</span>
         <select id="set-ui-font-size">
@@ -138,16 +156,19 @@
           <option value="1.25" data-i18n="settings.fontLarge">Large</option>
         </select>
       </label>
+
+      <!-- Group: 语言设置 -->
+      <h3 class="settings-group" data-i18n="settings.groupLanguage">Language</h3>
       <label class="setting-row">
-        <span data-i18n="settings.navButtonMode">Nav button display</span>
-        <select id="set-nav-button-mode">
-          <option value="icon" data-i18n="settings.navIcon">Icon</option>
-          <option value="text" data-i18n="settings.navText">Text</option>
-          <option value="both" data-i18n="settings.navBoth">Icon &amp; text</option>
+        <span data-i18n="settings.language">Language</span>
+        <select id="set-language">
+          <option value="auto" data-i18n="settings.langAuto">Follow browser</option>
+          <option value="zh" data-i18n="settings.langZh">中文</option>
+          <option value="en" data-i18n="settings.langEn">English</option>
         </select>
       </label>
-      <!-- Chat group. Saved on its own against the backend so changing chat
-           never restarts the stream; values come from GET /api/chat-config. -->
+
+      <!-- Group: 聊天设置 -->
       <h3 class="settings-group" data-i18n="chat.settings.group">Chat</h3>
       <label class="setting-row setting-row--check">
         <span data-i18n="chat.settings.enabled">Enable chat</span>
@@ -178,6 +199,7 @@
         <span id="chat-settings-status" class="chat-settings-status" role="status" aria-live="polite"></span>
         <button type="button" id="chat-settings-save" data-i18n="chat.settings.save">Save chat settings</button>
       </div>
+
       <p class="settings-note" data-i18n="settings.note">Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.</p>
       <footer class="settings-actions">
         <button type="button" id="settings-reset" data-i18n="settings.reset">Reset</button>

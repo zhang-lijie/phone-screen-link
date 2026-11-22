@@ -86,6 +86,15 @@ export const MESSAGES = {
     'settings.statsFontColor': 'Stats text color',
     'settings.railScale': 'Nav bar max size',
     'settings.statusScale': 'Status bar max size',
+    'settings.wheelSteps': 'Steps per wheel event',
+    'settings.wheel1': '1 step',
+    'settings.wheel2': '2 steps',
+    'settings.wheel3': '3 steps',
+    'settings.wheel5': '5 steps',
+    'settings.groupStream': 'Stream',
+    'settings.groupControl': 'Control',
+    'settings.groupDisplay': 'Display',
+    'settings.groupLanguage': 'Language',
     'settings.navButtonMode': 'Nav button display',
     'settings.navIcon': 'Icon',
     'settings.navText': 'Text',
@@ -221,6 +230,15 @@ export const MESSAGES = {
     'settings.statsFontColor': '统计文字颜色',
     'settings.railScale': '导航条最大尺寸',
     'settings.statusScale': '状态条最大尺寸',
+    'settings.wheelSteps': '每次滚轮事件的滚动步数',
+    'settings.wheel1': '1 步',
+    'settings.wheel2': '2 步',
+    'settings.wheel3': '3 步',
+    'settings.wheel5': '5 步',
+    'settings.groupStream': '投屏设置',
+    'settings.groupControl': '控制设置',
+    'settings.groupDisplay': '显示设置',
+    'settings.groupLanguage': '语言设置',
     'settings.navButtonMode': '导航按钮显示',
     'settings.navIcon': '图标',
     'settings.navText': '文字',
@@ -385,8 +403,16 @@ export const DEFAULT_SETTINGS = {
   railScale: 1,
   statusScale: 1,
   navButtonMode: 'both',
+  wheelSteps: 2,
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
+
+// Wheel-scroll amplification: how many engine scroll steps the phone is
+// scrolled per browser wheel event. The engine converts one browser wheel
+// tick into a single "swipe" message, so the phone screen (1152 CSS px tall)
+// needs ~20 ticks to scroll fully — hence a multiplier here.
+export const WHEEL_SCALE_CHOICES = [1, 2, 3, 5];
+export const DEFAULT_WHEEL_STEPS = 2;
 
 function pick(value, choices, fallback) {
   return choices.includes(value) ? value : fallback;
@@ -406,6 +432,7 @@ export function normalizeSettings(raw = {}) {
     railScale: pick(Number(raw?.railScale), RAIL_SCALES, DEFAULT_SETTINGS.railScale),
     statusScale: pick(Number(raw?.statusScale), STATUS_SCALES, DEFAULT_SETTINGS.statusScale),
     navButtonMode: pick(raw?.navButtonMode, NAV_BUTTON_MODES, DEFAULT_SETTINGS.navButtonMode),
+    wheelSteps: pick(Number(raw?.wheelSteps), WHEEL_SCALE_CHOICES, DEFAULT_SETTINGS.wheelSteps),
   };
 }
 
