@@ -55,3 +55,39 @@ class LogBufferTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfigTest(unittest.TestCase):
+    def test_write_chat_config_merges_and_keeps_key(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            cfg = root / "state" / "chat.json"
+            cfg.parent.mkdir()
+            cfg.write_text('{"apiKey":"K","model":"old"}')
+            result = srv.write_chat_config(root, {"apiKey": "", "model": "new"})
+            self.assertEqual(result["model"], "new")
+            self.assertEqual(result["apiKey"], "K")
+            self.assertEqual(stat.S_IMODE(cfg.stat().st_mode), 0o600)
+            self.assertFalse(list(cfg.parent.glob("*.tmp")))
+
+    def test_write_chat_config_clamps_maxsteps(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            a = srv.write_chat_config(root, {"maxSteps": 200})
+            b = srv.write_chat_config(root, {"maxSteps": 0})
+            self.assertEqual(a["maxSteps"], 100)
+            self.assertEqual(b["maxSteps"], 1)
+
+    def test_make_start_script_prepends_engine_adb_and_serial(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            script = srv.make_start_script(root, "SERIAL123")
+            self.assertIn('export PHONE_SERIAL="SERIAL123"', script)
+            self.assertIn("engine/dependencies/adb", script)
+            self.assertIn("exec npm start", script)
+
+    def test_config_never_logged(self):
+        srv.clear_logs()
+        with tempfile.TemporaryDirectory() as d:
+            srv.write_chat_config(Path(d), {"apiKey": "SECRET"})
+        self.assertNotIn("SECRET", "\n".join(srv.read_log_buffer()))
