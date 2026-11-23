@@ -19,7 +19,7 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(os.environ.get("PHONE_SCREEN_LINK_ROOT", str(Path(__file__).resolve().parents[1])))
 STATE_DIR = PROJECT_ROOT / "state"
 
 _log_lock = threading.Lock()
@@ -375,12 +375,12 @@ def main():
     _server = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     actual = _server.server_address[1]
     url = "http://127.0.0.1:%d/#token=%s" % (actual, _session_token)
-    print("Wizard: %s" % url)
+    print("Wizard: %s" % url, flush=True)
     try:
         if not webbrowser.open(url):
-            print("Open the URL above in your browser.")
+            print("Open the URL above in your browser.", flush=True)
     except Exception:
-        print("Open the URL above in your browser.")
+        print("Open the URL above in your browser.", flush=True)
     try:
         _server.serve_forever()
     except KeyboardInterrupt:

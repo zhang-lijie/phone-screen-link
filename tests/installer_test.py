@@ -105,3 +105,51 @@ class InstallShTest(unittest.TestCase):
             out = proc.stdout + proc.stderr
             self.assertIn(".local/share/phone-screen-link", out)
             self.assertEqual(proc.returncode, 0)
+
+
+class ReleaseTarballTest(unittest.TestCase):
+    def test_release_tarball_excludes_runtime_only_dirs(self):
+        root = Path(__file__).resolve().parents[1]
+        tag = "v0.0.0-release-test"
+        # create a temporary tag at HEAD for git archive
+        subprocess.run(["git", "tag", "-f", "-m", "release test", tag, "HEAD"], cwd=root, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        try:
+            with tempfile.TemporaryDirectory() as out:
+                proc = subprocess.run(
+                    ["bash", str(root / "scripts" / "make-release.sh"), "--dir", out, tag],
+                    capture_output=True, text=True, cwd=root)
+                self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+                tar = Path(out) / ("phone-screen-link-%s.tar.gz" % tag.lstrip("v"))
+                self.assertTrue(tar.exists(), proc.stdout + proc.stderr)
+                import tarfile
+                with tarfile.open(tar) as tf:
+                    names = tf.getnames()
+                    top = "phone-screen-link-%s" % tag.lstrip("v")
+                    self.assertTrue(any(n == top or n.startswith(top + "/") for n in names))
+                    self.assertTrue(any(n.endswith("/install.sh") for n in names))
+                    self.assertTrue(any(n.endswith("/package-lock.json") for n in names))
+                    self.assertTrue(any(n.endswith("/LICENSE") for n in names))
+                    self.assertTrue(any("installer/server.py" in n for n in names))
+                    bad = ["/engine/", "/node_modules/", "/state/", "/tests/", "/.git/", ".log"]
+                    for n in names:
+                        self.assertFalse(any(b in n for b in bad), "unexpected path: " + n)
+                    member = next(tf.getmember(n) for n in names if n.endswith("/install.sh"))
+                    self.assertTrue(member.mode & stat.S_IXUSR, "install.sh must be executable")
+        finally:
+            subprocess.run(["git", "tag", "-d", tag], cwd=root,
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+class RootIsolationTest(unittest.TestCase):
+    def test_server_root_can_be_overridden_by_env(self):
+        code = (
+            "import os,sys;sys.path.insert(0,%r);"
+            "import installer.server as s;print(s.PROJECT_ROOT)"
+        ) % str(Path(__file__).resolve().parents[1])
+        with tempfile.TemporaryDirectory() as d:
+            env = os.environ.copy()
+            env["PHONE_SCREEN_LINK_ROOT"] = d
+            proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
+                                  text=True, env=env)
+            self.assertEqual(proc.stdout.strip(), d)
