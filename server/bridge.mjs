@@ -1,11 +1,18 @@
 import http from 'node:http';
 import { KEY_CODES } from '../shared/keys.mjs';
+import { DEFAULT_USB_SERIAL } from './adb.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
 const MAX_BODY_BYTES = 64 * 1024;
 const TOO_LARGE = Symbol('too-large');
 const INVALID_JSON = Symbol('invalid-json');
+const PREFLIGHT_METHODS = {
+  '/health': 'GET, OPTIONS',
+  '/keyevent': 'POST, OPTIONS',
+  '/chat': 'POST, OPTIONS',
+  '/api/chat-config': 'GET, POST, OPTIONS',
+};
 
 function sendJson(res, status, payload) {
   const body = JSON.stringify(payload);
@@ -47,7 +54,11 @@ function readJsonBody(req, res) {
   });
 }
 
-export function createBridge({ adb, host, port }) {
+// `chat` is `{ run(userText, lang, config) }`, wired in scripts/start.mjs
+// around the agent loop; `config` is the store snapshot the /chat gate already
+// loaded. `chatConfig` is the backend store: it gates /chat and backs the
+// /api/chat-config routes.
+export function createBridge({ adb, host, port, chatConfig, chat }) {
   const bindHost = host ?? DEFAULT_HOST;
   let server;
   let boundAddress;
@@ -61,9 +72,18 @@ export function createBridge({ adb, host, port }) {
         res.setHeader('Access-Control-Allow-Origin', origin);
       }
 
-      if (req.method === 'OPTIONS' && (pathname === '/health' || pathname === '/keyevent')) {
+      // CORS only gates response reading: a hostile page can still send a
+      // preflight-free "simple request" (e.g. content-type:text/plain) that
+      // mutates state. Every POST must therefore carry either no Origin
+      // (curl and other non-browser clients) or an allowlisted one.
+      if (req.method === 'POST' && origin !== undefined && !ALLOWED_ORIGINS.has(origin)) {
+        sendJson(res, 403, { error: 'origin not allowed' });
+        return;
+      }
+
+      if (req.method === 'OPTIONS' && Object.hasOwn(PREFLIGHT_METHODS, pathname)) {
         res.writeHead(204, {
-          'access-control-allow-methods': pathname === '/health' ? 'GET, OPTIONS' : 'POST, OPTIONS',
+          'access-control-allow-methods': PREFLIGHT_METHODS[pathname],
           'access-control-allow-headers': 'content-type',
           'access-control-max-age': '600',
         });
@@ -72,7 +92,7 @@ export function createBridge({ adb, host, port }) {
       }
 
       if (req.method === 'GET' && pathname === '/health') {
-        sendJson(res, 200, { ok: true, online: await adb.isOnline() });
+        sendJson(res, 200, { ok: true, online: await adb.isOnline(), serial: DEFAULT_USB_SERIAL });
         return;
       }
 
@@ -94,6 +114,70 @@ export function createBridge({ adb, host, port }) {
         }
         await adb.keyEvent(key);
         sendJson(res, 200, { ok: true });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/chat') {
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        // The request body is never trusted for configuration: only `message`
+        // and `lang` are read from it. Enablement and model come from the
+        // backend store and are checked before the agent can reach the model.
+        if (body === null || typeof body !== 'object') {
+          sendJson(res, 400, { error: 'message required' });
+          return;
+        }
+        const message = body.message;
+        if (typeof message !== 'string') {
+          sendJson(res, 400, { error: 'message required' });
+          return;
+        }
+        const lang = typeof body.lang === 'string' ? body.lang : undefined;
+        if (!chat || !chatConfig) {
+          sendJson(res, 503, { error: 'chat unavailable' });
+          return;
+        }
+        const config = chatConfig.load();
+        if (config.enabled !== true || typeof config.model !== 'string' || config.model === '') {
+          sendJson(res, 503, { error: 'chat disabled' });
+          return;
+        }
+        // Model/tool failures carry readable messages (model-client, agent
+        // timeout): surface them as 502 so the frontend can show them in a
+        // bubble. The config loaded for the gate is handed to the agent so
+        // the store is read exactly once per request (no TOCTOU re-load).
+        let result;
+        try {
+          result = await chat.run(message, lang, config);
+        } catch (err) {
+          const detail = err instanceof Error && err.message ? err.message : 'chat request failed';
+          sendJson(res, 502, { error: detail });
+          return;
+        }
+        sendJson(res, 200, { reply: result.reply, steps: result.steps });
+        return;
+      }
+
+      if (pathname === '/api/chat-config' && (req.method === 'GET' || req.method === 'POST')) {
+        if (!chatConfig) {
+          sendJson(res, 503, { error: 'chat config unavailable' });
+          return;
+        }
+        if (req.method === 'GET') {
+          sendJson(res, 200, chatConfig.publicConfig());
+          return;
+        }
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        sendJson(res, 200, chatConfig.save(body));
         return;
       }
 

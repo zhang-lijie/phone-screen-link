@@ -4,6 +4,13 @@
 import {
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
+  canDock,
+  clampPanelPosition,
+  readChatDock,
+  readChatPosition,
+  shouldCenterDock,
+  writeChatDock,
+  writeChatPosition,
   buildStreamOptions,
   effectiveLanguage,
   isDegradedStream,
@@ -17,8 +24,13 @@ import {
   translateStatLine,
 } from './keys.js';
 
-const DEVICE_ID = '2FD0221C09004177';
-const BRIDGE_URL = 'http://127.0.0.1:8100/keyevent';
+// Loaded from the backend /health endpoint at startup so swapping phones
+// needs only the PHONE_SERIAL env var, no code edit here.
+let DEVICE_ID = window.__PHONE_SERIAL || '2FD0221C09004177';
+const BRIDGE_BASE = 'http://127.0.0.1:8100';
+const BRIDGE_URL = `${BRIDGE_BASE}/keyevent`;
+const CHAT_CONFIG_URL = `${BRIDGE_BASE}/api/chat-config`;
+const CHAT_URL = `${BRIDGE_BASE}/chat`;
 const SCREEN_STATE_POLL_MS = 3000;
 
 const streamEl = document.getElementById('stream');
@@ -28,6 +40,14 @@ const statusEl = document.getElementById('status');
 // right-click as the phone's Back button, and a native menu would swallow the
 // click and cover the picture. Keep the mousedown control, drop only the menu.
 document.addEventListener('contextmenu', (event) => event.preventDefault());
+
+// Wheel-scroll amplitude: a single wheel tick maps to `wheelSteps` times the
+// engine's default scroll distance. The engine reads window.__wheelScrollScale
+// (patched in via scripts/setup.mjs), so changing the setting takes effect
+// immediately without re-dispatching N events or restarting the stream.
+function applyWheelScale() {
+  window.__wheelScrollScale = Math.max(1, Number(settings.wheelSteps) || 1);
+}
 
 // The engine builds its own toolbox (screenshot, clipboard, stats, input
 // modes). Its icons carry an English tooltip but no visible text, so the
@@ -53,6 +73,7 @@ const TOOLBOX_LABELS = new Map([
 // Settings come from localStorage and are validated before they reach the
 // engine — a stale/tampered value must not break the stream or the UI.
 let settings = loadSettings(localStorage);
+applyWheelScale();
 let ladder = sizeLadder(settings);
 let lang = effectiveLanguage(settings, navigator.language);
 let screenState = {};
@@ -82,6 +103,9 @@ const formFields = {
   railScale: document.getElementById('set-rail-scale'),
   statusScale: document.getElementById('set-status-scale'),
   navButtonMode: document.getElementById('set-nav-button-mode'),
+  wheelSteps: document.getElementById('set-wheel-steps'),
+  volume: document.getElementById('set-volume'),
+  autoResizeWindow: document.getElementById('set-auto-resize-window'),
 };
 
 function fillSettingsForm(values = settings) {
@@ -89,6 +113,8 @@ function fillSettingsForm(values = settings) {
   formFields.maxFps.value = String(values.maxFps);
   formFields.bitrate.value = String(values.bitrate);
   formFields.audio.checked = values.audio;
+  formFields.volume.value = String(values.volume ?? 100);
+  formFields.autoResizeWindow.checked = values.autoResizeWindow ?? true;
   formFields.language.value = values.language;
   formFields.uiFontSize.value = String(values.uiFontSize);
   formFields.uiFontColor.value = values.uiFontColor;
@@ -97,10 +123,12 @@ function fillSettingsForm(values = settings) {
   formFields.railScale.value = String(values.railScale);
   formFields.statusScale.value = String(values.statusScale);
   formFields.navButtonMode.value = values.navButtonMode;
+  formFields.wheelSteps.value = String(values.wheelSteps);
 }
 
 function openSettings() {
   fillSettingsForm();
+  fillChatForm();
   overlay.hidden = false;
   formFields.resolution.focus();
 }
@@ -124,6 +152,105 @@ fullscreenToggle.addEventListener('click', () => {
   setFullscreen(!document.body.classList.contains('screen-fullscreen'));
 });
 
+// Real browser fullscreen via the Fullscreen API (F11-style), distinct from the
+// CSS pseudo-fullscreen above. Fullscreen the whole page (not just #stream) so
+// the chat panel stays visible in both floating and docked modes.
+const browserFullscreenToggle = document.getElementById('browser-fullscreen-toggle');
+let fullscreenWarned = false;
+
+function updateBrowserFullscreenLabel() {
+  const active = !!document.fullscreenElement;
+  const label = t(active ? 'fullscreen.browserExit' : 'fullscreen.browserEnter');
+  browserFullscreenToggle.title = label;
+  browserFullscreenToggle.setAttribute('aria-label', label);
+}
+
+browserFullscreenToggle.addEventListener('click', async () => {
+  try {
+    if (document.fullscreenElement) {
+      await document.exitFullscreen();
+    } else {
+      await document.documentElement.requestFullscreen();
+    }
+  } catch {
+    setStatus('status.fullscreenFailed');
+  }
+});
+document.addEventListener('fullscreenchange', updateBrowserFullscreenLabel);
+
+// Resize the browser window to match the stream's orientation. Only works in
+// environments that allow scripted window resizing (app mode / script-opened
+// windows); ordinary tabs ignore resizeTo, so we detect that and hint once.
+let lastOrientation = null;
+
+function orientationOf(info) {
+  if (!info) return null;
+  let w; let h;
+  if (typeof info.width === 'number' && typeof info.height === 'number') {
+    ({ width: w, height: h } = info);
+  } else {
+    const match = /^(\d+)\s*x\s*(\d+)$/.exec(info.resolution ?? '');
+    if (!match) return null;
+    w = Number(match[1]);
+    h = Number(match[2]);
+  }
+  return { w, h, landscape: w >= h };
+}
+
+function autoResizeWindow(w, h, landscape) {
+  const availW = screen.availWidth || screen.width;
+  const availH = screen.availHeight || screen.height;
+  // Fill 90% of the screen on the limiting axis, then derive the other axis
+  // from the encoded aspect ratio, and add space for the tool rail/status bar.
+  const railExtra = Math.round(60 * (Number(settings.railScale) || 1));
+  const chromeExtra = 44;
+  let targetW;
+  let targetH;
+  if (landscape) {
+    targetW = Math.round(availW * 0.9);
+    targetH = Math.round(targetW * (h / w)) + chromeExtra;
+  } else {
+    targetH = Math.round(availH * 0.9);
+    targetW = Math.round(targetH * (w / h)) + railExtra;
+  }
+  targetW = Math.min(Math.max(targetW, 320), availW);
+  targetH = Math.min(Math.max(targetH, 240), availH);
+
+  const beforeW = innerWidth;
+  window.resizeTo(targetW, targetH);
+  setTimeout(() => {
+    if (innerWidth === beforeW && !fullscreenWarned) {
+      fullscreenWarned = true;
+      setStatus('status.windowResizeUnsupported');
+    }
+  }, 120);
+}
+
+function handleStreamOrientation(info) {
+  const o = orientationOf(info?.resolution);
+  if (!o) return;
+  if (lastOrientation === null) {
+    lastOrientation = o.landscape; // first connection: keep the user's window
+    return;
+  }
+  if (o.landscape === lastOrientation) return;
+  lastOrientation = o.landscape;
+  if (settings.autoResizeWindow && !document.fullscreenElement) {
+    autoResizeWindow(o.w, o.h, o.landscape);
+  }
+}
+
+// Phone audio plays in the browser via the engine's AudioPlayer; its volume is
+// a browser-local setting (0..100) applied immediately, no stream restart.
+function applyAudioVolume() {
+  const v = Math.max(0, Math.min(1, Number(settings.volume ?? 100) / 100));
+  window.phoneLinkHandle?.setAudioVolume?.(v);
+}
+document.getElementById('set-volume').addEventListener('input', (event) => {
+  const v = Number(event.target.value);
+  window.phoneLinkHandle?.setAudioVolume?.(v / 100);
+});
+
 function readSettingsForm() {
   return normalizeSettings({
     resolution: formFields.resolution.value,
@@ -138,6 +265,9 @@ function readSettingsForm() {
     railScale: Number(formFields.railScale.value),
     statusScale: Number(formFields.statusScale.value),
     navButtonMode: formFields.navButtonMode.value,
+    wheelSteps: Number(formFields.wheelSteps.value),
+    volume: Number(formFields.volume.value),
+    autoResizeWindow: formFields.autoResizeWindow.checked,
   });
 }
 
@@ -148,6 +278,7 @@ overlay.addEventListener('click', (event) => {
 window.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   if (!overlay.hidden) closeSettings();
+  else if (!chatPanel.hidden) chatPanel.hidden = true;
   else if (document.body.classList.contains('screen-fullscreen')) setFullscreen(false);
 });
 document.getElementById('settings-reset').addEventListener('click', () => {
@@ -156,6 +287,7 @@ document.getElementById('settings-reset').addEventListener('click', () => {
 document.getElementById('settings-apply').addEventListener('click', applySettings);
 
 function applyTypography() {
+  applyWheelScale();
   const root = document.documentElement;
   root.style.setProperty('--ui-font-scale', String(settings.uiFontSize));
   root.style.setProperty('--ui-text-color', settings.uiFontColor);
@@ -179,11 +311,18 @@ function applyLanguage() {
   for (const el of document.querySelectorAll('[data-i18n-aria]')) {
     el.setAttribute('aria-label', t(el.dataset.i18nAria));
   }
+  for (const el of document.querySelectorAll('[data-i18n-placeholder]')) {
+    el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
+  }
   lockMessage = lockHint(screenState, lang);
   renderStatus();
   setFullscreen(document.body.classList.contains('screen-fullscreen'));
+  updateBrowserFullscreenLabel();
   labelToolbox();
   localizeEngineDom();
+  updateChatLabels();
+  renderChatStatus();
+  renderChatSaveStatus();
 }
 
 // Every status update funnels through here as a key + variables, so a language
@@ -406,6 +545,372 @@ for (const button of document.querySelectorAll('[data-key]')) {
   });
 }
 
+// ---------------------------------------------------------------------------
+// Chat. The configuration lives on the backend (/api/chat-config); this page
+// only mirrors it. Chat is a separate entry point: every call here is guarded
+// and reports into the chat panel only, so a broken chat can never take the
+// stream, the toolbox or the key buttons down.
+// ---------------------------------------------------------------------------
+const CHAT_MAX_BUBBLES = 100;
+
+const chatFab = document.getElementById('chat-fab');
+const chatPanel = document.getElementById('chat-panel');
+const chatMessagesEl = document.getElementById('chat-messages');
+const chatEmptyEl = document.getElementById('chat-empty');
+const chatStatusEl = document.getElementById('chat-status');
+const chatInput = document.getElementById('chat-input');
+const chatSendButton = document.getElementById('chat-send');
+const chatSaveStatusEl = document.getElementById('chat-settings-status');
+const chatFormFields = {
+  enabled: document.getElementById('set-chat-enabled'),
+  baseUrl: document.getElementById('set-chat-base-url'),
+  model: document.getElementById('set-chat-model'),
+  apiKey: document.getElementById('set-chat-api-key'),
+  screenshot: document.getElementById('set-chat-screenshot'),
+  maxSteps: document.getElementById('set-chat-max-steps'),
+};
+
+// Last publicConfig from the backend ({enabled, baseUrl, model, maxSteps,
+// screenshot, hasApiKey}); null until the first GET succeeds. History is
+// display-only and lives until reload, per the design doc.
+let chatConfig = null;
+let chatRunning = false;
+let chatSaveStatus = { key: '', vars: {} };
+
+function applyChatVisibility() {
+  // Icon hidden while disabled: no entry point means no accidental 503s.
+  const show = Boolean(chatConfig?.enabled);
+  chatFab.hidden = !show;
+  if (!show) chatPanel.hidden = true;
+}
+
+function updateChatLabels() {
+  const label = t('chat.button');
+  chatFab.title = label;
+  chatFab.setAttribute('aria-label', label);
+  setChatDockButton();
+  // The backend never echoes the key back, only whether one is stored.
+  chatFormFields.apiKey.placeholder = chatConfig?.hasApiKey
+    ? t('chat.settings.apiKeySet')
+    : t('chat.settings.apiKeyHint');
+}
+
+function renderChatStatus() {
+  chatStatusEl.textContent = chatRunning ? t('chat.running') : '';
+  chatSendButton.disabled = chatRunning;
+  chatInput.disabled = chatRunning;
+}
+
+function renderChatSaveStatus() {
+  chatSaveStatusEl.textContent = chatSaveStatus.key ? t(chatSaveStatus.key, chatSaveStatus.vars) : '';
+}
+
+function syncChatEmpty() {
+  chatEmptyEl.hidden = Boolean(chatMessagesEl.querySelector('.chat-msg'));
+}
+
+function addChatBubble(kind, text, steps) {
+  const bubble = document.createElement('div');
+  bubble.className = `chat-msg chat-msg--${kind}`;
+  const body = document.createElement('p');
+  body.textContent = text;
+  bubble.appendChild(body);
+  if (Array.isArray(steps) && steps.length > 0) {
+    const line = document.createElement('div');
+    line.className = 'chat-steps';
+    for (const step of steps) {
+      const chip = document.createElement('span');
+      chip.className = step.ok ? 'chat-step' : 'chat-step chat-step--fail';
+      chip.textContent = `${step.tool ?? '?'} ${step.ok ? '✓' : '✗'}`;
+      line.appendChild(chip);
+    }
+    bubble.appendChild(line);
+  }
+  chatMessagesEl.appendChild(bubble);
+  // A long session only ever keeps the tail on screen.
+  let count = chatMessagesEl.querySelectorAll('.chat-msg').length;
+  while (count-- > CHAT_MAX_BUBBLES) {
+    chatMessagesEl.querySelector('.chat-msg').remove();
+  }
+  chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+  syncChatEmpty();
+}
+
+function chatErrorText(res, payload) {
+  const error = typeof payload?.error === 'string' ? payload.error : '';
+  if (error === 'chat disabled') return t('chat.error.disabled');
+  if (error === 'chat unavailable') return t('chat.error.unavailable');
+  return t('chat.error.request', { status: res.status, error });
+}
+
+async function sendChatMessage() {
+  const message = chatInput.value.trim();
+  if (!message || chatRunning) return;
+  chatInput.value = '';
+  addChatBubble('user', message);
+  chatRunning = true;
+  renderChatStatus();
+  try {
+    // lang carries the UI language so the backend answers in kind.
+    const res = await fetch(CHAT_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message, lang }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      addChatBubble('error', chatErrorText(res, payload));
+    } else {
+      // runAgentTurn always answers with a non-empty string; anything else
+      // means the backend is not what we expect.
+      const reply = typeof payload.reply === 'string' && payload.reply !== ''
+        ? payload.reply
+        : t('chat.error.unavailable');
+      addChatBubble('assistant', reply, payload.steps);
+    }
+  } catch (err) {
+    addChatBubble('error', t('chat.error.network', { error: messageOf(err) }));
+  } finally {
+    chatRunning = false;
+    renderChatStatus();
+    chatInput.focus();
+  }
+}
+
+document.getElementById('chat-form').addEventListener('submit', (event) => {
+  event.preventDefault();
+  sendChatMessage();
+});
+// The chat head is the drag handle; buttons inside it stay clickable. Pointer
+// events cover mouse, touch and pen with one code path. Docked mode turns the
+// panel into a layout column, so dragging is disabled there.
+const chatHead = chatPanel.querySelector('.chat-head');
+const chatDockButton = document.getElementById('chat-dock');
+let chatDocked = false;
+
+function setChatDockButton() {
+  const label = t(chatDocked ? 'chat.undock' : 'chat.dock');
+  chatDockButton.title = label;
+  chatDockButton.setAttribute('aria-label', label);
+  chatDockButton.disabled = !canDock(window.innerWidth);
+}
+
+function updateDockCentering() {
+  if (!chatDocked) return;
+  const streamWidth = streamEl.getBoundingClientRect().width;
+  const chatWidth = chatPanel.getBoundingClientRect().width;
+  document.body.classList.toggle('chat-centered', shouldCenterDock(streamWidth, chatWidth));
+}
+
+function enterChatDock() {
+  if (chatDocked || !canDock(window.innerWidth)) {
+    if (!canDock(window.innerWidth)) setStatus('chat.dockNarrow');
+    return;
+  }
+  // Lock the current picture width (canvas plus rail) so the mirrored screen
+  // keeps its visible size while the chat panel takes the remaining space.
+  const canvas = streamEl.querySelector('canvas.video-layer');
+  const rail = streamEl.querySelector('.control-buttons-list');
+  const canvasWidth = canvas ? canvas.getBoundingClientRect().width : 0;
+  const railWidth = rail ? rail.getBoundingClientRect().width : 0;
+  const lockedWidth = Math.max(240, Math.round(canvasWidth + railWidth));
+  document.body.style.setProperty('--dock-stream-width', `${lockedWidth}px`);
+  // Drag offsets are meaningless in a layout column; clear them for the dock.
+  chatPanel.style.left = '';
+  chatPanel.style.top = '';
+  chatPanel.style.right = '';
+  chatPanel.style.bottom = '';
+  chatDocked = true;
+  document.body.classList.add('chat-docked');
+  writeChatDock(localStorage, true);
+  setChatDockButton();
+  updateDockCentering();
+}
+
+function exitChatDock() {
+  if (!chatDocked) return;
+  chatDocked = false;
+  document.body.classList.remove('chat-docked', 'chat-centered');
+  document.body.style.removeProperty('--dock-stream-width');
+  writeChatDock(localStorage, false);
+  // Restore the user's previous floating position, if any.
+  const saved = readChatPosition(localStorage);
+  if (saved) applyChatPosition(saved);
+  else {
+    chatPanel.style.left = '';
+    chatPanel.style.top = '';
+    chatPanel.style.right = '';
+    chatPanel.style.bottom = '';
+  }
+  setChatDockButton();
+}
+
+function closeChat() {
+  exitChatDock();
+  chatPanel.hidden = true;
+}
+
+chatDockButton.addEventListener('click', () => {
+  if (chatDocked) exitChatDock();
+  else enterChatDock();
+});
+
+function applyChatPosition(position) {
+  const rect = chatPanel.getBoundingClientRect();
+  const bounded = clampPanelPosition(
+    position.x, position.y, rect.width, rect.height,
+    window.innerWidth, window.innerHeight,
+  );
+  chatPanel.style.left = `${bounded.x}px`;
+  chatPanel.style.top = `${bounded.y}px`;
+  chatPanel.style.right = 'auto';
+  chatPanel.style.bottom = 'auto';
+}
+
+let chatDrag = null;
+
+chatHead.addEventListener('pointerdown', (event) => {
+  if (chatDocked || event.button !== 0 || event.target.closest('button')) return;
+  const rect = chatPanel.getBoundingClientRect();
+  // Switch from the docked right/bottom anchor to explicit left/top.
+  chatPanel.style.left = `${rect.left}px`;
+  chatPanel.style.top = `${rect.top}px`;
+  chatPanel.style.right = 'auto';
+  chatPanel.style.bottom = 'auto';
+  chatDrag = {
+    id: event.pointerId,
+    pointerX: event.clientX,
+    pointerY: event.clientY,
+    panelX: rect.left,
+    panelY: rect.top,
+    width: rect.width,
+    height: rect.height,
+  };
+  chatHead.setPointerCapture(event.pointerId);
+  chatHead.classList.add('dragging');
+  event.preventDefault();
+});
+
+chatHead.addEventListener('pointermove', (event) => {
+  if (!chatDrag || event.pointerId !== chatDrag.id) return;
+  const next = clampPanelPosition(
+    chatDrag.panelX + event.clientX - chatDrag.pointerX,
+    chatDrag.panelY + event.clientY - chatDrag.pointerY,
+    chatDrag.width, chatDrag.height,
+    window.innerWidth, window.innerHeight,
+  );
+  chatPanel.style.left = `${next.x}px`;
+  chatPanel.style.top = `${next.y}px`;
+});
+
+function endChatDrag(event) {
+  if (!chatDrag || event.pointerId !== chatDrag.id) return;
+  chatDrag = null;
+  chatHead.classList.remove('dragging');
+  writeChatPosition(localStorage, {
+    x: Number.parseFloat(chatPanel.style.left) || 0,
+    y: Number.parseFloat(chatPanel.style.top) || 0,
+  });
+}
+
+chatHead.addEventListener('pointerup', endChatDrag);
+chatHead.addEventListener('pointercancel', endChatDrag);
+
+window.addEventListener('resize', () => {
+  if (chatDocked) {
+    if (!canDock(window.innerWidth)) {
+      exitChatDock();
+      setStatus('chat.dockNarrow');
+    } else {
+      setChatDockButton();
+      updateDockCentering();
+    }
+    return;
+  }
+  const saved = readChatPosition(localStorage);
+  if (saved && !chatPanel.hidden) applyChatPosition(saved);
+});
+
+chatFab.addEventListener('click', () => {
+  if (chatPanel.hidden) {
+    chatPanel.hidden = false;
+    if (readChatDock(localStorage) && canDock(window.innerWidth)) enterChatDock();
+    else {
+      const saved = readChatPosition(localStorage);
+      if (saved) applyChatPosition(saved);
+    }
+    chatInput.focus();
+  } else {
+    closeChat();
+  }
+});
+document.getElementById('chat-close').addEventListener('click', closeChat);
+document.getElementById('chat-clear').addEventListener('click', () => {
+  for (const el of chatMessagesEl.querySelectorAll('.chat-msg')) el.remove();
+  syncChatEmpty();
+  chatInput.focus();
+});
+
+async function refreshChatConfig() {
+  try {
+    const res = await fetch(CHAT_CONFIG_URL);
+    chatConfig = res.ok ? await res.json() : null;
+  } catch {
+    // Bridge down: no chat icon, everything else unaffected.
+    chatConfig = null;
+  }
+  applyChatVisibility();
+  updateChatLabels();
+}
+
+function fillChatForm() {
+  chatFormFields.enabled.checked = Boolean(chatConfig?.enabled);
+  chatFormFields.baseUrl.value = chatConfig?.baseUrl ?? '';
+  chatFormFields.model.value = chatConfig?.model ?? '';
+  chatFormFields.apiKey.value = '';
+  chatFormFields.screenshot.checked = chatConfig?.screenshot ?? true;
+  chatFormFields.maxSteps.value = String(chatConfig?.maxSteps ?? 8);
+  updateChatLabels();
+}
+
+async function saveChatSettings() {
+  const patch = {
+    enabled: chatFormFields.enabled.checked,
+    baseUrl: chatFormFields.baseUrl.value.trim(),
+    model: chatFormFields.model.value.trim(),
+    screenshot: chatFormFields.screenshot.checked,
+  };
+  // Mirror the backend maxSteps policy: integers clamped to 1..32 (the
+  // input's min/max), garbage dropped rather than posted. The key is sent
+  // only when the user typed one, so the stored value survives every other
+  // edit untouched.
+  const maxSteps = Number.parseInt(chatFormFields.maxSteps.value, 10);
+  if (Number.isFinite(maxSteps)) patch.maxSteps = Math.min(32, Math.max(1, maxSteps));
+  if (chatFormFields.apiKey.value !== '') patch.apiKey = chatFormFields.apiKey.value;
+  try {
+    const res = await fetch(CHAT_CONFIG_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(patch),
+    });
+    if (!res.ok) {
+      const detail = await res.json().catch(() => ({}));
+      throw new Error(detail.error ? `${res.status} — ${detail.error}` : String(res.status));
+    }
+    chatConfig = await res.json();
+    applyChatVisibility();
+    fillChatForm();
+    chatSaveStatus = { key: 'chat.settings.saved', vars: {} };
+  } catch (err) {
+    chatSaveStatus = { key: 'chat.settings.saveFailed', vars: { error: messageOf(err) } };
+  }
+  renderChatSaveStatus();
+}
+
+document.getElementById('chat-settings-save').addEventListener('click', saveChatSettings);
+
+refreshChatConfig();
+
 const RETRY_DELAY_MS = 1200;
 
 // Each attempt gets a generation. Stopping a stream fires its disconnect
@@ -425,6 +930,7 @@ function startStream() {
 
   options.onConnect = (info) => {
     if (gen !== generation) return;
+    applyAudioVolume();
     labelToolbox();
     const degraded = isDegradedStream(info?.resolution, size);
     const canRetry = attempts < ladder.length;
@@ -443,6 +949,7 @@ function startStream() {
     setStatus('status.connected', {
       resolution: `${resolution}${degraded ? t('status.lowRes') : ''}`,
     });
+    handleStreamOrientation(info);
   };
   options.onDisconnect = (reason) => {
     if (gen !== generation) return;
@@ -452,12 +959,17 @@ function startStream() {
     if (gen !== generation) return;
     setStatus('status.error', { error: messageOf(err) });
   };
+  options.onResize = (info) => {
+    if (gen !== generation) return;
+    handleStreamOrientation(info);
+  };
 
   window.phoneLinkHandle = window.WsScrcpy.startStream(streamEl, DEVICE_ID, options);
 }
 
 function applySettings() {
   settings = saveSettings(localStorage, readSettingsForm());
+  applyAudioVolume();
   ladder = sizeLadder(settings);
   applyLanguage();
   closeSettings();
@@ -478,11 +990,29 @@ function applySettings() {
 
 applyLanguage();
 
-if (!isUsableContext(location.protocol, location.hostname)) {
-  setStatus('status.insecure');
-} else if (!window.WsScrcpy || typeof window.WsScrcpy.startStream !== 'function') {
-  setStatus('status.engineDown');
-} else {
+async function boot() {
+  if (!isUsableContext(location.protocol, location.hostname)) {
+    setStatus('status.insecure');
+    return;
+  }
+  if (!window.WsScrcpy || typeof window.WsScrcpy.startStream !== 'function') {
+    setStatus('status.engineDown');
+    return;
+  }
+  // Ask the local bridge which device serial is configured, so changing
+  // phones is a backend env-var change only.
+  try {
+    const res = await fetch(`${BRIDGE_BASE}/health`);
+    if (res.ok) {
+      const info = await res.json();
+      if (typeof info.serial === 'string' && info.serial) {
+        DEVICE_ID = info.serial;
+        window.__PHONE_SERIAL = info.serial;
+      }
+    }
+  } catch {
+    // Bridge not up yet: keep the fallback serial.
+  }
   setStatus('status.connectPhone');
   try {
     startStream();
@@ -490,3 +1020,5 @@ if (!isUsableContext(location.protocol, location.hostname)) {
     setStatus('status.engineDownError', { error: messageOf(err) });
   }
 }
+
+boot();

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DEFAULT_USB_SERIAL } from '../server/adb.mjs';
 import { buildPlan, copyWeb, engineEnv, main } from '../scripts/start.mjs';
 
 test('plan enforces usb before copying and starting the engine', () => {
@@ -56,7 +57,8 @@ test('copyWeb copies the three web files and shared keys into the public dir as 
   }
 });
 
-// Injected runtime: no real ADB, engine, bridge, timers, or process listeners.
+// Injected runtime: no real ADB, engine, bridge, ghost, timers, or process
+// listeners.
 function fakeRuntime(overrides = {}) {
   const calls = {
     ensureUsb: 0,
@@ -65,23 +67,56 @@ function fakeRuntime(overrides = {}) {
     order: [],
     bridgeStart: 0,
     bridgeStop: 0,
+    ghostStart: 0,
+    ghostStop: 0,
+    ghostListTools: 0,
+    ghostCalls: [],
     kill: 0,
     setTimer: 0,
     clearTimer: 0,
   };
   const handlers = new Map();
   const interval = Symbol('usb-interval');
-  const child = { kill: () => { calls.kill += 1; } };
+  const child = { kill: () => { calls.order.push('kill'); calls.kill += 1; } };
+  const ghost = {
+    start: async () => { calls.order.push('ghostStart'); calls.ghostStart += 1; },
+    stop: async () => { calls.order.push('ghostStop'); calls.ghostStop += 1; },
+    listTools: async () => { calls.ghostListTools += 1; return []; },
+    callTool: async (name, toolArgs) => {
+      calls.ghostCalls.push({ name, args: toolArgs });
+      return { content: [{ type: 'text', text: '{"locked":false}' }] };
+    },
+  };
   const bridge = {
-    start: async () => { calls.bridgeStart += 1; return { address: 'http://127.0.0.1:8100' }; },
-    stop: async () => { calls.bridgeStop += 1; },
+    start: async () => { calls.order.push('bridgeStart'); calls.bridgeStart += 1; return { address: 'http://127.0.0.1:8100' }; },
+    stop: async () => { calls.order.push('bridgeStop'); calls.bridgeStop += 1; },
+  };
+  // In-memory stand-in for the file store; start.mjs must hand the same
+  // object to the bridge and read config through it in chat.run.
+  const chatConfig = {
+    load: () => ({
+      enabled: true,
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      model: 'qwen3',
+      maxSteps: 8,
+      screenshot: true,
+      apiKey: '',
+    }),
+    save: () => ({}),
+    publicConfig: () => ({}),
   };
   const deps = {
-    adb: { ensureUsbOnly: async () => { calls.ensureUsb += 1; } },
+    adb: {
+      ensureUsbOnly: async () => { calls.ensureUsb += 1; },
+      isLocked: async () => true,
+    },
     engineDir: () => '/x/engine',
     copyWeb: () => { calls.copy += 1; },
+    createGhostClient: (options) => { calls.ghostOptions = options; return ghost; },
+    createChatConfigStore: (options) => { calls.chatConfigOptions = options; return chatConfig; },
     createBridge: (options) => {
       assert.equal(options.port, 8100);
+      calls.bridgeOptions = options;
       return bridge;
     },
     spawn: (command, args, options) => {
@@ -99,7 +134,7 @@ function fakeRuntime(overrides = {}) {
     offSignal: (signal, handler) => { if (handlers.get(signal) === handler) handlers.delete(signal); },
     ...overrides,
   };
-  return { deps, calls, handlers, child, bridge };
+  return { deps, calls, handlers, child, bridge, ghost, chatConfig };
 }
 
 test('the engine is spawned with proxy-aware fetch settings when a proxy is configured', () => {
@@ -198,4 +233,125 @@ test('repeated signals after startup trigger cleanup only once', async () => {
   assert.equal(calls.bridgeStop, 1);
   assert.equal(calls.kill, 1);
   assert.equal(calls.clearTimer, 1);
+});
+
+// ---------------------------------------------------------------------------
+// Chat wiring (Task 7): config store, ghost lifecycle, agent, cleanup order
+// ---------------------------------------------------------------------------
+
+test('main wires the chat config store and ghost agent into the bridge, ghost before bridge', async () => {
+  const { deps, calls, handlers, chatConfig } = fakeRuntime();
+
+  await main(deps);
+
+  assert.equal(calls.ghostOptions.serial, DEFAULT_USB_SERIAL);
+  assert.equal(calls.ghostStart, 1);
+  assert.deepEqual(calls.order.slice(2, 5), ['spawn', 'ghostStart', 'bridgeStart']);
+  assert.equal(calls.bridgeOptions.chatConfig, chatConfig);
+  assert.equal(typeof calls.bridgeOptions.chat.run, 'function');
+
+  await handlers.get('SIGINT')();
+  assert.equal(calls.ghostStop, 1);
+  // Cleanup unwinds in reverse start order: bridge, then ghost, then engine.
+  assert.ok(calls.order.indexOf('bridgeStop') < calls.order.indexOf('ghostStop'));
+  assert.ok(calls.order.indexOf('ghostStop') < calls.order.indexOf('kill'));
+});
+
+test('chat.run goes through the agent loop and the phone-state gate', async () => {
+  const { deps, calls, handlers, chatConfig } = fakeRuntime();
+  // Locked device: the agent must stop before listing tools or calling the
+  // model, and reply with the localized unlock prompt.
+  deps.createGhostClient = () => ({
+    start: async () => { calls.ghostStart += 1; },
+    stop: async () => { calls.ghostStop += 1; },
+    listTools: async () => { calls.ghostListTools += 1; return []; },
+    callTool: async (name, toolArgs) => {
+      calls.ghostCalls.push({ name, args: toolArgs });
+      return { content: [{ type: 'text', text: 'The screen is locked' }] };
+    },
+  });
+
+  await main(deps);
+  // M8: the bridge hands chat.run the config it already loaded for the gate;
+  // run must use it instead of re-reading the store (TOCTOU double load).
+  let loads = 0;
+  const innerLoad = chatConfig.load;
+  chatConfig.load = () => { loads += 1; return innerLoad(); };
+  const turn = await calls.bridgeOptions.chat.run('回到桌面', 'zh', innerLoad());
+  assert.equal(loads, 0, 'chat.run must not re-load the config store');
+
+  assert.match(turn.reply, /解锁/);
+  assert.deepEqual(turn.steps, []);
+  assert.deepEqual(calls.ghostCalls.map((c) => c.name), [], 'lock check uses ADB, not a ghost tool');
+  assert.equal(calls.ghostListTools, 0);
+
+  await handlers.get('SIGINT')();
+});
+
+test('a hanging ghost start is bounded: startup completes with chat disabled', async () => {
+  const { deps, calls, handlers, chatConfig } = fakeRuntime({ ghostStartTimeoutMs: 50 });
+  deps.createGhostClient = () => ({
+    start: () => { calls.ghostStart += 1; return new Promise(() => {}); }, // never resolves
+    stop: async () => { calls.ghostStop += 1; },
+    listTools: async () => [],
+    callTool: async () => ({}),
+  });
+
+  // The bridge must come up even though ghost.start() hangs forever.
+  await main(deps);
+
+  assert.equal(calls.ghostStart, 1);
+  assert.equal(calls.bridgeStart, 1);
+  assert.equal(calls.bridgeOptions.chat, undefined);
+  assert.equal(calls.bridgeOptions.chatConfig, chatConfig);
+  assert.equal(calls.ghostStop, 1); // defensive release of the partial start
+
+  await handlers.get('SIGINT')();
+  assert.equal(calls.ghostStop, 1); // stopped exactly once
+  assert.equal(calls.bridgeStop, 1);
+  assert.equal(calls.kill, 1);
+});
+
+test('a signal while ghost is still starting aborts without hanging cleanup', async () => {
+  let ghostEntered;
+  const entered = new Promise((resolve) => { ghostEntered = resolve; });
+  const { deps, calls, handlers } = fakeRuntime({ ghostStartTimeoutMs: 50 });
+  deps.createGhostClient = () => ({
+    start: () => { calls.ghostStart += 1; ghostEntered(); return new Promise(() => {}); },
+    stop: async () => { calls.ghostStop += 1; },
+    listTools: async () => [],
+    callTool: async () => ({}),
+  });
+
+  const running = main(deps);
+  await entered;
+  await handlers.get('SIGINT')();
+
+  await assert.rejects(running, /startup aborted/);
+  assert.equal(calls.ghostStop, 1);
+  assert.equal(calls.kill, 1);
+  assert.equal(calls.bridgeStart, 0);
+});
+
+test('a ghost that fails to start leaves the bridge and buttons running without chat', async () => {
+  const { deps, calls, handlers, chatConfig } = fakeRuntime();
+  deps.createGhostClient = () => ({
+    start: async () => { calls.ghostStart += 1; throw new Error('uvx not found'); },
+    stop: async () => { calls.ghostStop += 1; },
+    listTools: async () => [],
+    callTool: async () => ({}),
+  });
+
+  // Startup must succeed anyway: chat degrades to unavailable, /keyevent does not.
+  await main(deps);
+
+  assert.equal(calls.bridgeStart, 1);
+  assert.equal(calls.ghostStop, 1); // defensive release of the partial start
+  assert.equal(calls.bridgeOptions.chat, undefined);
+  assert.equal(calls.bridgeOptions.chatConfig, chatConfig);
+
+  await handlers.get('SIGINT')();
+  assert.equal(calls.ghostStop, 1); // stopped exactly once
+  assert.equal(calls.bridgeStop, 1);
+  assert.equal(calls.kill, 1);
 });

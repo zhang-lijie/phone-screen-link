@@ -86,6 +86,27 @@ export const MESSAGES = {
     'settings.statsFontColor': 'Stats text color',
     'settings.railScale': 'Nav bar max size',
     'settings.statusScale': 'Status bar max size',
+    'settings.wheelSteps': 'Wheel scroll multiplier',
+    'settings.volume': 'Browser volume',
+    'settings.autoResizeWindow': 'Resize window on orientation change',
+    'status.windowResizeUnsupported': 'This tab cannot resize windows — use the fullscreen button at the top right',
+    'fullscreen.browserEnter': 'Browser fullscreen',
+    'fullscreen.browserExit': 'Exit browser full',
+    'status.fullscreenFailed': 'Fullscreen was blocked by the browser',
+    'settings.wheel1': '1x',
+    'settings.wheel2': '2x',
+    'settings.wheel3': '3x',
+    'settings.wheel4': '4x',
+    'settings.wheel5': '5x',
+    'settings.wheel6': '6x',
+    'settings.wheel7': '7x',
+    'settings.wheel8': '8x',
+    'settings.wheel9': '9x',
+    'settings.wheel10': '10x',
+    'settings.groupStream': 'Stream',
+    'settings.groupControl': 'Control',
+    'settings.groupDisplay': 'Display',
+    'settings.groupLanguage': 'Language',
     'settings.navButtonMode': 'Nav button display',
     'settings.navIcon': 'Icon',
     'settings.navText': 'Text',
@@ -93,11 +114,41 @@ export const MESSAGES = {
     'settings.fontSmall': 'Small',
     'settings.fontNormal': 'Default',
     'settings.fontLarge': 'Large',
-    'fullscreen.enter': 'Fullscreen',
-    'fullscreen.exit': 'Exit fullscreen',
+    'fullscreen.enter': 'Window fullscreen',
+    'fullscreen.exit': 'Exit window fullscreen',
     'settings.note': 'Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.',
     'settings.reset': 'Reset',
     'settings.apply': 'Apply & restart',
+    // Chat feature: floating button, panel and the settings group. The
+    // config itself lives on the backend; these are display strings only.
+    'chat.button': 'Chat assistant',
+    'chat.title': 'Chat assistant',
+    'chat.close': 'Close chat',
+    'chat.dock': 'Dock chat beside the screen',
+    'chat.undock': 'Undock chat',
+    'chat.dockNarrow': 'Side-by-side needs a window at least 720px wide',
+    'chat.placeholder': 'Ask something, e.g. "go to the home screen"',
+    'chat.send': 'Send',
+    'chat.clear': 'Clear chat',
+    'chat.empty': 'Send a message to control the phone.',
+    'chat.running': 'Working…',
+    'chat.error.network': 'Cannot reach the chat service — {error}',
+    'chat.error.request': 'Request failed ({status}) — {error}',
+    'chat.error.disabled': 'Chat is disabled or the model name is empty — set it in the chat settings.',
+    'chat.error.unavailable': 'Chat service unavailable — is the control bridge running?',
+    'chat.settings.group': 'Chat',
+    'chat.settings.enabled': 'Enable chat',
+    'chat.settings.baseUrl': 'Model base URL',
+    'chat.settings.model': 'Model name',
+    'chat.settings.apiKey': 'API Key',
+    'chat.settings.apiKeyHint': 'Optional',
+    'chat.settings.apiKeySet': 'Saved — leave blank to keep',
+    'chat.settings.screenshot': 'Send screenshots to the model',
+    'chat.settings.maxSteps': 'Max steps per request',
+    'chat.settings.note': 'Chat settings are stored by the local backend and the API Key never travels back to the page. An empty model name disables chat. Saving does not restart the stream.',
+    'chat.settings.save': 'Save chat settings',
+    'chat.settings.saved': 'Chat settings saved',
+    'chat.settings.saveFailed': 'Save failed — {error}',
     'status.connecting': 'Connecting…',
     'status.connectPhone': 'Connecting to phone…',
     'status.connected': 'Connected{resolution}',
@@ -194,6 +245,27 @@ export const MESSAGES = {
     'settings.statsFontColor': '统计文字颜色',
     'settings.railScale': '导航条最大尺寸',
     'settings.statusScale': '状态条最大尺寸',
+    'settings.wheelSteps': '滚轮滚动倍率',
+    'settings.volume': '浏览器播放音量',
+    'settings.autoResizeWindow': '画面方向变化时调整窗口',
+    'status.windowResizeUnsupported': '当前标签页无法调整窗口大小 — 请使用右上角的全屏按钮',
+    'fullscreen.browserEnter': '浏览器全屏',
+    'fullscreen.browserExit': '退出浏览器全屏',
+    'status.fullscreenFailed': '浏览器拒绝了全屏请求',
+    'settings.wheel1': '1×',
+    'settings.wheel2': '2×',
+    'settings.wheel3': '3×',
+    'settings.wheel4': '4×',
+    'settings.wheel5': '5×',
+    'settings.wheel6': '6×',
+    'settings.wheel7': '7×',
+    'settings.wheel8': '8×',
+    'settings.wheel9': '9×',
+    'settings.wheel10': '10×',
+    'settings.groupStream': '投屏设置',
+    'settings.groupControl': '控制设置',
+    'settings.groupDisplay': '显示设置',
+    'settings.groupLanguage': '语言设置',
     'settings.navButtonMode': '导航按钮显示',
     'settings.navIcon': '图标',
     'settings.navText': '文字',
@@ -201,11 +273,39 @@ export const MESSAGES = {
     'settings.fontSmall': '小',
     'settings.fontNormal': '默认',
     'settings.fontLarge': '大',
-    'fullscreen.enter': '全屏',
-    'fullscreen.exit': '退出全屏',
+    'fullscreen.enter': '窗口全屏',
+    'fullscreen.exit': '退出窗口全屏',
     'settings.note': '自动模式先尝试 1280，被手机拒绝时会自动降档。应用设置会重启画面。',
     'settings.reset': '恢复默认',
     'settings.apply': '应用并重启',
+    'chat.button': '聊天助手',
+    'chat.title': '聊天助手',
+    'chat.close': '关闭聊天',
+    'chat.dock': '与画面并排显示',
+    'chat.undock': '取消并排显示',
+    'chat.dockNarrow': '窗口宽度至少 720px 才能并排显示',
+    'chat.placeholder': '输入指令，例如「回到桌面」',
+    'chat.send': '发送',
+    'chat.clear': '清空对话',
+    'chat.empty': '发送消息即可指挥手机。',
+    'chat.running': '正在执行…',
+    'chat.error.network': '无法连接聊天服务 — {error}',
+    'chat.error.request': '请求失败（{status}）— {error}',
+    'chat.error.disabled': '聊天未启用或模型名为空 — 请在设置的聊天分组中填写。',
+    'chat.error.unavailable': '聊天服务不可用 — 控制桥是否已启动？',
+    'chat.settings.group': '聊天',
+    'chat.settings.enabled': '启用聊天',
+    'chat.settings.baseUrl': '模型服务地址',
+    'chat.settings.model': '模型名',
+    'chat.settings.apiKey': 'API Key',
+    'chat.settings.apiKeyHint': '可选',
+    'chat.settings.apiKeySet': '已保存，留空则不修改',
+    'chat.settings.screenshot': '截图发给模型',
+    'chat.settings.maxSteps': '单次最大步数',
+    'chat.settings.note': '聊天设置保存在本机后端，API Key 不会回传到页面；模型名为空时聊天禁用。保存设置不会重启投屏画面。',
+    'chat.settings.saved': '聊天设置已保存',
+    'chat.settings.save': '保存聊天设置',
+    'chat.settings.saveFailed': '保存失败 — {error}',
     'status.connecting': '正在连接…',
     'status.connectPhone': '正在连接手机…',
     'status.connected': '已连接{resolution}',
@@ -333,11 +433,27 @@ export const DEFAULT_SETTINGS = {
   railScale: 1,
   statusScale: 1,
   navButtonMode: 'both',
+  wheelSteps: 2,
+  volume: 100,
+  autoResizeWindow: true,
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
 
+// Wheel-scroll amplification: how many engine scroll steps the phone is
+// scrolled per browser wheel event. The engine converts one browser wheel
+// tick into a single "swipe" message, so the phone screen (1152 CSS px tall)
+// needs ~20 ticks to scroll fully — hence a multiplier here.
+export const WHEEL_SCALE_CHOICES = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+export const DEFAULT_WHEEL_STEPS = 2;
+
 function pick(value, choices, fallback) {
   return choices.includes(value) ? value : fallback;
+}
+
+function clampVolume(value) {
+  const n = Number(value);
+  if (!Number.isFinite(n)) return DEFAULT_SETTINGS.volume;
+  return Math.max(0, Math.min(100, Math.round(n)));
 }
 
 export function normalizeSettings(raw = {}) {
@@ -354,6 +470,9 @@ export function normalizeSettings(raw = {}) {
     railScale: pick(Number(raw?.railScale), RAIL_SCALES, DEFAULT_SETTINGS.railScale),
     statusScale: pick(Number(raw?.statusScale), STATUS_SCALES, DEFAULT_SETTINGS.statusScale),
     navButtonMode: pick(raw?.navButtonMode, NAV_BUTTON_MODES, DEFAULT_SETTINGS.navButtonMode),
+    wheelSteps: pick(Number(raw?.wheelSteps), WHEEL_SCALE_CHOICES, DEFAULT_SETTINGS.wheelSteps),
+    volume: clampVolume(raw?.volume),
+    autoResizeWindow: typeof raw?.autoResizeWindow === 'boolean' ? raw.autoResizeWindow : DEFAULT_SETTINGS.autoResizeWindow,
   };
 }
 
@@ -377,6 +496,70 @@ export function saveSettings(storage, settings) {
 
 // "auto" walks the measured ladder; a fixed resolution is used as-is, so the
 // user's explicit choice is not silently replaced.
+// Chat dock (side-by-side) mode. Kept in localStorage like the drag position.
+export const CHAT_DOCK_KEY = 'phone-link-chat-docked';
+export const MIN_DOCK_WIDTH = 720;
+
+export function canDock(viewportWidth) {
+  return Number.isFinite(viewportWidth) && viewportWidth >= MIN_DOCK_WIDTH;
+}
+
+export function readChatDock(storage) {
+  try {
+    return storage?.getItem(CHAT_DOCK_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+export function writeChatDock(storage, docked) {
+  try {
+    storage?.setItem(CHAT_DOCK_KEY, docked ? 'true' : 'false');
+  } catch {
+    // Storage disabled: the dock mode simply won't survive a reload.
+  }
+}
+
+export function shouldCenterDock(streamWidth, chatWidth) {
+  return chatWidth > streamWidth;
+}
+
+// Chat panel drag position. The panel is non-modal and can be moved freely,
+// but its head (the drag handle, ~40px tall) must stay on screen so the user
+// can always grab it again. Horizontally a 40px strip stays visible.
+export const CHAT_POSITION_KEY = 'phone-link-chat-position';
+
+export function clampPanelPosition(x, y, width, height, viewportWidth, viewportHeight) {
+  const margin = 40;
+  const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
+  return {
+    x: clamp(x, margin - width, viewportWidth - margin),
+    y: clamp(y, 0, viewportHeight - margin),
+  };
+}
+
+export function readChatPosition(storage) {
+  try {
+    const raw = storage?.getItem(CHAT_POSITION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && Number.isFinite(parsed.x) && Number.isFinite(parsed.y)) {
+      return { x: parsed.x, y: parsed.y };
+    }
+  } catch {
+    // Corrupt or unavailable storage: fall back to the docked position.
+  }
+  return null;
+}
+
+export function writeChatPosition(storage, position) {
+  try {
+    storage?.setItem(CHAT_POSITION_KEY, JSON.stringify({ x: position.x, y: position.y }));
+  } catch {
+    // Storage disabled: the position simply won't survive a reload.
+  }
+}
+
 export function sizeLadder(settings) {
   const s = normalizeSettings(settings);
   return s.resolution === 'auto' ? [...STREAM_SIZE_LADDER] : [Number(s.resolution)];

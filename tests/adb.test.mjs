@@ -31,3 +31,32 @@ test('keyEvent pins the usb serial', async () => {
   await adb.keyEvent('home');
   assert.deepEqual(calls[0], ['-s', DEFAULT_USB_SERIAL, 'shell', 'input', 'keyevent', '3']);
 });
+
+test('isLocked: asleep screen fails closed as locked', async () => {
+  const adb = createAdb(async (args) => {
+    if (args.includes('power')) return '  mWakefulness=Asleep\n';
+    return '  deviceLocked=0\n';
+  });
+  assert.equal(await adb.isLocked(), true);
+});
+
+test('isLocked: awake with no keyguard is unlocked', async () => {
+  const adb = createAdb(async (args) => {
+    if (args.includes('power')) return '  mWakefulness=Awake\n';
+    return '  deviceLocked=0\n';
+  });
+  assert.equal(await adb.isLocked(), false);
+});
+
+test('isLocked: awake but keyguard locked fails closed as locked', async () => {
+  const adb = createAdb(async (args) => {
+    if (args.includes('power')) return '  mWakefulness=Awake\n';
+    return '  deviceLocked=1\n';
+  });
+  assert.equal(await adb.isLocked(), true);
+});
+
+test('isLocked: unreadable wakefulness fails closed as locked', async () => {
+  const adb = createAdb(async () => '');
+  assert.equal(await adb.isLocked(), true);
+});

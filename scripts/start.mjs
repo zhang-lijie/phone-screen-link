@@ -2,8 +2,11 @@ import { spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { adb } from '../server/adb.mjs';
+import { adb, DEFAULT_USB_SERIAL } from '../server/adb.mjs';
+import { runAgentTurn } from '../server/chat-agent.mjs';
+import { createChatConfigStore } from '../server/chat-config.mjs';
 import { createBridge } from '../server/bridge.mjs';
+import { createGhostClient } from '../server/ghost-client.mjs';
 import { engineDir } from './setup.mjs';
 
 const BRIDGE_PORT = 8100;
@@ -11,6 +14,7 @@ const ENGINE_URL = 'http://127.0.0.1:8000/';
 const USB_RECHECK_MS = 5_000;
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 250;
+const GHOST_START_TIMEOUT_MS = 25_000;
 const ABORTED = Symbol('startup-aborted');
 
 export function buildPlan({ engineDir, webDir }) {
@@ -42,6 +46,17 @@ export function copyWeb({ files, webDir, sharedDir }, targetDir) {
 }
 
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Bound a startup promise so a hang cannot hold the rest of startup (or
+// cleanup) hostage. The timer is cleared as soon as the promise settles;
+// Promise.race keeps a handler on the input, so a late rejection is safe.
+function withTimeout(promise, ms, label) {
+  let timer;
+  const timeout = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
 
 // The engine resolves an OPTIONAL node-pty dependency on startup and awaits it
 // before it starts serving. Its fetch does not use the system HTTPS proxy
@@ -80,12 +95,15 @@ export async function main(deps = {}) {
   const {
     adb: adbClient = adb,
     createBridge: makeBridge = createBridge,
+    createChatConfigStore: makeChatConfig = createChatConfigStore,
+    createGhostClient: makeGhost = createGhostClient,
     spawn: spawnChild = spawn,
     waitForEngine: checkEngine = waitForEngine,
     engineDir: getEngineDir = engineDir,
     copyWeb: copyFiles = copyWeb,
     setTimer = setInterval,
     clearTimer = clearInterval,
+    ghostStartTimeoutMs = GHOST_START_TIMEOUT_MS,
     log = console.log,
     error = console.error,
     onSignal = (signal, handler) => process.once(signal, handler),
@@ -105,6 +123,9 @@ export async function main(deps = {}) {
   let engine;
   let bridge;
   let bridgeStart;
+  let ghost;
+  let ghostStart;
+  let ghostStopped = false;
   let usbInterval;
   let bridgeStopped = false;
   let engineKilled = false;
@@ -131,16 +152,33 @@ export async function main(deps = {}) {
           // A failed start has no server to close.
         }
       }
+      if (ghostStart) {
+        const starting = ghostStart;
+        ghostStart = undefined;
+        try {
+          // Same bound as startup: a hanging ghost must not hang cleanup.
+          await withTimeout(starting, ghostStartTimeoutMs, 'ghost MCP server start (cleanup)');
+        } catch {
+          // A failed start is released once by the startup path.
+        }
+      }
       try {
         if (bridge && !bridgeStopped) {
           bridgeStopped = true;
           await bridge.stop();
         }
       } finally {
-        // The child must die even if stopping the bridge fails.
-        if (engine && !engineKilled) {
-          engineKilled = true;
-          engine.kill();
+        try {
+          if (ghost && !ghostStopped) {
+            ghostStopped = true;
+            await ghost.stop();
+          }
+        } finally {
+          // The child must die even if stopping the bridge or ghost fails.
+          if (engine && !engineKilled) {
+            engineKilled = true;
+            engine.kill();
+          }
         }
       }
     };
@@ -170,7 +208,48 @@ export async function main(deps = {}) {
     });
     if (aborted) throw new Error('startup aborted');
 
-    bridge = makeBridge({ adb: adbClient, port: bridgeStep.port });
+    // Chat wiring, in order: backend config store, then the ghost MCP tools
+    // layer, then the agent loop wrapped for the bridge. None of it may take
+    // projection or /keyevent down: when ghost cannot start, chat is simply
+    // absent and the bridge reports it as unavailable.
+    const chatConfig = makeChatConfig({ file: join(projectDir, 'state', 'chat.json') });
+    try {
+      ghost = makeGhost({ serial: DEFAULT_USB_SERIAL });
+      // A hanging ghost.start() (e.g. uvx stuck downloading) must not block
+      // the bridge: bound it and fall into the chat-disabled catch below.
+      ghostStart = withTimeout(ghost.start(), ghostStartTimeoutMs, 'ghost MCP server start');
+      await ghostStart;
+      ghostStart = undefined;
+    } catch (err) {
+      error('ghost MCP server failed to start; chat disabled:', err);
+      if (ghost && !ghostStopped) {
+        ghostStopped = true;
+        try {
+          await ghost.stop(); // release anything a partial start acquired
+        } catch {
+          // Nothing else to release.
+        }
+      }
+      ghost = undefined;
+    }
+    if (aborted) throw new Error('startup aborted');
+
+    // The bridge passes the config it already loaded for the enablement gate;
+    // re-loading here would race a concurrent settings save (TOCTOU).
+    const chat = ghost
+      ? {
+          run: (userText, lang, config) => runAgentTurn({
+            config,
+            ghost,
+            userText,
+            lang,
+            // Real lock/sleep state comes from ADB; ghost has no lock tool.
+            deps: { isLocked: () => adbClient.isLocked() },
+          }),
+        }
+      : undefined;
+
+    bridge = makeBridge({ adb: adbClient, port: bridgeStep.port, chatConfig, chat });
     bridgeStart = bridge.start();
     const { address } = await bridgeStart;
     bridgeStart = undefined;

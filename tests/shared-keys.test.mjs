@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   BITRATE_CHOICES,
+  CHAT_DOCK_KEY,
+  CHAT_POSITION_KEY,
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
   FPS_CHOICES,
@@ -11,12 +13,16 @@ import {
   NAV_BUTTON_MODES,
   RAIL_SCALES,
   RESOLUTION_CHOICES,
+  WHEEL_SCALE_CHOICES,
+  DEFAULT_WHEEL_STEPS,
   SETTINGS_STORAGE_KEY,
   STREAM_SIZE_LADDER,
   STATS_FONT_SCALES,
   STATUS_SCALES,
   UI_FONT_SCALES,
   buildStreamOptions,
+  canDock,
+  clampPanelPosition,
   effectiveLanguage,
   isDegradedStream,
   isUsableContext,
@@ -24,7 +30,12 @@ import {
   lockHint,
   negotiatedMaxDimension,
   normalizeSettings,
+  readChatDock,
+  readChatPosition,
   saveSettings,
+  shouldCenterDock,
+  writeChatDock,
+  writeChatPosition,
   sizeLadder,
   translate,
   translateStatLine,
@@ -72,6 +83,23 @@ test('the size ladder runs best first and a fixed resolution is requestable', ()
   assert.equal(o.bitrate, 4_000_000);
 });
 
+test('wheel steps are a small validated set, defaulting to 2', () => {
+  assert.deepEqual(WHEEL_SCALE_CHOICES, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
+  assert.equal(DEFAULT_WHEEL_STEPS, 2);
+  assert.equal(DEFAULT_SETTINGS.wheelSteps, 2);
+  assert.equal(normalizeSettings().wheelSteps, 2);
+  assert.equal(normalizeSettings({ wheelSteps: 1 }).wheelSteps, 1);
+  assert.equal(normalizeSettings({ wheelSteps: 5 }).wheelSteps, 5);
+  assert.equal(normalizeSettings({ wheelSteps: 10 }).wheelSteps, 10);
+  assert.equal(normalizeSettings({ volume: 50 }).volume, 50);
+  assert.equal(normalizeSettings({ volume: 200 }).volume, 100);
+  assert.equal(normalizeSettings({ volume: -5 }).volume, 0);
+  assert.equal(normalizeSettings().volume, 100);
+  assert.equal(normalizeSettings({ wheelSteps: 11 }).wheelSteps, 2);
+  assert.equal(normalizeSettings({ wheelSteps: 0 }).wheelSteps, 2);
+  assert.equal(normalizeSettings({ wheelSteps: '3' }).wheelSteps, 3);
+});
+
 test('settings are normalized before reaching the engine', () => {
   assert.deepEqual(normalizeSettings(), DEFAULT_SETTINGS);
   assert.deepEqual(normalizeSettings({ resolution: 'bogus', maxFps: 999, bitrate: 'x', audio: 'yes', language: 'fr' }), DEFAULT_SETTINGS);
@@ -91,9 +119,9 @@ test('settings persist in localStorage and bad data falls back to defaults', () 
   };
   assert.deepEqual(loadSettings(storage), DEFAULT_SETTINGS);
 
-  const chosen = saveSettings(storage, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en' });
+  const chosen = saveSettings(storage, { resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en', wheelSteps: 5 });
   assert.deepEqual(chosen, {
-    ...DEFAULT_SETTINGS, resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en',
+    ...DEFAULT_SETTINGS, resolution: '720', maxFps: 15, bitrate: 2_000_000, audio: false, language: 'en', wheelSteps: 5,
   });
   assert.deepEqual(loadSettings(storage), chosen);
   assert.ok(data.has(SETTINGS_STORAGE_KEY));
@@ -194,6 +222,30 @@ test('translations are complete and interpolate variables', () => {
   assert.equal(translate('fr', 'status.connecting'), MESSAGES.en['status.connecting']);
 });
 
+test('chat strings exist in both languages and interpolate', () => {
+  // The chat feature owns its own key namespace; every chat.* key must be
+  // shipped in both languages (the parity test enforces the sets, this one
+  // enforces that the namespace actually exists and names the required UI
+  // strings: button, title, placeholder, status, errors, settings labels).
+  const chatKeys = Object.keys(MESSAGES.en).filter((key) => key.startsWith('chat.'));
+  assert.ok(chatKeys.length >= 20, 'the chat feature ships its own strings');
+  for (const key of chatKeys) {
+    assert.ok(MESSAGES.zh[key], `${key} has a Chinese value`);
+  }
+  const required = [
+    'chat.button', 'chat.title', 'chat.placeholder', 'chat.send', 'chat.clear',
+    'chat.running', 'chat.error.network', 'chat.error.request', 'chat.error.disabled',
+    'chat.settings.group', 'chat.settings.enabled', 'chat.settings.baseUrl',
+    'chat.settings.model', 'chat.settings.apiKey', 'chat.settings.screenshot',
+    'chat.settings.maxSteps', 'chat.settings.save',
+  ];
+  for (const key of required) {
+    assert.ok(MESSAGES.en[key] && MESSAGES.zh[key], `${key} is shipped in both languages`);
+  }
+  assert.equal(translate('zh', 'chat.error.request', { status: 503, error: 'boom' }), '请求失败（503）— boom');
+  assert.equal(translate('en', 'chat.settings.saveFailed', { error: 'nope' }), 'Save failed — nope');
+});
+
 test('canvas-drawn quality stats are translated without touching their values', () => {
   assert.equal(translateStatLine('Resolution:  522x1080', 'en'), 'Resolution:  522x1080');
   assert.equal(translateStatLine('Resolution:  522x1080', 'zh'), '分辨率:  522x1080');
@@ -219,4 +271,52 @@ test('every engine-owned English string has a translation in both languages', ()
   assert.equal(ENGINE_TEXT_KEYS['Device clipboard ready —'], 'engine.clipboardReady');
   assert.equal(ENGINE_TEXT_KEYS['device is locked — unlock it to see the screen'], 'engine.locked');
   assert.equal(translate('zh', ENGINE_TEXT_KEYS['Refresh stream']), '刷新画面');
+});
+
+test('chat drag: clampPanelPosition keeps part of the panel on screen', () => {
+  // 340x440 panel in a 1280x800 viewport with a 40px visible margin.
+  assert.deepEqual(clampPanelPosition(100, 120, 340, 440, 1280, 800), { x: 100, y: 120 });
+  // The drag handle (head) must remain reachable, so y never goes above 0.
+  assert.deepEqual(clampPanelPosition(-1000, -1000, 340, 440, 1280, 800), { x: -300, y: 0 });
+  assert.deepEqual(clampPanelPosition(9999, 9999, 340, 440, 1280, 800), { x: 1240, y: 760 });
+});
+
+test('chat drag: position storage accepts finite numbers, rejects garbage', () => {
+  const store = new Map();
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+  };
+  assert.equal(readChatPosition(storage), null);
+  writeChatPosition(storage, { x: 12, y: 34 });
+  assert.deepEqual(readChatPosition(storage), { x: 12, y: 34 });
+  assert.ok(store.has(CHAT_POSITION_KEY));
+  store.set(CHAT_POSITION_KEY, '{"x":"bad","y":34}');
+  assert.equal(readChatPosition(storage), null);
+  store.set(CHAT_POSITION_KEY, 'not json');
+  assert.equal(readChatPosition(storage), null);
+});
+
+test('chat dock: width gate, persistence and centering rule', () => {
+  assert.equal(canDock(719), false);
+  assert.equal(canDock(720), true);
+  assert.equal(canDock(1280), true);
+
+  const store = new Map();
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+  };
+  assert.equal(readChatDock(storage), false);
+  writeChatDock(storage, true);
+  assert.equal(readChatDock(storage), true);
+  assert.ok(store.has(CHAT_DOCK_KEY));
+  writeChatDock(storage, false);
+  assert.equal(readChatDock(storage), false);
+  store.set(CHAT_DOCK_KEY, 'garbage');
+  assert.equal(readChatDock(storage), false);
+
+  assert.equal(shouldCenterDock(300, 500), true, 'wider chat centers the pair');
+  assert.equal(shouldCenterDock(500, 300), false, 'narrower chat stays left');
+  assert.equal(shouldCenterDock(400, 400), false);
 });

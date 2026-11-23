@@ -22,21 +22,61 @@
       <button type="button" data-key="volume_up" data-i18n="key.volume_up">VOL+</button>
       <button type="button" data-key="power" data-i18n="key.power">POWER</button>
     </div>
+    <div class="stage">
     <div id="stream" data-i18n-aria="nav.screen" aria-label="Phone screen">
-      <button type="button" id="fullscreen-toggle" class="fullscreen-toggle" title="全屏" aria-label="全屏">
+      <button type="button" id="fullscreen-toggle" class="fullscreen-toggle" title="窗口全屏" aria-label="窗口全屏">
         <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
-          <path d="M4 4h6v2H6v4H4V4zm10 0h6v6h-2V6h-4V4zM4 14h2v4h4v2H4v-6zm14 0h2v6h-6v-2h4v-4z"/>
+          <path d="M4 8H2v8h2V8zm14 0v8h2V8h-2zM6 6h12v12H6V6zm2 2v8h8V8H8z"/>
+        </svg>
+      </button>
+      <button type="button" id="browser-fullscreen-toggle" class="fullscreen-toggle browser-fullscreen-toggle" title="全屏" aria-label="全屏">
+        <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+          <path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/>
         </svg>
       </button>
     </div>
+    <section id="chat-panel" class="chat-panel" role="dialog" aria-labelledby="chat-title" hidden>
+      <header class="chat-head">
+        <h2 id="chat-title" data-i18n="chat.title">Chat assistant</h2>
+        <div class="chat-head-actions">
+          <button type="button" id="chat-dock" title="Dock chat beside the screen" aria-label="Dock chat beside the screen">
+            <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
+              <path d="M3 4h8v16H3V4zm10 0h8v16h-8V4z"/>
+            </svg>
+          </button>
+          <button type="button" id="chat-close" data-i18n-aria="chat.close" aria-label="Close chat">&times;</button>
+        </div>
+      </header>
+      <div id="chat-messages" class="chat-messages">
+        <p id="chat-empty" class="chat-empty" data-i18n="chat.empty">Send a message to control the phone.</p>
+      </div>
+      <p id="chat-status" class="chat-status" role="status" aria-live="polite"></p>
+      <form id="chat-form" class="chat-form">
+        <input type="text" id="chat-input" data-i18n-placeholder="chat.placeholder" placeholder="Ask something" autocomplete="off">
+        <button type="submit" id="chat-send" data-i18n="chat.send">Send</button>
+      </form>
+      <footer class="chat-actions">
+        <button type="button" id="chat-clear" data-i18n="chat.clear">Clear chat</button>
+      </footer>
+    </section>
+    </div>
     <div id="status" role="status" aria-live="polite"></div>
   </main>
+  <!-- Chat entry point. Hidden until GET /api/chat-config reports enabled. -->
+  <button type="button" id="chat-fab" class="chat-fab" hidden>
+    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
+      <path d="M20 2H4a2 2 0 0 0-2 2v18l4-4h14a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2zm-9 9H6v-2h5v2zm7 0h-5v-2h5v2z"/>
+    </svg>
+  </button>
   <div id="settings-overlay" class="settings-overlay" hidden>
     <section class="settings-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <header class="settings-head">
         <h2 id="settings-title" data-i18n="settings.title">Stream settings</h2>
         <button type="button" id="settings-close" data-i18n-aria="settings.close" aria-label="Close settings">&times;</button>
       </header>
+
+      <!-- Group: 投屏设置 -->
+      <h3 class="settings-group" data-i18n="settings.groupStream">Stream</h3>
       <label class="setting-row">
         <span data-i18n="settings.resolution">Resolution</span>
         <select id="set-resolution">
@@ -63,18 +103,47 @@
           <option value="16000000" data-i18n="settings.br16">16 Mbps</option>
         </select>
       </label>
+
+      <!-- Group: 控制设置 -->
+      <h3 class="settings-group" data-i18n="settings.groupControl">Control</h3>
       <label class="setting-row setting-row--check">
         <span data-i18n="settings.audio">Audio</span>
         <input type="checkbox" id="set-audio">
       </label>
       <label class="setting-row">
-        <span data-i18n="settings.language">Language</span>
-        <select id="set-language">
-          <option value="auto" data-i18n="settings.langAuto">Follow browser</option>
-          <option value="zh" data-i18n="settings.langZh">中文</option>
-          <option value="en" data-i18n="settings.langEn">English</option>
+        <span data-i18n="settings.volume">Browser volume</span>
+        <input type="range" id="set-volume" min="0" max="100" value="100" step="1">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="settings.navButtonMode">Nav button display</span>
+        <select id="set-nav-button-mode">
+          <option value="icon" data-i18n="settings.navIcon">Icon</option>
+          <option value="text" data-i18n="settings.navText">Text</option>
+          <option value="both" data-i18n="settings.navBoth">Icon &amp; text</option>
         </select>
       </label>
+      <label class="setting-row">
+        <span data-i18n="settings.wheelSteps">Wheel scroll multiplier</span>
+        <select id="set-wheel-steps">
+          <option value="1" data-i18n="settings.wheel1">1x</option>
+          <option value="2" data-i18n="settings.wheel2">2x</option>
+          <option value="3" data-i18n="settings.wheel3">3x</option>
+          <option value="4" data-i18n="settings.wheel4">4x</option>
+          <option value="5" data-i18n="settings.wheel5">5x</option>
+          <option value="6" data-i18n="settings.wheel6">6x</option>
+          <option value="7" data-i18n="settings.wheel7">7x</option>
+          <option value="8" data-i18n="settings.wheel8">8x</option>
+          <option value="9" data-i18n="settings.wheel9">9x</option>
+          <option value="10" data-i18n="settings.wheel10">10x</option>
+        </select>
+      </label>
+      <label class="setting-row setting-row--check">
+        <span data-i18n="settings.autoResizeWindow">Resize window on orientation change</span>
+        <input type="checkbox" id="set-auto-resize-window">
+      </label>
+
+      <!-- Group: 显示设置 -->
+      <h3 class="settings-group" data-i18n="settings.groupDisplay">Display</h3>
       <label class="setting-row">
         <span data-i18n="settings.uiFontSize">UI font size</span>
         <select id="set-ui-font-size">
@@ -115,14 +184,50 @@
           <option value="1.25" data-i18n="settings.fontLarge">Large</option>
         </select>
       </label>
+
+      <!-- Group: 语言设置 -->
+      <h3 class="settings-group" data-i18n="settings.groupLanguage">Language</h3>
       <label class="setting-row">
-        <span data-i18n="settings.navButtonMode">Nav button display</span>
-        <select id="set-nav-button-mode">
-          <option value="icon" data-i18n="settings.navIcon">Icon</option>
-          <option value="text" data-i18n="settings.navText">Text</option>
-          <option value="both" data-i18n="settings.navBoth">Icon &amp; text</option>
+        <span data-i18n="settings.language">Language</span>
+        <select id="set-language">
+          <option value="auto" data-i18n="settings.langAuto">Follow browser</option>
+          <option value="zh" data-i18n="settings.langZh">中文</option>
+          <option value="en" data-i18n="settings.langEn">English</option>
         </select>
       </label>
+
+      <!-- Group: 聊天设置 -->
+      <h3 class="settings-group" data-i18n="chat.settings.group">Chat</h3>
+      <label class="setting-row setting-row--check">
+        <span data-i18n="chat.settings.enabled">Enable chat</span>
+        <input type="checkbox" id="set-chat-enabled">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="chat.settings.baseUrl">Model base URL</span>
+        <input type="url" id="set-chat-base-url" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="chat.settings.model">Model name</span>
+        <input type="text" id="set-chat-model" autocomplete="off" spellcheck="false">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="chat.settings.apiKey">API Key</span>
+        <input type="password" id="set-chat-api-key" autocomplete="new-password">
+      </label>
+      <label class="setting-row setting-row--check">
+        <span data-i18n="chat.settings.screenshot">Send screenshots to the model</span>
+        <input type="checkbox" id="set-chat-screenshot">
+      </label>
+      <label class="setting-row">
+        <span data-i18n="chat.settings.maxSteps">Max steps per request</span>
+        <input type="number" id="set-chat-max-steps" min="1" max="32" step="1">
+      </label>
+      <p class="settings-note" data-i18n="chat.settings.note">Chat settings are stored by the local backend.</p>
+      <div class="settings-actions chat-settings-save">
+        <span id="chat-settings-status" class="chat-settings-status" role="status" aria-live="polite"></span>
+        <button type="button" id="chat-settings-save" data-i18n="chat.settings.save">Save chat settings</button>
+      </div>
+
       <p class="settings-note" data-i18n="settings.note">Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.</p>
       <footer class="settings-actions">
         <button type="button" id="settings-reset" data-i18n="settings.reset">Reset</button>
