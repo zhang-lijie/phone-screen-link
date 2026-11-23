@@ -527,9 +527,9 @@ export function shouldCenterDock(streamWidth, chatWidth) {
 }
 
 // Docked splitter: how much of the stage the stream side takes. Stored as a
-// ratio so it survives window resizes. Stream keeps at least 530px, chat 240px.
+// ratio so it survives window resizes. Stream keeps at least 500px, chat 240px.
 export const CHAT_SPLIT_KEY = 'phone-link-chat-split-ratio';
-export const MIN_DOCK_STREAM = 530;
+export const MIN_DOCK_STREAM = 500;
 export const MIN_DOCK_CHAT = 240;
 
 export function clampDockStreamWidth(requested, available) {
