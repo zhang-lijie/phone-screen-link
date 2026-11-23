@@ -1,5 +1,6 @@
 import os
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -91,3 +92,16 @@ class ConfigTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             srv.write_chat_config(Path(d), {"apiKey": "SECRET"})
         self.assertNotIn("SECRET", "\n".join(srv.read_log_buffer()))
+
+
+class InstallShTest(unittest.TestCase):
+    def test_install_sh_bootstrap_directory(self):
+        with tempfile.TemporaryDirectory() as d:
+            env = os.environ.copy()
+            env["HOME"] = d
+            env["PHONE_SCREEN_LINK_DRY_RUN"] = "1"
+            proc = subprocess.run(["bash", str(Path(__file__).resolve().parents[1] / "install.sh")],
+                                  capture_output=True, text=True, env=env, cwd=d)
+            out = proc.stdout + proc.stderr
+            self.assertIn(".local/share/phone-screen-link", out)
+            self.assertEqual(proc.returncode, 0)

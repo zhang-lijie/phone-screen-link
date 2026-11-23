@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phone Screen Link 安装向导</title>
+<style>
+  :root { --bg:#12151b; --card:#1b1f27; --line:#2b323e; --text:#e6e9ef; --muted:#949cab; --accent:#5b9aff; --ok:#5fd39b; --err:#ff7b72; }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--text); font:14px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+  .wrap { max-width:720px; margin:0 auto; padding:32px 20px 60px; }
+  h1 { font-size:22px; margin:0 0 4px; }
+  .sub { color:var(--muted); font-size:13px; margin-bottom:24px; }
+  .steps { display:flex; gap:8px; margin-bottom:24px; }
+  .step { flex:1; padding:8px 6px; text-align:center; border:1px solid var(--line); border-radius:8px; color:var(--muted); font-size:12px; }
+  .step.active { border-color:var(--accent); color:var(--accent); }
+  .step.done { border-color:var(--ok); color:var(--ok); }
+  .card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:20px; margin-bottom:16px; }
+  .card h2 { font-size:16px; margin:0 0 12px; }
+  button { font:inherit; padding:9px 16px; border:1px solid var(--accent); border-radius:8px; background:#23334d; color:var(--text); cursor:pointer; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  button.primary { background:var(--accent); color:#0b1220; font-weight:600; border-color:var(--accent); }
+  label { display:block; margin:10px 0 4px; color:var(--muted); font-size:13px; }
+  input[type=text],input[type=password] { width:100%; padding:9px 10px; border:1px solid var(--line); border-radius:8px; background:#101319; color:var(--text); }
+  .checks { list-style:none; padding:0; margin:0; }
+  .checks li { padding:5px 0; border-bottom:1px solid #232932; }
+  .checks li:last-child { border-bottom:0; }
+  .tag { display:inline-block; min-width:52px; font-size:12px; font-weight:600; }
+  .tag.ok { color:var(--ok); } .tag.error { color:var(--err); } .tag.warning { color:#e2b341; }
+  pre { background:#0d1015; border:1px solid var(--line); border-radius:8px; padding:12px; max-height:220px; overflow:auto; font:12px/1.5 ui-monospace,monospace; white-space:pre-wrap; word-break:break-all; }
+  .msg { margin-top:10px; font-size:13px; }
+  .msg.ok { color:var(--ok); } .msg.error { color:var(--err); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Phone Screen Link 安装向导</h1>
+  <div class="sub">本地安装 · 数据不离开这台机器 · Linux x64</div>
+
+  <div class="steps">
+    <div class="step active" data-step="detect">1 环境检测</div>
+    <div class="step" data-step="install">2 安装依赖</div>
+    <div class="step" data-step="config">3 聊天配置</div>
+    <div class="step" data-step="start">4 启动</div>
+  </div>
+
+  <div class="card" id="card-detect">
+    <h2>1. 环境检测</h2>
+    <button id="btn-detect" class="primary">检测环境</button>
+    <ul class="checks" id="checks"></ul>
+    <div class="msg" id="msg-detect"></div>
+  </div>
+
+  <div class="card" id="card-install">
+    <h2>2. 安装依赖与构建引擎</h2>
+    <button id="btn-install">开始安装（npm install + setup）</button>
+    <pre id="log-install">等待开始…</pre>
+    <div class="msg" id="msg-install"></div>
+  </div>
+
+  <div class="card" id="card-config">
+    <h2>3. 聊天配置（可选，可稍后在页面里设置）</h2>
+    <label>模型服务地址 baseUrl</label>
+    <input type="text" id="cfg-base">
+    <label>模型名 model</label>
+    <input type="text" id="cfg-model">
+    <label>API Key（留空则保留已保存的）</label>
+    <input type="password" id="cfg-key">
+    <label>设备序列号 PHONE_SERIAL（可选，留空自动检测）</label>
+    <input type="text" id="cfg-serial">
+    <div style="margin-top:14px"><button id="btn-config">保存配置</button></div>
+    <div class="msg" id="msg-config"></div>
+  </div>
+
+  <div class="card" id="card-start">
+    <h2>4. 启动并打开投屏页</h2>
+    <button id="btn-start" class="primary">启动应用</button>
+    <button id="btn-open" disabled>打开浏览器</button>
+    <div class="msg" id="msg-start"></div>
+  </div>
+</div>
+
+<script>
+const TOKEN = (location.hash.match(/token=([^&]+)/) || [])[1] || '';
+const PORT = '__PORT__';
+if (!TOKEN) document.body.innerHTML = '<div class="wrap"><h1>缺少访问令牌</h1><p>请从 install.sh 打开的链接进入。</p></div>';
+
+async function post(path, body = {}) {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Token': TOKEN },
+    body: JSON.stringify({ ...body, token: TOKEN }),
+  });
+  return res.json();
+}
+function setMsg(id, text, kind) {
+  const el = document.getElementById(id);
+  el.textContent = text || '';
+  el.className = 'msg' + (kind ? ' ' + kind : '');
+}
+function markStep(name, kind) {
+  const el = document.querySelector(`.step[data-step="${name}"]`);
+  el.className = 'step ' + (kind || '');
+}
+
+document.getElementById('btn-detect').onclick = async () => {
+  setMsg('msg-detect', '检测中…');
+  try {
+    const r = await post('/api/detect');
+    const list = document.getElementById('checks');
+    list.innerHTML = '';
+    const rows = [];
+    for (const key of ['platform','git','npm','node','python','uvx','adb','engine_adb']) {
+      const v = r[key];
+      if (v === undefined) continue;
+      const obj = typeof v === 'object' ? v : { status:'ok', path:String(v) };
+      const label = { platform:'系统', git:'git', npm:'npm', node:'Node.js', python:'python3', uvx:'uvx/uv（聊天）', adb:'系统 adb', engine_adb:'引擎自带 adb' }[key] || key;
+      rows.push(`<li><span class="tag ${obj.status||''}">${obj.status||'info'}</span> ${label}${obj.path ? ' — ' + obj.path : ''}</li>`);
+    }
+    list.innerHTML = rows.join('');
+    if (!r.supported) { setMsg('msg-detect', r.reason, 'error'); markStep('detect','error'); return; }
+    const missing = ['git','npm','node','python'].filter(k => r[k].status !== 'ok');
+    if (missing.length) { setMsg('msg-detect', '缺少：' + missing.join(', ') + '，请先安装后重试', 'error'); markStep('detect','error'); return; }
+    setMsg('msg-detect', '环境就绪', 'ok'); markStep('detect','done');
+  } catch (e) { setMsg('msg-detect', '检测失败：' + e, 'error'); }
+};
+
+document.getElementById('btn-install').onclick = async () => {
+  const btn = document.getElementById('btn-install'); btn.disabled = true;
+  markStep('install','active');
+  await post('/api/install');
+};
+document.getElementById('btn-config').onclick = async () => {
+  const body = {
+    baseUrl: document.getElementById('cfg-base').value.trim(),
+    model: document.getElementById('cfg-model').value.trim(),
+    apiKey: document.getElementById('cfg-key').value,
+    serial: document.getElementById('cfg-serial').value.trim(),
+  };
+  const r = await post('/api/config', body);
+  setMsg('msg-config', r.ok ? '已保存' : '保存失败', r.ok ? 'ok' : 'error');
+  markStep('config','done');
+  document.getElementById('cfg-key').value = '';
+};
+document.getElementById('btn-start').onclick = async () => {
+  setMsg('msg-start', '启动中，请稍候…');
+  markStep('start','active');
+  document.getElementById('btn-start').disabled = true;
+  await post('/api/start');
+};
+document.getElementById('btn-open').onclick = () => post('/api/open');
+
+async function poll() {
+  try {
+    const s = await (await fetch('/api/state')).json();
+    document.getElementById('log-install').textContent = (s.logs || []).join('\n') || '等待开始…';
+    if (s.status === 'error') {
+      setMsg('msg-install', s.detail, 'error'); markStep(s.step || 'install', 'error');
+    } else if (s.step === 'install' && s.status === 'ok') {
+      setMsg('msg-install', s.detail, 'ok'); markStep('install','done');
+    } else if (s.step === 'install' && s.status === 'running') {
+      setMsg('msg-install', s.detail, '');
+    }
+    if (s.step === 'start') {
+      setMsg('msg-start', s.detail, s.status === 'ok' ? 'ok' : 'error');
+      if (s.status === 'ok') {
+        markStep('start','done');
+        const b = document.getElementById('btn-open'); b.disabled = false; b.className = 'primary';
+      } else { markStep('start','error'); document.getElementById('btn-start').disabled = false; }
+    }
+  } catch (e) {}
+  setTimeout(poll, 500);
+}
+poll();
+</script>
+</body>
+</html>
