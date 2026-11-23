@@ -1,5 +1,5 @@
 #!/bin/sh
-# One-click bootstrap for phone-screen-link (Linux x64 only).
+# One-click bootstrap for phone-screen-link (Linux x64 / macOS arm64).
 # Two modes:
 #   1. Run next to installer/server.py (extracted release): start the wizard here.
 #   2. Downloaded alone via curl: fetch the release tarball into the fixed

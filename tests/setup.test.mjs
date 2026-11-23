@@ -10,6 +10,8 @@ import {
   FETCH_NODE_DARWIN_PATCH,
   ADB_DARWIN_PATCH,
   PREBUILT_DARWIN_PATCH,
+  NODEPTY_DARWIN_PATCH,
+  NODE_URL_DARWIN_PATCH,
   checkGhostToolchain,
 } from '../scripts/setup.mjs';
 
@@ -94,4 +96,26 @@ test('darwin patches: node bootstrap, adb archive and prebuilt platform', () => 
   assert.equal(PREBUILT_DARWIN_PATCH.file, 'scripts/fetch-prebuilts.mjs');
   assert.match(PREBUILT_DARWIN_PATCH.from, /process\.platform === 'win32' \? 'win32' : 'linux'/);
   assert.match(PREBUILT_DARWIN_PATCH.to, /darwin/);
+});
+
+test('darwin runtime patches: node-pty resolver and node download url', () => {
+  // I-1: runtime node-pty key must not fall through to linux on darwin
+  assert.ok(Array.isArray(NODEPTY_DARWIN_PATCH));
+  assert.equal(NODEPTY_DARWIN_PATCH.length, 2);
+  assert.equal(NODEPTY_DARWIN_PATCH[0].file, 'src/server/NodePtyResolver.ts');
+  assert.match(NODEPTY_DARWIN_PATCH[0].from, /platform: 'win32' \| 'linux'/);
+  assert.match(NODEPTY_DARWIN_PATCH[0].to, /'darwin'/);
+  assert.match(NODEPTY_DARWIN_PATCH[1].from, /process\.platform === 'win32' \? 'win32' : 'linux'/);
+  assert.match(NODEPTY_DARWIN_PATCH[1].to, /'darwin'/);
+
+  // I-2: Node dependency download URL must select darwin archive
+  assert.ok(Array.isArray(NODE_URL_DARWIN_PATCH));
+  assert.equal(NODE_URL_DARWIN_PATCH.length, 3);
+  assert.equal(NODE_URL_DARWIN_PATCH[0].file, 'src/server/DependencyDefinitions.ts');
+  assert.match(NODE_URL_DARWIN_PATCH[0].from, /node-v\$\{version\}-linux-\$\{arch\}\.tar\.gz/);
+  assert.match(NODE_URL_DARWIN_PATCH[0].to, /darwin/);
+  assert.equal(NODE_URL_DARWIN_PATCH[1].file, 'src/server/DependencyManager.ts');
+  assert.match(NODE_URL_DARWIN_PATCH[1].from, /platform: 'win32' \| 'linux'/);
+  assert.match(NODE_URL_DARWIN_PATCH[2].from, /installAdb/);
+  assert.match(NODE_URL_DARWIN_PATCH[2].to, /darwin/);
 });

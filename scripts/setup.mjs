@@ -255,6 +255,46 @@ export const PREBUILT_DARWIN_PATCH = {
   to: "    const platform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';",
 };
 
+// Runtime node-pty resolution (NodePtyResolver.ts) also hardcodes darwin to
+// linux — patching only fetch-prebuilts.mjs leaves shell broken on a Mac.
+export const NODEPTY_DARWIN_PATCH = [
+  {
+    file: 'src/server/NodePtyResolver.ts',
+    from: `export interface HostInfo {
+    platform: 'win32' | 'linux';`,
+    to: `export interface HostInfo {
+    platform: 'win32' | 'linux' | 'darwin';`,
+  },
+  {
+    file: 'src/server/NodePtyResolver.ts',
+    from: "    const platform = (process.platform === 'win32' ? 'win32' : 'linux') as HostInfo['platform'];",
+    to: "    const platform = (process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux') as HostInfo['platform'];",
+  },
+];
+
+// Node dependency auto-download uses a linux archive for every non-win32
+// platform; a fresh Mac would install a Linux ELF into dependencies/node/.
+export const NODE_URL_DARWIN_PATCH = [
+  {
+    file: 'src/server/DependencyDefinitions.ts',
+    from: `                return \`\${nodeDistBase()}/v\${version}/node-v\${version}-linux-\${arch}.tar.gz\`;`,
+    to: `                if (platform === 'darwin') {
+                    return \`\${nodeDistBase()}/v\${version}/node-v\${version}-darwin-\${arch}.tar.gz\`;
+                }
+                return \`\${nodeDistBase()}/v\${version}/node-v\${version}-linux-\${arch}.tar.gz\`;`,
+  },
+  {
+    file: 'src/server/DependencyManager.ts',
+    from: "        platform: 'win32' | 'linux',\n    ): Promise<void> {\n        const destDir = path.join(this.depsPath, 'node');",
+    to: "        platform: 'win32' | 'linux' | 'darwin',\n    ): Promise<void> {\n        const destDir = path.join(this.depsPath, 'node');",
+  },
+  {
+    file: 'src/server/DependencyManager.ts',
+    from: "    private async installAdb(downloadPath: string, tmpDir: string, platform: 'win32' | 'linux'): Promise<void> {",
+    to: "    private async installAdb(downloadPath: string, tmpDir: string, platform: 'win32' | 'linux' | 'darwin'): Promise<void> {",
+  },
+];
+
 function run(command, args, cwd) {
   console.log(`+ ${command} ${args.join(' ')}`);
   execFileSync(command, args, { cwd, stdio: 'inherit' });
@@ -283,6 +323,8 @@ function applyEnginePatches() {
   applyPatch(FETCH_NODE_DARWIN_PATCH, 'darwin-arm64 node bootstrap');
   for (const patch of ADB_DARWIN_PATCH) applyPatch(patch, 'darwin adb archive');
   applyPatch(PREBUILT_DARWIN_PATCH, 'darwin prebuilt platform');
+  for (const patch of NODEPTY_DARWIN_PATCH) applyPatch(patch, 'darwin node-pty resolver');
+  for (const patch of NODE_URL_DARWIN_PATCH) applyPatch(patch, 'darwin node download url');
 }
 
 export function checkGhostToolchain({ exec = execFileSync, log = console.log } = {}) {
