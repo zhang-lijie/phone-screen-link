@@ -178,7 +178,7 @@ class ReviewFixesTest(unittest.TestCase):
     def test_detect_rejects_non_x64(self):
         result = srv.detect_environment("/usr/bin", "linux", "/x", machine="aarch64")
         self.assertFalse(result["supported"])
-        self.assertIn("x86_64", result["reason"])
+        self.assertIn("Linux x64", result["reason"])
 
     def test_detect_marks_port_conflict(self):
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
@@ -189,3 +189,50 @@ class ReviewFixesTest(unittest.TestCase):
             result = srv.detect_environment("/usr/bin", "linux", "/x", probe_ports=(port,))
         self.assertTrue(result["ports"].get(str(port)))
         self.assertIn("ports", result)
+
+
+class DarwinGateTest(unittest.TestCase):
+    def test_detect_accepts_darwin_arm64(self):
+        result = srv.detect_environment("/usr/bin", "darwin", "/x", machine="arm64")
+        self.assertTrue(result["supported"])
+        self.assertEqual(result["reason"], "")
+
+    def test_detect_rejects_darwin_x64(self):
+        result = srv.detect_environment("/usr/bin", "darwin", "/x", machine="x86_64")
+        self.assertFalse(result["supported"])
+        self.assertIn("arm64", result["reason"])
+
+    def test_install_sh_accepts_darwin_arm64(self):
+        with tempfile.TemporaryDirectory() as d:
+            bindir = Path(d) / "bin"
+            bindir.mkdir()
+            for name, out in (("uname", None),):
+                pass
+            # stub uname: -s -> Darwin, -m -> arm64
+            stub = bindir / "uname"
+            stub.write_text('#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo arm64;; *) echo Darwin;; esac\n')
+            stub.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+            env["HOME"] = d
+            env["PHONE_SCREEN_LINK_DRY_RUN"] = "1"
+            proc = subprocess.run(["bash", str(Path(__file__).resolve().parents[1] / "install.sh")],
+                                  capture_output=True, text=True, env=env, cwd=d)
+            self.assertEqual(proc.returncode, 0, proc.stdout + proc.stderr)
+            self.assertIn("安装目录", proc.stdout)
+
+    def test_install_sh_rejects_darwin_x64(self):
+        with tempfile.TemporaryDirectory() as d:
+            bindir = Path(d) / "bin"
+            bindir.mkdir()
+            stub = bindir / "uname"
+            stub.write_text('#!/bin/sh\ncase "$1" in -s) echo Darwin;; -m) echo x86_64;; *) echo Darwin;; esac\n')
+            stub.chmod(0o755)
+            env = os.environ.copy()
+            env["PATH"] = str(bindir) + os.pathsep + env.get("PATH", "")
+            env["HOME"] = d
+            env["PHONE_SCREEN_LINK_DRY_RUN"] = "1"
+            proc = subprocess.run(["bash", str(Path(__file__).resolve().parents[1] / "install.sh")],
+                                  capture_output=True, text=True, env=env, cwd=d)
+            self.assertNotEqual(proc.returncode, 0)
+            self.assertIn("arm64", proc.stdout + proc.stderr)

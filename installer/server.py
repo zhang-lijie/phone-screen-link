@@ -65,7 +65,8 @@ def detect_environment(path, platform_name, project_root, machine=None, probe_po
         import platform as _platform
         machine = _platform.machine()
     x64 = machine in ("x86_64", "amd64")
-    supported = platform_name == "linux" and x64
+    arm64 = machine == "arm64"
+    supported = (platform_name == "linux" and x64) or (platform_name == "darwin" and arm64)
     tools = {name: _tool(path, name) for name in ("git", "npm", "node", "python3", "uvx", "uv")}
     adb = _tool(path, "adb")
     if adb["status"] != "ok":
@@ -78,7 +79,7 @@ def detect_environment(path, platform_name, project_root, machine=None, probe_po
             ports[str(port)] = sock.connect_ex(("127.0.0.1", port)) == 0
     return {
         "supported": supported,
-        "reason": "" if supported else ("仅支持 x86_64 Linux：当前系统 %s/%s 不在支持范围" % (platform_name, machine)),
+        "reason": "" if supported else ("仅支持 Linux x64 与 macOS arm64 (Apple Silicon)：当前系统 %s/%s 不在支持范围" % (platform_name, machine)),
         "arch": machine,
         "platform": platform_name,
         "git": tools["git"],

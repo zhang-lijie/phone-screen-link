@@ -10,13 +10,22 @@ INSTALL_DIR="$HOME/.local/share/phone-screen-link"
 RELEASE_URL="https://github.com/zhang-lijie/phone-screen-link/releases/download/v1.0.0/phone-screen-link-1.0.0.tar.gz"
 DRY_RUN="${PHONE_SCREEN_LINK_DRY_RUN:-0}"
 
-if [ "$(uname -s)" != "Linux" ]; then
-  echo "仅支持 Linux x64；当前系统: $(uname -s)" >&2
-  exit 1
-fi
-case "$(uname -m)" in
-  x86_64|amd64) ;;
-  *) echo "仅支持 x86_64 架构；当前架构: $(uname -m)" >&2; exit 1 ;;
+OS=$(uname -s)
+ARCH=$(uname -m)
+case "$OS" in
+  Linux)
+    case "$ARCH" in
+      x86_64|amd64) ;;
+      *) echo "仅支持 Linux x64；当前架构: $ARCH" >&2; exit 1 ;;
+    esac ;;
+  Darwin)
+    case "$ARCH" in
+      arm64) ;;
+      *) echo "macOS 仅支持 Apple Silicon (arm64)，不支持 Intel (x64)；当前架构: $ARCH" >&2; exit 1 ;;
+    esac ;;
+  *)
+    echo "仅支持 Linux x64 与 macOS arm64；当前系统: $OS" >&2
+    exit 1 ;;
 esac
 
 if ! command -v python3 >/dev/null 2>&1; then
