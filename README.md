@@ -5,14 +5,14 @@
 一条命令，自动装好并在浏览器里打开安装向导（环境检测 → 依赖安装 → 可选聊天配置 → 启动）：
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/zhang-lijie/phone-screen-link/v1.0.0/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/zhang-lijie/phone-screen-link/v1.1.0/install.sh | bash
 ```
 
-或下载 `phone-screen-link-1.0.0.tar.gz`，解压后运行：
+或下载 `phone-screen-link-1.1.0.tar.gz`，解压后运行：
 
 ```sh
-tar xf phone-screen-link-1.0.0.tar.gz
-cd phone-screen-link-1.0.0 && ./install.sh
+tar xf phone-screen-link-1.1.0.tar.gz
+cd phone-screen-link-1.1.0 && ./install.sh
 ```
 
 安装目录固定为 `~/.local/share/phone-screen-link`；重复运行只启动向导，不覆盖你的配置。首次安装需联网拉取引擎（GPL-3.0，见下方声明）。**支持 Linux x64 与 macOS arm64（Apple Silicon）**；Intel Mac（x64）不支持（上游缺少 node-pty 的 darwin-x64 预编译），Windows 不支持。macOS 为本次新增支持，尚无实机验证结果；若安装失败请把报错反馈给项目。手动安装方式见[快速开始](#快速开始)。

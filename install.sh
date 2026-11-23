@@ -7,7 +7,7 @@
 set -eu
 
 INSTALL_DIR="$HOME/.local/share/phone-screen-link"
-RELEASE_URL="https://github.com/zhang-lijie/phone-screen-link/releases/download/v1.0.0/phone-screen-link-1.0.0.tar.gz"
+RELEASE_URL="https://github.com/zhang-lijie/phone-screen-link/releases/download/v1.1.0/phone-screen-link-1.1.0.tar.gz"
 DRY_RUN="${PHONE_SCREEN_LINK_DRY_RUN:-0}"
 
 OS=$(uname -s)
