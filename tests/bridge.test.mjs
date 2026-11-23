@@ -660,3 +660,37 @@ test('chat: OPTIONS preflight allows POST', async () => {
     }
   });
 });
+
+
+test('chat-command: runs preset command via chat.runCommand and returns reply', async () => {
+  let received;
+  const chat = {
+    runCommand: async (command, lang) => { received = [command, lang]; return { reply: 'done', ok: true, steps: [{ tool: 'press_key', ok: true }] }; },
+  };
+  await withBridge({ chat }, async (address) => {
+    const res = await fetch(`${address}/api/chat-command`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ command: 'desktop', lang: 'zh' }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.reply, 'done');
+    assert.equal(body.ok, true);
+    assert.deepEqual(received, ['desktop', 'zh']);
+  });
+});
+
+test('chat-command: rejects missing command and when chat unavailable', async () => {
+  await withBridge({ chat: { runCommand: async () => ({ reply: 'x', ok: true }) } }, async (address) => {
+    const bad = await fetch(`${address}/api/chat-command`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}',
+    });
+    assert.equal(bad.status, 400);
+  });
+  await withBridge({ chat: undefined }, async (address) => {
+    const res = await fetch(`${address}/api/chat-command`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ command: 'desktop' }),
+    });
+    assert.equal(res.status, 503);
+  });
+});

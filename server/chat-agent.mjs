@@ -4,6 +4,7 @@
 
 import { chatCompletion as defaultChatCompletion } from './model-client.mjs';
 import { filterToolDefinitions, isAllowedTool, validateToolArgs } from '../shared/chat-tools.mjs';
+import { resolveCommand, truncateResult } from '../shared/chat-commands.mjs';
 
 const DEFAULT_MAX_STEPS = 8;
 const DEFAULT_MODEL_TIMEOUT_MS = 60_000;
@@ -64,6 +65,37 @@ function imageDataUriOf(result) {
 function imagePartOf(result) {
   const url = imageDataUriOf(result);
   return url ? { type: 'image_url', image_url: { url } } : null;
+}
+
+// Run a preset slash command by calling its tool directly — no model call.
+// Reuses the same lock gate and callTool injection as the agent loop.
+export async function runPresetCommand({ commandId, lang, deps = {} }) {
+  const command = resolveCommand(commandId);
+  if (!command) {
+    return { ok: false, reply: strings(lang).noContent, steps: [] };
+  }
+  let locked = true;
+  try {
+    if (typeof deps.isLocked === 'function') {
+      const value = await deps.isLocked();
+      locked = typeof value === 'boolean' ? value : true;
+    }
+  } catch {
+    locked = true;
+  }
+  if (locked) {
+    return { ok: false, reply: strings(lang).locked, steps: [] };
+  }
+  const callTool = deps.callTool ?? ((name, toolArgs) => deps.ghost.callTool(name, toolArgs));
+  try {
+    const result = await callTool(command.tool, { ...command.args });
+    const ok = result?.isError !== true;
+    const text = textOf(result);
+    const reply = ok ? truncateResult(text || strings(lang).noContent) : (text || strings(lang).noContent);
+    return { ok, reply, steps: [{ tool: command.tool, ok }] };
+  } catch (err) {
+    return { ok: false, reply: String(err?.message ?? err), steps: [{ tool: command.tool, ok: false }] };
+  }
 }
 
 export async function runAgentTurn({ config, ghost, userText, lang, deps = {} }) {

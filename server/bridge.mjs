@@ -11,6 +11,7 @@ const PREFLIGHT_METHODS = {
   '/health': 'GET, OPTIONS',
   '/keyevent': 'POST, OPTIONS',
   '/chat': 'POST, OPTIONS',
+  '/api/chat-command': 'POST, OPTIONS',
   '/api/chat-config': 'GET, POST, OPTIONS',
 };
 
@@ -159,6 +160,32 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
           return;
         }
         sendJson(res, 200, { reply: result.reply, steps: result.steps });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/chat-command') {
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        if (body === null || typeof body !== 'object' || typeof body.command !== 'string') {
+          sendJson(res, 400, { error: 'command required' });
+          return;
+        }
+        const lang = typeof body.lang === 'string' ? body.lang : undefined;
+        if (!chat?.runCommand) {
+          sendJson(res, 503, { error: 'chat unavailable' });
+          return;
+        }
+        try {
+          const result = await chat.runCommand(body.command, lang);
+          sendJson(res, 200, { reply: result.reply, ok: result.ok, steps: result.steps });
+        } catch (err) {
+          const detail = err instanceof Error && err.message ? err.message : 'command failed';
+          sendJson(res, 502, { error: detail });
+        }
         return;
       }
 

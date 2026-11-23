@@ -3,7 +3,7 @@ import { copyFileSync, mkdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { adb, DEFAULT_USB_SERIAL } from '../server/adb.mjs';
-import { runAgentTurn } from '../server/chat-agent.mjs';
+import { runAgentTurn, runPresetCommand } from '../server/chat-agent.mjs';
 import { createChatConfigStore } from '../server/chat-config.mjs';
 import { createBridge } from '../server/bridge.mjs';
 import { createGhostClient } from '../server/ghost-client.mjs';
@@ -22,7 +22,8 @@ export function buildPlan({ engineDir, webDir }) {
     { kind: 'enforceUsb' },
     {
       kind: 'copyWeb',
-      files: ['index.html', 'app.js', 'styles.css', 'keys.mjs'],
+      files: ['index.html', 'app.js', 'styles.css'],
+      sharedFiles: ['keys.mjs', 'chat-commands.mjs'],
       webDir,
       sharedDir: join(dirname(engineDir), 'shared'),
     },
@@ -31,11 +32,9 @@ export function buildPlan({ engineDir, webDir }) {
   ];
 }
 
-export function copyWeb({ files, webDir, sharedDir }, targetDir) {
+export function copyWeb({ files, sharedFiles = [], webDir, sharedDir }, targetDir) {
   mkdirSync(targetDir, { recursive: true });
-  const webFiles = files.slice(0, -1);
-  const sharedFiles = files.slice(-1);
-  for (const file of webFiles) {
+  for (const file of files) {
     copyFileSync(join(webDir, file), join(targetDir, file));
   }
   for (const file of sharedFiles) {
@@ -245,6 +244,11 @@ export async function main(deps = {}) {
             lang,
             // Real lock/sleep state comes from ADB; ghost has no lock tool.
             deps: { isLocked: () => adbClient.isLocked() },
+          }),
+          runCommand: (commandId, lang) => runPresetCommand({
+            commandId,
+            lang,
+            deps: { ghost, isLocked: () => adbClient.isLocked() },
           }),
         }
       : undefined;

@@ -53,7 +53,10 @@
       </div>
       <p id="chat-status" class="chat-status" role="status" aria-live="polite"></p>
       <form id="chat-form" class="chat-form">
-        <input type="text" id="chat-input" data-i18n-placeholder="chat.placeholder" placeholder="Ask something" autocomplete="off">
+        <div class="chat-input-wrap">
+          <input type="text" id="chat-input" data-i18n-placeholder="chat.placeholder" placeholder="Ask something" autocomplete="off">
+          <div id="chat-suggestions" class="chat-suggestions" hidden></div>
+        </div>
         <button type="submit" id="chat-send" data-i18n="chat.send">Send</button>
       </form>
       <footer class="chat-actions">

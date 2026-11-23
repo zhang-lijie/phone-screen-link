@@ -28,6 +28,7 @@ import {
   translate,
   translateStatLine,
 } from './keys.js';
+import { PRESET_COMMANDS, findCommands } from './chat-commands.js';
 
 // Loaded from the backend /health endpoint at startup so swapping phones
 // needs only the PHONE_SERIAL env var, no code edit here.
@@ -36,6 +37,7 @@ const BRIDGE_BASE = 'http://127.0.0.1:8100';
 const BRIDGE_URL = `${BRIDGE_BASE}/keyevent`;
 const CHAT_CONFIG_URL = `${BRIDGE_BASE}/api/chat-config`;
 const CHAT_URL = `${BRIDGE_BASE}/chat`;
+const CHAT_COMMAND_URL = `${BRIDGE_BASE}/api/chat-command`;
 const SCREEN_STATE_POLL_MS = 3000;
 
 const streamEl = document.getElementById('stream');
@@ -653,6 +655,7 @@ async function sendChatMessage() {
   const message = chatInput.value.trim();
   if (!message || chatRunning) return;
   chatInput.value = '';
+  hideSuggestions();
   addChatBubble('user', message);
   chatRunning = true;
   renderChatStatus();
@@ -683,9 +686,109 @@ async function sendChatMessage() {
   }
 }
 
+// Quick commands: typing "/" shows preset commands with hints; picking one
+// calls the backend command endpoint (tool runs directly, no model call).
+const chatSuggestions = document.getElementById('chat-suggestions');
+let suggestionItems = [];
+let suggestionIndex = -1;
+
+function hideSuggestions() {
+  chatSuggestions.hidden = true;
+  chatSuggestions.replaceChildren();
+  suggestionItems = [];
+  suggestionIndex = -1;
+}
+
+function showSuggestions() {
+  const value = chatInput.value;
+  if (!value.startsWith('/')) {
+    hideSuggestions();
+    return;
+  }
+  const matches = findCommands(value);
+  if (!matches.length) {
+    hideSuggestions();
+    return;
+  }
+  suggestionItems = matches;
+  suggestionIndex = 0;
+  chatSuggestions.replaceChildren();
+  matches.forEach((cmd, i) => {
+    const row = document.createElement('div');
+    row.className = 'chat-suggestion' + (i === 0 ? ' selected' : '');
+    const name = document.createElement('span');
+    name.className = 'cmd';
+    name.textContent = `/${cmd.id}`;
+    const note = document.createElement('span');
+    note.className = 'note';
+    note.textContent = cmd.note[lang] ?? cmd.note.en;
+    row.append(name, note);
+    row.addEventListener('mousedown', (event) => {
+      event.preventDefault();
+      runQuickCommand(cmd.id);
+    });
+    chatSuggestions.append(row);
+  });
+  chatSuggestions.hidden = false;
+}
+
+function moveSuggestion(delta) {
+  if (chatSuggestions.hidden || suggestionItems.length === 0) return false;
+  const rows = chatSuggestions.querySelectorAll('.chat-suggestion');
+  if (suggestionIndex >= 0) rows[suggestionIndex]?.classList.remove('selected');
+  suggestionIndex = (suggestionIndex + delta + suggestionItems.length) % suggestionItems.length;
+  rows[suggestionIndex]?.classList.add('selected');
+  rows[suggestionIndex]?.scrollIntoView({ block: 'nearest' });
+  return true;
+}
+
+async function runQuickCommand(commandId) {
+  hideSuggestions();
+  chatInput.value = '';
+  const cmd = PRESET_COMMANDS.find((c) => c.id === commandId);
+  addChatBubble('user', `/${commandId}`);
+  if (chatRunning) return;
+  chatRunning = true;
+  renderChatStatus();
+  try {
+    const res = await fetch(CHAT_COMMAND_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ command: commandId, lang }),
+    });
+    const payload = await res.json().catch(() => ({}));
+    if (!res.ok || payload.ok === false) {
+      addChatBubble('error', t('chat.cmdFailed', { error: payload.error || payload.reply || res.status }));
+    } else {
+      addChatBubble('assistant', payload.reply || t('chat.cmdDone', { name: `/${commandId}` }), payload.steps);
+    }
+  } catch (err) {
+    addChatBubble('error', t('chat.cmdFailed', { error: messageOf(err) }));
+  } finally {
+    chatRunning = false;
+    renderChatStatus();
+    chatInput.focus();
+  }
+}
+
+chatInput.addEventListener('input', showSuggestions);
+chatInput.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown' && moveSuggestion(1)) event.preventDefault();
+  else if (event.key === 'ArrowUp' && moveSuggestion(-1)) event.preventDefault();
+  else if (event.key === 'Escape' && !chatSuggestions.hidden) { hideSuggestions(); event.preventDefault(); }
+  else if (event.key === 'Enter' && !chatSuggestions.hidden && suggestionIndex >= 0) {
+    event.preventDefault();
+    runQuickCommand(suggestionItems[suggestionIndex].id);
+  }
+});
+
 document.getElementById('chat-form').addEventListener('submit', (event) => {
   event.preventDefault();
-  sendChatMessage();
+  if (!chatSuggestions.hidden && suggestionIndex >= 0) {
+    runQuickCommand(suggestionItems[suggestionIndex].id);
+  } else {
+    sendChatMessage();
+  }
 });
 // The chat head is the drag handle; buttons inside it stay clickable. Pointer
 // events cover mouse, touch and pen with one code path. Docked mode turns the
