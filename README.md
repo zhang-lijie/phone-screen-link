@@ -1,5 +1,24 @@
 # Phone Screen Link
 
+## 一键安装（Linux x64）
+
+一条命令，自动装好并在浏览器里打开安装向导（环境检测 → 依赖安装 → 可选聊天配置 → 启动）：
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zhang-lijie/phone-screen-link/v1.0.0/install.sh | bash
+```
+
+或下载 `phone-screen-link-1.0.0.tar.gz`，解压后运行：
+
+```sh
+tar xf phone-screen-link-1.0.0.tar.gz
+cd phone-screen-link-1.0.0 && ./install.sh
+```
+
+安装目录固定为 `~/.local/share/phone-screen-link`；重复运行只启动向导，不覆盖你的配置。首次安装需联网拉取引擎（GPL-3.0，见下方声明）。**仅支持 Linux x64**，Windows / macOS 不支持（macOS 因引擎缺少 darwin 构建）。手动安装方式见[快速开始](#快速开始)。
+
+---
+
 把一台华为 Mate 40 Pro 的**整台屏幕**投到本机浏览器，并在网页上反向控制手机。
 视频流和触摸走成熟的开源引擎 [ws-scrcpy-web](https://github.com/bilbospocketses/ws-scrcpy-web)
 v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
@@ -154,7 +173,7 @@ ghost 连接失败时其子进程传输会被立即关闭，不留残余进程�
 | 模型名 | `model` | 空 | **留空即禁用**（后端强制，不信任前端开关）；需支持 function/tool calling |
 | API Key | `apiKey` | 空 | 可选，局域网模型通常不需要；只在请求里作 `Authorization: Bearer`，**从不回传前端**（前端只看到 `hasApiKey`） |
 | 截图发给模型 | `screenshot` | 开 | 关闭时连 `screenshot` 工具都不暴露给模型；开启时截图以 base64 data URI 作视觉消息回灌，模型不支持视觉会报可读错误 |
-| 单次最大步数 | `maxSteps` | 8 | agent 一次请求最多调几轮工具（界面 1–32），到了就停并提示「已达到最大步数」。后端强制：整数收敛到 1–32，非整数丢弃 |
+| 单次最大步数 | `maxSteps` | 100 | agent 一次请求最多调几轮工具（界面 1–100），到了就停并提示「已达到最大步数」。后端强制：整数收敛到 1–100，非整数丢弃 |
 
 后端把有效值写成 JSON 文件 `state/chat.json`（已 gitignore，权限 `0600` 仅本人可读，临时文件 + 重命名原子写入）；`GET /api/chat-config` 返回
 `{enabled, baseUrl, model, maxSteps, screenshot, hasApiKey}` —— Key 只以 `hasApiKey` 摘要出现；`POST` 只接受
