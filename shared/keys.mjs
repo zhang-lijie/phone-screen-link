@@ -127,6 +127,7 @@ export const MESSAGES = {
     'chat.dock': 'Dock chat beside the screen',
     'chat.undock': 'Undock chat',
     'chat.dockNarrow': 'Side-by-side needs a window at least 720px wide',
+    'chat.splitter': 'Drag to resize the two panels',
     'chat.placeholder': 'Ask something, e.g. "go to the home screen"',
     'chat.send': 'Send',
     'chat.clear': 'Clear chat',
@@ -284,6 +285,7 @@ export const MESSAGES = {
     'chat.dock': '与画面并排显示',
     'chat.undock': '取消并排显示',
     'chat.dockNarrow': '窗口宽度至少 720px 才能并排显示',
+    'chat.splitter': '拖动调整两侧大小',
     'chat.placeholder': '输入指令，例如「回到桌面」',
     'chat.send': '发送',
     'chat.clear': '清空对话',
@@ -522,6 +524,37 @@ export function writeChatDock(storage, docked) {
 
 export function shouldCenterDock(streamWidth, chatWidth) {
   return chatWidth > streamWidth;
+}
+
+// Docked splitter: how much of the stage the stream side takes. Stored as a
+// ratio so it survives window resizes. Stream keeps at least 530px, chat 240px.
+export const CHAT_SPLIT_KEY = 'phone-link-chat-split-ratio';
+export const MIN_DOCK_STREAM = 530;
+export const MIN_DOCK_CHAT = 240;
+
+export function clampDockStreamWidth(requested, available) {
+  const max = available - MIN_DOCK_CHAT;
+  if (max < MIN_DOCK_STREAM) return MIN_DOCK_STREAM;
+  return Math.min(Math.max(requested, MIN_DOCK_STREAM), max);
+}
+
+export function readChatSplitRatio(storage) {
+  try {
+    const raw = storage?.getItem(CHAT_SPLIT_KEY);
+    if (!raw) return null;
+    const ratio = Number(raw);
+    return Number.isFinite(ratio) && ratio >= 0 && ratio <= 1 ? ratio : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeChatSplitRatio(storage, ratio) {
+  try {
+    storage?.setItem(CHAT_SPLIT_KEY, String(ratio));
+  } catch {
+    // Storage disabled: the split ratio simply won't survive a reload.
+  }
 }
 
 // Chat panel drag position. The panel is non-modal and can be moved freely,

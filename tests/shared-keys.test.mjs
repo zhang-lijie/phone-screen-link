@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   BITRATE_CHOICES,
   CHAT_DOCK_KEY,
+  CHAT_SPLIT_KEY,
   CHAT_POSITION_KEY,
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
@@ -22,6 +23,7 @@ import {
   UI_FONT_SCALES,
   buildStreamOptions,
   canDock,
+  clampDockStreamWidth,
   clampPanelPosition,
   effectiveLanguage,
   isDegradedStream,
@@ -31,10 +33,12 @@ import {
   negotiatedMaxDimension,
   normalizeSettings,
   readChatDock,
+  readChatSplitRatio,
   readChatPosition,
   saveSettings,
   shouldCenterDock,
   writeChatDock,
+  writeChatSplitRatio,
   writeChatPosition,
   sizeLadder,
   translate,
@@ -319,4 +323,28 @@ test('chat dock: width gate, persistence and centering rule', () => {
   assert.equal(shouldCenterDock(300, 500), true, 'wider chat centers the pair');
   assert.equal(shouldCenterDock(500, 300), false, 'narrower chat stays left');
   assert.equal(shouldCenterDock(400, 400), false);
+});
+
+test('chat dock splitter: clamp stream width to 530 min and chat 240 min', () => {
+  assert.equal(clampDockStreamWidth(300, 1200), 530, 'below min lifts to 530');
+  assert.equal(clampDockStreamWidth(900, 1200), 900, 'within range untouched');
+  assert.equal(clampDockStreamWidth(2000, 1200), 960, 'above max leaves 240 for chat');
+  assert.equal(clampDockStreamWidth(100, 600), 530, 'too-narrow stage still keeps 530');
+  assert.ok(clampDockStreamWidth(700, 1200) >= 500);
+});
+
+test('chat dock splitter: ratio persistence validates 0..1', () => {
+  const store = new Map();
+  const storage = {
+    getItem: (key) => (store.has(key) ? store.get(key) : null),
+    setItem: (key, value) => store.set(key, value),
+  };
+  assert.equal(readChatSplitRatio(storage), null);
+  writeChatSplitRatio(storage, 0.42);
+  assert.equal(readChatSplitRatio(storage), 0.42);
+  assert.ok(store.has(CHAT_SPLIT_KEY));
+  writeChatSplitRatio(storage, 2);
+  assert.equal(readChatSplitRatio(storage), null, 'out-of-range rejected');
+  store.set(CHAT_SPLIT_KEY, 'not a number');
+  assert.equal(readChatSplitRatio(storage), null);
 });

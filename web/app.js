@@ -5,12 +5,15 @@ import {
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
   canDock,
+  clampDockStreamWidth,
   clampPanelPosition,
   readChatDock,
   readChatPosition,
+  readChatSplitRatio,
   shouldCenterDock,
   writeChatDock,
   writeChatPosition,
+  writeChatSplitRatio,
   buildStreamOptions,
   effectiveLanguage,
   isDegradedStream,
@@ -686,13 +689,33 @@ document.getElementById('chat-form').addEventListener('submit', (event) => {
 // panel into a layout column, so dragging is disabled there.
 const chatHead = chatPanel.querySelector('.chat-head');
 const chatDockButton = document.getElementById('chat-dock');
+const dockSplitter = document.getElementById('dock-splitter');
 let chatDocked = false;
+
+// Space the two docked columns share: stage width minus the splitter and the
+// two flex gaps. Reading the live rects keeps this correct across font scaling.
+function dockAvailableWidth() {
+  const stage = streamEl.parentElement;
+  const gap = Number.parseFloat(getComputedStyle(stage).columnGap) || 0;
+  return stage.getBoundingClientRect().width - dockSplitter.offsetWidth - gap * 2;
+}
+
+function applyDockWidth(requested) {
+  const available = dockAvailableWidth();
+  const width = clampDockStreamWidth(requested, available);
+  document.body.style.setProperty('--dock-stream-width', `${width}px`);
+  updateDockCentering();
+  return width;
+}
 
 function setChatDockButton() {
   const label = t(chatDocked ? 'chat.undock' : 'chat.dock');
   chatDockButton.title = label;
   chatDockButton.setAttribute('aria-label', label);
   chatDockButton.disabled = !canDock(window.innerWidth);
+  const hint = t('chat.splitter');
+  dockSplitter.title = hint;
+  dockSplitter.setAttribute('aria-label', hint);
 }
 
 function updateDockCentering() {
@@ -707,14 +730,6 @@ function enterChatDock() {
     if (!canDock(window.innerWidth)) setStatus('chat.dockNarrow');
     return;
   }
-  // Lock the current picture width (canvas plus rail) so the mirrored screen
-  // keeps its visible size while the chat panel takes the remaining space.
-  const canvas = streamEl.querySelector('canvas.video-layer');
-  const rail = streamEl.querySelector('.control-buttons-list');
-  const canvasWidth = canvas ? canvas.getBoundingClientRect().width : 0;
-  const railWidth = rail ? rail.getBoundingClientRect().width : 0;
-  const lockedWidth = Math.max(240, Math.round(canvasWidth + railWidth));
-  document.body.style.setProperty('--dock-stream-width', `${lockedWidth}px`);
   // Drag offsets are meaningless in a layout column; clear them for the dock.
   chatPanel.style.left = '';
   chatPanel.style.top = '';
@@ -722,15 +737,27 @@ function enterChatDock() {
   chatPanel.style.bottom = '';
   chatDocked = true;
   document.body.classList.add('chat-docked');
+  dockSplitter.hidden = false;
+  // On first dock, keep the current picture size; afterwards honour the saved
+  // split ratio. Both are clamped so stream >= 500px and chat >= 240px.
+  const canvas = streamEl.querySelector('canvas.video-layer');
+  const rail = streamEl.querySelector('.control-buttons-list');
+  const canvasWidth = canvas ? canvas.getBoundingClientRect().width : 0;
+  const railWidth = rail ? rail.getBoundingClientRect().width : 0;
+  const lockedWidth = Math.round(canvasWidth + railWidth);
+  const ratio = readChatSplitRatio(localStorage);
+  const requested = ratio === null ? lockedWidth : ratio * dockAvailableWidth();
+  applyDockWidth(requested);
   writeChatDock(localStorage, true);
   setChatDockButton();
-  updateDockCentering();
 }
 
 function exitChatDock() {
   if (!chatDocked) return;
   chatDocked = false;
   document.body.classList.remove('chat-docked', 'chat-centered');
+  dockSplitter.hidden = true;
+  dockSplitter.classList.remove('dragging');
   document.body.style.removeProperty('--dock-stream-width');
   writeChatDock(localStorage, false);
   // Restore the user's previous floating position, if any.
@@ -816,6 +843,32 @@ function endChatDrag(event) {
 chatHead.addEventListener('pointerup', endChatDrag);
 chatHead.addEventListener('pointercancel', endChatDrag);
 
+// Splitter drag: moving it changes the stream column width; the chat column
+// takes the rest. The ratio is saved on release so it survives reloads.
+let splitDrag = null;
+dockSplitter.addEventListener('pointerdown', (event) => {
+  if (event.button !== 0) return;
+  splitDrag = { id: event.pointerId, startX: event.clientX, startWidth: streamEl.getBoundingClientRect().width };
+  dockSplitter.setPointerCapture(event.pointerId);
+  dockSplitter.classList.add('dragging');
+  event.preventDefault();
+});
+dockSplitter.addEventListener('pointermove', (event) => {
+  if (!splitDrag || event.pointerId !== splitDrag.id) return;
+  applyDockWidth(splitDrag.startWidth + (event.clientX - splitDrag.startX));
+});
+function endSplitDrag(event) {
+  if (!splitDrag || event.pointerId !== splitDrag.id) return;
+  splitDrag = null;
+  dockSplitter.classList.remove('dragging');
+  const available = dockAvailableWidth();
+  if (available > 0) {
+    writeChatSplitRatio(localStorage, streamEl.getBoundingClientRect().width / available);
+  }
+}
+dockSplitter.addEventListener('pointerup', endSplitDrag);
+dockSplitter.addEventListener('pointercancel', endSplitDrag);
+
 window.addEventListener('resize', () => {
   if (chatDocked) {
     if (!canDock(window.innerWidth)) {
@@ -823,7 +876,9 @@ window.addEventListener('resize', () => {
       setStatus('chat.dockNarrow');
     } else {
       setChatDockButton();
-      updateDockCentering();
+      const ratio = readChatSplitRatio(localStorage);
+      if (ratio !== null) applyDockWidth(ratio * dockAvailableWidth());
+      else updateDockCentering();
     }
     return;
   }

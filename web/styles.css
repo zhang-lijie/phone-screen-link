@@ -856,3 +856,32 @@ body.chat-docked.screen-fullscreen #stream {
 body.chat-docked.screen-fullscreen #stream .control-buttons-list {
   display: block;
 }
+
+/* Docked splitter: a thin grip between the picture and the chat column. */
+.dock-splitter {
+  flex: 0 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  cursor: col-resize;
+  touch-action: none;
+  user-select: none;
+}
+
+.dock-splitter[hidden] {
+  display: none;
+}
+
+.dock-splitter span {
+  width: 3px;
+  height: 30px;
+  border-radius: 2px;
+  background: #3a424e;
+  transition: background 0.1s;
+}
+
+.dock-splitter:hover span,
+.dock-splitter.dragging span {
+  background: #5b9aff;
+}
