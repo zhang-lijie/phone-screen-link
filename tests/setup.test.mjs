@@ -7,6 +7,9 @@ import {
   LOOPBACK_PATCH,
   KEYBOARD_FOCUS_PATCH,
   UHID_KEYBOARD_FOCUS_PATCHES,
+  FETCH_NODE_DARWIN_PATCH,
+  ADB_DARWIN_PATCH,
+  PREBUILT_DARWIN_PATCH,
   checkGhostToolchain,
 } from '../scripts/setup.mjs';
 
@@ -71,4 +74,24 @@ test('ghost toolchain: missing uvx and uv only prints an install hint, never thr
   assert.match(text, /uvx/);
   assert.match(text, /ghost-in-the-droid/);
   assert.match(text, /astral\.sh\/uv|install/i);
+});
+
+test('darwin patches: node bootstrap, adb archive and prebuilt platform', () => {
+  assert.equal(FETCH_NODE_DARWIN_PATCH.file, 'scripts/fetch-node.mjs');
+  assert.match(FETCH_NODE_DARWIN_PATCH.from, /if \(process\.platform === 'linux'\) \{/);
+  assert.match(FETCH_NODE_DARWIN_PATCH.from, /Node bootstrap fetch is implemented for win32 and linux only/);
+  assert.match(FETCH_NODE_DARWIN_PATCH.to, /darwin/);
+  assert.match(FETCH_NODE_DARWIN_PATCH.to, /node-v24\.19\.0-darwin-arm64\.tar\.xz/);
+  assert.match(FETCH_NODE_DARWIN_PATCH.to, /3f1cf157479c1480352083105e13faf9d008ede98e7e157746b6df940d197b94/);
+
+  assert.equal(ADB_DARWIN_PATCH.length, 2);
+  assert.match(ADB_DARWIN_PATCH[0].from, /getPlatform\(\): 'win32' \| 'linux'/);
+  assert.match(ADB_DARWIN_PATCH[0].from, /os\.platform\(\) === 'win32' \? 'win32' : 'linux'/);
+  assert.match(ADB_DARWIN_PATCH[0].to, /darwin/);
+  assert.match(ADB_DARWIN_PATCH[1].from, /platform-tools_r\$\{version\}-\$\{getPlatform\(\) === 'win32' \? 'win' : 'linux'\}\.zip/);
+  assert.match(ADB_DARWIN_PATCH[1].to, /darwin/);
+
+  assert.equal(PREBUILT_DARWIN_PATCH.file, 'scripts/fetch-prebuilts.mjs');
+  assert.match(PREBUILT_DARWIN_PATCH.from, /process\.platform === 'win32' \? 'win32' : 'linux'/);
+  assert.match(PREBUILT_DARWIN_PATCH.to, /darwin/);
 });

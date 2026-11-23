@@ -188,6 +188,73 @@ export const UHID_KEYBOARD_FOCUS_PATCHES = ['KeyDown', 'KeyUp'].map((suffix) => 
 ${UHID_EDITABLE_GUARD}        event.preventDefault();`,
 }));
 
+// macOS arm64 (Apple Silicon) bootstrap. Engine's fetch-node.mjs only knows
+// win32/linux; add the pinned darwin-arm64 Node archive (verified present and
+// sha256-published on nodejs.org). Intel Mac stays unsupported upstream.
+export const FETCH_NODE_DARWIN_PATCH = {
+  file: 'scripts/fetch-node.mjs',
+  from: `    if (process.platform === 'linux') {
+        return {
+            archiveName: LINUX_ARCHIVE_NAME,
+            archiveSha256: LINUX_ARCHIVE_SHA256,
+            innerRel: LINUX_INNER_NODE_REL,
+            seedNodeName: 'node',
+        };
+    }
+    throw new Error(
+        \`Unsupported platform: \${process.platform}. \` +
+            'Node bootstrap fetch is implemented for win32 and linux only ' +
+            '(those are the platforms we ship installers for).',
+    );`,
+  to: `    if (process.platform === 'linux') {
+        return {
+            archiveName: LINUX_ARCHIVE_NAME,
+            archiveSha256: LINUX_ARCHIVE_SHA256,
+            innerRel: LINUX_INNER_NODE_REL,
+            seedNodeName: 'node',
+        };
+    }
+    if (process.platform === 'darwin' && process.arch === 'arm64') {
+        return {
+            archiveName: 'node-v24.19.0-darwin-arm64.tar.xz',
+            archiveSha256: '3f1cf157479c1480352083105e13faf9d008ede98e7e157746b6df940d197b94',
+            innerRel: path.join('node-v24.19.0-darwin-arm64', 'bin', 'node'),
+            seedNodeName: 'node',
+        };
+    }
+    throw new Error(
+        \`Unsupported platform: \${process.platform}. \` +
+            'Node bootstrap fetch is implemented for win32, linux and darwin-arm64 only ' +
+            '(Intel Mac is not supported).',
+    );`,
+};
+
+// adb platform-tools: getPlatform() and adbArchiveName() both hardcode linux;
+// both must be widened or the darwin archive name stays wrong.
+export const ADB_DARWIN_PATCH = [
+  {
+    file: 'src/server/DependencyDefinitions.ts',
+    from: `export function getPlatform(): 'win32' | 'linux' {
+    return os.platform() === 'win32' ? 'win32' : 'linux';
+}`,
+    to: `export function getPlatform(): 'win32' | 'linux' | 'darwin' {
+    return os.platform() === 'win32' ? 'win32' : os.platform() === 'darwin' ? 'darwin' : 'linux';
+}`,
+  },
+  {
+    file: 'src/server/DependencyDefinitions.ts',
+    from: "    return `platform-tools_r${version}-${getPlatform() === 'win32' ? 'win' : 'linux'}.zip`;",
+    to: "    return `platform-tools_r${version}-${getPlatform() === 'win32' ? 'win' : getPlatform() === 'darwin' ? 'darwin' : 'linux'}.zip`;",
+  },
+];
+
+// node-pty prebuilt key: darwin must not fall through to the linux/glibc key.
+export const PREBUILT_DARWIN_PATCH = {
+  file: 'scripts/fetch-prebuilts.mjs',
+  from: "    const platform = process.platform === 'win32' ? 'win32' : 'linux';",
+  to: "    const platform = process.platform === 'win32' ? 'win32' : process.platform === 'darwin' ? 'darwin' : 'linux';",
+};
+
 function run(command, args, cwd) {
   console.log(`+ ${command} ${args.join(' ')}`);
   execFileSync(command, args, { cwd, stdio: 'inherit' });
@@ -213,6 +280,9 @@ function applyEnginePatches() {
   for (const patch of UHID_KEYBOARD_FOCUS_PATCHES) applyPatch(patch, 'UHID keyboard focus handoff');
   for (const patch of AUDIO_VOLUME_PATCHES) applyPatch(patch, 'audio volume handle');
   for (const patch of RESIZE_PATCHES) applyPatch(patch, 'resize handle');
+  applyPatch(FETCH_NODE_DARWIN_PATCH, 'darwin-arm64 node bootstrap');
+  for (const patch of ADB_DARWIN_PATCH) applyPatch(patch, 'darwin adb archive');
+  applyPatch(PREBUILT_DARWIN_PATCH, 'darwin prebuilt platform');
 }
 
 export function checkGhostToolchain({ exec = execFileSync, log = console.log } = {}) {
