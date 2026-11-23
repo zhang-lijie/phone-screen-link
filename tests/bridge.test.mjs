@@ -289,7 +289,7 @@ const PUBLIC_CHAT_CONFIG_DEFAULT = {
   enabled: false,
   baseUrl: DEFAULT_CHAT_CONFIG.baseUrl,
   model: '',
-  maxSteps: 8,
+  maxSteps: 100,
   screenshot: true,
   hasApiKey: false,
 };

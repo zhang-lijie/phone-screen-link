@@ -5,7 +5,7 @@ export const DEFAULT_CHAT_CONFIG = Object.freeze({
   enabled: false,
   baseUrl: 'http://127.0.0.1:11434/v1',
   model: '',
-  maxSteps: 8,
+  maxSteps: 100,
   screenshot: true,
   apiKey: '',
 });
@@ -54,13 +54,13 @@ export function createChatConfigStore({ file }) {
       const value = fieldValue(fields, key);
       if (value !== undefined) config[key] = value;
     }
-    // maxSteps policy: integers are CLAMPED to 1..32 (the settings input's
-    // range, web/index.html max=32); non-integers are dropped like any other
+    // maxSteps policy: integers are CLAMPED to 1..100 (the settings input's
+    // range, web/index.html max=100); non-integers are dropped like any other
     // type mismatch, keeping the previously stored value.
     if (Object.hasOwn(fields, 'maxSteps')) {
       const value = fields.maxSteps;
       config.maxSteps = typeof value === 'number' && Number.isInteger(value)
-        ? Math.min(32, Math.max(1, value))
+        ? Math.min(100, Math.max(1, value))
         : previousMaxSteps;
     }
     mkdirSync(dirname(file), { recursive: true });

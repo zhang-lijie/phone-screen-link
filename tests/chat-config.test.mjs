@@ -9,7 +9,7 @@ const EXPECTED_DEFAULT = {
   enabled: false,
   baseUrl: 'http://127.0.0.1:11434/v1',
   model: '',
-  maxSteps: 8,
+  maxSteps: 100,
   screenshot: true,
   apiKey: '',
 };
@@ -66,7 +66,7 @@ test('chat config: publicConfig hides apiKey and reports hasApiKey', (t) => {
     enabled: false,
     baseUrl: 'http://127.0.0.1:11434/v1',
     model: '',
-    maxSteps: 8,
+    maxSteps: 100,
     screenshot: true,
     hasApiKey: false,
   });
@@ -79,7 +79,7 @@ test('chat config: publicConfig hides apiKey and reports hasApiKey', (t) => {
   assert.equal(pub.model, 'qwen3');
   assert.equal(pub.enabled, false);
   assert.equal(pub.baseUrl, EXPECTED_DEFAULT.baseUrl);
-  assert.equal(pub.maxSteps, 8);
+  assert.equal(pub.maxSteps, 100);
   assert.equal(pub.screenshot, true);
   assert.equal(JSON.stringify(pub).includes('sk-x'), false);
 });
@@ -95,13 +95,14 @@ test('chat config: enabled is read from disk and can be turned back off', (t) =>
   assert.equal(saved.enabled, false);
 });
 
-test('chat config: save clamps integer maxSteps to 1..32 and drops non-integers', (t) => {
+test('chat config: save clamps integer maxSteps to 1..100 and drops non-integers', (t) => {
   const store = tempStore(t);
   assert.equal(store.save({ maxSteps: 0 }).maxSteps, 1);
   assert.equal(store.save({ maxSteps: -5 }).maxSteps, 1);
-  assert.equal(store.save({ maxSteps: 100 }).maxSteps, 32);
+  assert.equal(store.save({ maxSteps: 100 }).maxSteps, 100);
   assert.equal(store.save({ maxSteps: 1 }).maxSteps, 1);
   assert.equal(store.save({ maxSteps: 32 }).maxSteps, 32);
+  assert.equal(store.save({ maxSteps: 200 }).maxSteps, 100);
   assert.equal(store.save({ maxSteps: 5 }).maxSteps, 5);
   // Non-integers are dropped like any other type mismatch: the stored value stays.
   assert.equal(store.save({ maxSteps: 2.5 }).maxSteps, 5);
