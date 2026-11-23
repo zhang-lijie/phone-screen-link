@@ -587,6 +587,7 @@ function applyChatVisibility() {
   const show = Boolean(chatConfig?.enabled);
   chatFab.hidden = !show;
   if (!show) chatPanel.hidden = true;
+  syncChatOpenClass();
 }
 
 function updateChatLabels() {
@@ -789,9 +790,14 @@ function setChatInputModes(targets) {
   }
 }
 
+function syncChatOpenClass() {
+  document.body.classList.toggle('chat-open', !chatPanel.hidden);
+}
+
 function closeChat() {
   exitChatDock();
   chatPanel.hidden = true;
+  syncChatOpenClass();
   setChatInputModes(chatInputModeTargets(false));
 }
 
@@ -907,6 +913,7 @@ window.addEventListener('resize', () => {
 chatFab.addEventListener('click', () => {
   if (chatPanel.hidden) {
     chatPanel.hidden = false;
+    syncChatOpenClass();
     // Every open starts floating: clear any persisted dock preference and
     // restore the saved drag position instead of re-entering side-by-side.
     if (chatDocked) exitChatDock();
