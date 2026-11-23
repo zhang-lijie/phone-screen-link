@@ -498,6 +498,22 @@ export function saveSettings(storage, settings) {
 
 // "auto" walks the measured ladder; a fixed resolution is used as-is, so the
 // user's explicit choice is not silently replaced.
+// Input-mode checkboxes the engine builds in its toolbox. Matched by input-id
+// prefix (title is translated, id is not). While chat is open all three are
+// unchecked so key/mouse/touch input stops reaching the phone; closing chat
+// restores the fixed defaults.
+export const CHAT_INPUT_MODE_IDS = Object.freeze({
+  keyboard: 'input_capture_keyboard_',
+  uhid: 'input_uhid_input_',
+  touch: 'input_input_mode_',
+});
+
+export function chatInputModeTargets(chatOpen) {
+  return chatOpen
+    ? { keyboard: false, uhid: false, touch: false }
+    : { keyboard: true, uhid: false, touch: true };
+}
+
 // Chat dock (side-by-side) mode. Kept in localStorage like the drag position.
 export const CHAT_DOCK_KEY = 'phone-link-chat-docked';
 export const MIN_DOCK_WIDTH = 720;

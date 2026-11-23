@@ -23,6 +23,8 @@ import {
   UI_FONT_SCALES,
   buildStreamOptions,
   canDock,
+  CHAT_INPUT_MODE_IDS,
+  chatInputModeTargets,
   clampDockStreamWidth,
   clampPanelPosition,
   effectiveLanguage,
@@ -347,4 +349,15 @@ test('chat dock splitter: ratio persistence validates 0..1', () => {
   assert.equal(readChatSplitRatio(storage), null, 'out-of-range rejected');
   store.set(CHAT_SPLIT_KEY, 'not a number');
   assert.equal(readChatSplitRatio(storage), null);
+});
+
+test('chat input mode targets: chat open unchecks all, close restores defaults', () => {
+  assert.deepEqual(chatInputModeTargets(true), { keyboard: false, uhid: false, touch: false });
+  assert.deepEqual(chatInputModeTargets(false), { keyboard: true, uhid: false, touch: true });
+  // ids must be language-independent prefixes used to find engine checkboxes
+  assert.deepEqual(CHAT_INPUT_MODE_IDS, {
+    keyboard: 'input_capture_keyboard_',
+    uhid: 'input_uhid_input_',
+    touch: 'input_input_mode_',
+  });
 });

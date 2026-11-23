@@ -4,7 +4,9 @@
 import {
   DEFAULT_SETTINGS,
   ENGINE_TEXT_KEYS,
+  CHAT_INPUT_MODE_IDS,
   canDock,
+  chatInputModeTargets,
   clampDockStreamWidth,
   clampPanelPosition,
   readChatDock,
@@ -281,7 +283,7 @@ overlay.addEventListener('click', (event) => {
 window.addEventListener('keydown', (event) => {
   if (event.key !== 'Escape') return;
   if (!overlay.hidden) closeSettings();
-  else if (!chatPanel.hidden) chatPanel.hidden = true;
+  else if (!chatPanel.hidden) closeChat();
   else if (document.body.classList.contains('screen-fullscreen')) setFullscreen(false);
 });
 document.getElementById('settings-reset').addEventListener('click', () => {
@@ -772,9 +774,25 @@ function exitChatDock() {
   setChatDockButton();
 }
 
+// While chat is open, uncheck the engine's three input-mode checkboxes so
+// key/mouse/touch input stops reaching the phone. A programmatic click toggles
+// both the icon state and the engine's internal listener (no engine change).
+// Checked state only when it differs, so an already-correct box is not flipped.
+function setChatInputModes(targets) {
+  const list = streamEl.querySelector('.control-buttons-list');
+  if (!list) return;
+  for (const [name, prefix] of Object.entries(CHAT_INPUT_MODE_IDS)) {
+    const input = [...list.querySelectorAll('input[type=checkbox]')]
+      .find((el) => el.id?.startsWith(prefix));
+    if (!input || input.checked === targets[name]) continue;
+    input.click();
+  }
+}
+
 function closeChat() {
   exitChatDock();
   chatPanel.hidden = true;
+  setChatInputModes(chatInputModeTargets(false));
 }
 
 chatDockButton.addEventListener('click', () => {
@@ -889,11 +907,13 @@ window.addEventListener('resize', () => {
 chatFab.addEventListener('click', () => {
   if (chatPanel.hidden) {
     chatPanel.hidden = false;
-    if (readChatDock(localStorage) && canDock(window.innerWidth)) enterChatDock();
-    else {
-      const saved = readChatPosition(localStorage);
-      if (saved) applyChatPosition(saved);
-    }
+    // Every open starts floating: clear any persisted dock preference and
+    // restore the saved drag position instead of re-entering side-by-side.
+    if (chatDocked) exitChatDock();
+    writeChatDock(localStorage, false);
+    const saved = readChatPosition(localStorage);
+    if (saved) applyChatPosition(saved);
+    setChatInputModes(chatInputModeTargets(true));
     chatInput.focus();
   } else {
     closeChat();

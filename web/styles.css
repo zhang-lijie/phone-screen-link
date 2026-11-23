@@ -75,6 +75,7 @@ body {
    and a narrow control rail; we only need the video cell to fill the space
    and to scale with the device aspect ratio. */
 #stream {
+  position: relative;
   flex: 1;
   min-height: 0;
   display: flex;
