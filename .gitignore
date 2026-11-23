@@ -5,3 +5,5 @@ state/
 *.log
 
 .worktrees/
+__pycache__/
+*.pyc
