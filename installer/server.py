@@ -59,22 +59,27 @@ def _tool(path, name):
     return {"status": "ok" if found else "error", "path": found}
 
 
-def detect_environment(path, platform_name, project_root):
+def detect_environment(path, platform_name, project_root, machine=None, probe_ports=(8000, 8100)):
     """Report tool availability and platform support without running tools."""
-    supported = platform_name == "linux"
+    if machine is None:
+        import platform as _platform
+        machine = _platform.machine()
+    x64 = machine in ("x86_64", "amd64")
+    supported = platform_name == "linux" and x64
     tools = {name: _tool(path, name) for name in ("git", "npm", "node", "python3", "uvx", "uv")}
     adb = _tool(path, "adb")
     if adb["status"] != "ok":
         adb = {"status": "warning", "path": None, "hint": "系统未找到 adb，安装时会使用引擎自带的版本"}
     engine_adb = str(Path(project_root) / "engine" / "dependencies" / "adb")
     ports = {}
-    for port in (8000, 8100):
+    for port in probe_ports:
         with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
             sock.settimeout(0.2)
             ports[str(port)] = sock.connect_ex(("127.0.0.1", port)) == 0
     return {
         "supported": supported,
-        "reason": "" if supported else "仅支持 Linux x64：引擎在 macOS/Windows 上没有对应构建",
+        "reason": "" if supported else ("仅支持 x86_64 Linux：当前系统 %s/%s 不在支持范围" % (platform_name, machine)),
+        "arch": machine,
         "platform": platform_name,
         "git": tools["git"],
         "npm": tools["npm"],
@@ -150,8 +155,8 @@ def write_chat_config(root, patch):
         value = patch[key]
         if type(value) is not type(CHAT_DEFAULTS[key]):
             continue
-        if key == "apiKey" and value == "":
-            continue  # blank means keep the stored key
+        if key in ("apiKey", "baseUrl", "model") and value == "":
+            continue  # blank means keep the stored value
         if key == "maxSteps":
             try:
                 value = max(1, min(100, int(value)))
@@ -211,19 +216,31 @@ def start_app(root):
     append_log("npm start launched")
 
 
-def wait_for_health(timeout=90):
+def readiness_from_health(health):
+    """Interpret /health: service-ready is `ok:true`; `online` is device state."""
+    if not health or not health.get("ok"):
+        return (False, False, "")
+    online = bool(health.get("online"))
+    detail = "投屏服务已就绪" if online else "投屏服务已就绪，等待手机连接/授权"
+    return (True, online, detail)
+
+
+def wait_for_service(timeout=90):
+    """Poll /health until the service answers ok:true (device may be absent)."""
     import time
     deadline = time.time() + timeout
+    last = None
     while time.time() < deadline:
         try:
             with urllib.request.urlopen("http://127.0.0.1:8100/health", timeout=2) as resp:
-                data = json.loads(resp.read().decode("utf-8"))
-                if data.get("online"):
-                    return True
+                last = json.loads(resp.read().decode("utf-8"))
         except Exception:
-            pass
+            last = None
+        ready, online, detail = readiness_from_health(last)
+        if ready:
+            return (True, online, detail)
         time.sleep(1)
-    return False
+    return (False, False, "服务启动超时，请查看日志")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -338,15 +355,16 @@ class Handler(BaseHTTPRequestHandler):
             return
 
         if path == "/api/start":
-            try:
-                start_app(PROJECT_ROOT)
-                ok = wait_for_health()
-                if ok:
-                    set_state(step="start", status="ok", detail="投屏服务已就绪")
-                else:
-                    set_state(step="start", status="error", detail="服务启动超时，请查看日志")
-            except Exception as exc:
-                set_state(step="start", status="error", detail=str(exc))
+            def work():
+                try:
+                    start_app(PROJECT_ROOT)
+                    ready, online, detail = wait_for_service()
+                    set_state(step="start", status="ok" if ready else "error",
+                              detail=detail if ready else "服务启动超时，请查看日志",
+                              online=online)
+                except Exception as exc:
+                    set_state(step="start", status="error", detail=str(exc))
+            threading.Thread(target=work, daemon=True).start()
             self._json({"ok": True})
             return
 

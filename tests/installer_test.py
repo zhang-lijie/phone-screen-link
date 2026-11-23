@@ -1,6 +1,7 @@
 import os
 import stat
 import subprocess
+import socket
 import sys
 import tempfile
 import unittest
@@ -153,3 +154,38 @@ class RootIsolationTest(unittest.TestCase):
             proc = subprocess.run([sys.executable, "-c", code], capture_output=True,
                                   text=True, env=env)
             self.assertEqual(proc.stdout.strip(), d)
+
+
+class ReviewFixesTest(unittest.TestCase):
+    def test_readiness_accepts_ok_without_online(self):
+        ready, online, detail = srv.readiness_from_health({"ok": True, "online": False})
+        self.assertTrue(ready)
+        self.assertFalse(online)
+        self.assertIn("等待手机", detail)
+        ready, online, _ = srv.readiness_from_health({"ok": True, "online": True})
+        self.assertTrue(ready and online)
+        self.assertEqual(srv.readiness_from_health(None)[0], False)
+        self.assertEqual(srv.readiness_from_health({"ok": False})[0], False)
+
+    def test_config_blank_baseurl_model_keep_stored(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            srv.write_chat_config(root, {"baseUrl": "http://my-model:8000/v1", "model": "m1"})
+            result = srv.write_chat_config(root, {"baseUrl": "", "model": ""})
+            self.assertEqual(result["baseUrl"], "http://my-model:8000/v1")
+            self.assertEqual(result["model"], "m1")
+
+    def test_detect_rejects_non_x64(self):
+        result = srv.detect_environment("/usr/bin", "linux", "/x", machine="aarch64")
+        self.assertFalse(result["supported"])
+        self.assertIn("x86_64", result["reason"])
+
+    def test_detect_marks_port_conflict(self):
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.bind(("127.0.0.1", 0))
+            s.listen(1)
+            port = s.getsockname()[1]
+            # detect while the socket is still listening
+            result = srv.detect_environment("/usr/bin", "linux", "/x", probe_ports=(port,))
+        self.assertTrue(result["ports"].get(str(port)))
+        self.assertIn("ports", result)

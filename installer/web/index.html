@@ -110,13 +110,15 @@ document.getElementById('btn-detect').onclick = async () => {
     const list = document.getElementById('checks');
     list.innerHTML = '';
     const rows = [];
-    for (const key of ['platform','git','npm','node','python','uvx','adb','engine_adb']) {
+    for (const key of ['platform','arch','git','npm','node','python','uvx','adb','engine_adb']) {
       const v = r[key];
       if (v === undefined) continue;
       const obj = typeof v === 'object' ? v : { status:'ok', path:String(v) };
       const label = { platform:'系统', git:'git', npm:'npm', node:'Node.js', python:'python3', uvx:'uvx/uv（聊天）', adb:'系统 adb', engine_adb:'引擎自带 adb' }[key] || key;
       rows.push(`<li><span class="tag ${obj.status||''}">${obj.status||'info'}</span> ${label}${obj.path ? ' — ' + obj.path : ''}</li>`);
     }
+    const busy = Object.entries(r.ports || {}).filter(([,v]) => v).map(([p]) => p);
+    rows.push(`<li><span class="tag ${busy.length ? 'warning' : 'ok'}">${busy.length ? 'warning' : 'ok'}</span> 端口 8000/8100${busy.length ? ' — ' + busy.join(',') + ' 被占用，若非本应用请先停掉占用进程' : ' — 空闲'}</li>`);
     list.innerHTML = rows.join('');
     if (!r.supported) { setMsg('msg-detect', r.reason, 'error'); markStep('detect','error'); return; }
     const missing = ['git','npm','node','python'].filter(k => r[k].status !== 'ok');
@@ -137,7 +139,7 @@ document.getElementById('btn-config').onclick = async () => {
     apiKey: document.getElementById('cfg-key').value,
     serial: document.getElementById('cfg-serial').value.trim(),
   };
-  const r = await post('/api/config', body);
+  let r; try { r = await post('/api/config', body); } catch (e) { setMsg('msg-config','保存失败：'+e,'error'); return; }
   setMsg('msg-config', r.ok ? '已保存' : '保存失败', r.ok ? 'ok' : 'error');
   markStep('config','done');
   document.getElementById('cfg-key').value = '';
@@ -146,9 +148,9 @@ document.getElementById('btn-start').onclick = async () => {
   setMsg('msg-start', '启动中，请稍候…');
   markStep('start','active');
   document.getElementById('btn-start').disabled = true;
-  await post('/api/start');
+  try { await post('/api/start'); } catch (e) { setMsg('msg-start','启动失败：'+e,'error'); }
 };
-document.getElementById('btn-open').onclick = () => post('/api/open');
+document.getElementById('btn-open').onclick = () => post('/api/open').catch(() => {});
 
 async function poll() {
   try {

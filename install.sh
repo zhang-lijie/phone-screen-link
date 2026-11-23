@@ -14,6 +14,10 @@ if [ "$(uname -s)" != "Linux" ]; then
   echo "仅支持 Linux x64；当前系统: $(uname -s)" >&2
   exit 1
 fi
+case "$(uname -m)" in
+  x86_64|amd64) ;;
+  *) echo "仅支持 x86_64 架构；当前架构: $(uname -m)" >&2; exit 1 ;;
+esac
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "需要 python3（安装向导用它启动本地服务）。请先安装 python3。" >&2
