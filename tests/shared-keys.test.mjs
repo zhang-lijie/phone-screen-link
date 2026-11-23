@@ -93,6 +93,7 @@ test('wheel steps are a small validated set, defaulting to 2', () => {
   assert.deepEqual(WHEEL_SCALE_CHOICES, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   assert.equal(DEFAULT_WHEEL_STEPS, 2);
   assert.equal(DEFAULT_SETTINGS.wheelSteps, 2);
+  assert.equal(DEFAULT_SETTINGS.navButtonMode, 'icon', 'default nav shows icons only');
   assert.equal(normalizeSettings().wheelSteps, 2);
   assert.equal(normalizeSettings({ wheelSteps: 1 }).wheelSteps, 1);
   assert.equal(normalizeSettings({ wheelSteps: 5 }).wheelSteps, 5);

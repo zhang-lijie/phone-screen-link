@@ -230,8 +230,8 @@ body.screen-fullscreen #stream .control-buttons-list {
 }
 
 #stream .control-button > svg {
-  width: calc(16px * var(--rail-scale));
-  height: calc(16px * var(--rail-scale));
+  width: calc(20px * var(--rail-scale));
+  height: calc(20px * var(--rail-scale));
   fill: #aeb5c2;
 }
 
@@ -243,7 +243,7 @@ body.screen-fullscreen #stream .control-buttons-list {
    data-label is filled in by app.js; without it the entry stays icon-only. */
 #stream .control-button[data-label]::after {
   content: attr(data-label);
-  font: 500 calc(8px * var(--rail-scale))/1 system-ui, -apple-system, sans-serif;
+  font: 500 calc(10px * var(--rail-scale))/1 system-ui, -apple-system, sans-serif;
   letter-spacing: 0.04em;
   color: var(--ui-text-muted);
 }
@@ -262,7 +262,7 @@ body.nav-text-only #stream .control-button > svg {
 }
 
 body.nav-text-only #stream .control-button[data-label]::after {
-  font-size: calc(9px * var(--rail-scale));
+  font-size: calc(11px * var(--rail-scale));
 }
 
 /* Checkbox entries (keyboard capture, UHID, stats, D-pad) are labels whose
@@ -295,8 +295,8 @@ body.nav-text-only #stream .control-button[data-label]::after {
 }
 
 #stream .control-wrapper > label.control-button > svg {
-  width: calc(16px * var(--rail-scale));
-  height: calc(16px * var(--rail-scale));
+  width: calc(20px * var(--rail-scale));
+  height: calc(20px * var(--rail-scale));
   fill: #aeb5c2;
 }
 

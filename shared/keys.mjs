@@ -434,7 +434,7 @@ export const DEFAULT_SETTINGS = {
   statsFontColor: '#ec6a13',
   railScale: 1,
   statusScale: 1,
-  navButtonMode: 'both',
+  navButtonMode: 'icon',
   wheelSteps: 2,
   volume: 100,
   autoResizeWindow: true,
