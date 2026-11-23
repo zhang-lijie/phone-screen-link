@@ -1,6 +1,6 @@
 # Phone Screen Link
 
-## 一键安装（Linux x64）
+## 一键安装（Linux x64 / macOS arm64）
 
 一条命令，自动装好并在浏览器里打开安装向导（环境检测 → 依赖安装 → 可选聊天配置 → 启动）：
 
@@ -15,7 +15,7 @@ tar xf phone-screen-link-1.0.0.tar.gz
 cd phone-screen-link-1.0.0 && ./install.sh
 ```
 
-安装目录固定为 `~/.local/share/phone-screen-link`；重复运行只启动向导，不覆盖你的配置。首次安装需联网拉取引擎（GPL-3.0，见下方声明）。**仅支持 Linux x64**，Windows / macOS 不支持（macOS 因引擎缺少 darwin 构建）。手动安装方式见[快速开始](#快速开始)。
+安装目录固定为 `~/.local/share/phone-screen-link`；重复运行只启动向导，不覆盖你的配置。首次安装需联网拉取引擎（GPL-3.0，见下方声明）。**支持 Linux x64 与 macOS arm64（Apple Silicon）**；Intel Mac（x64）不支持（上游缺少 node-pty 的 darwin-x64 预编译），Windows 不支持。macOS 为本次新增支持，尚无实机验证结果；若安装失败请把报错反馈给项目。手动安装方式见[快速开始](#快速开始)。
 
 ---
 
@@ -401,7 +401,7 @@ npm run build
 ## 目录结构
 
 ```
-install.sh               一键安装入口（Linux x64），自举到 ~/.local/share/phone-screen-link
+install.sh               一键安装入口（Linux x64 / macOS arm64），自举到 ~/.local/share/phone-screen-link
 installer/server.py      本地回环安装向导 HTTP 服务（检测/装依赖/配置/启动）
 installer/web/index.html 向导单页界面
 scripts/make-release.sh  从 git tag 构建发布 tar.gz（剔除 engine/node_modules/state）
