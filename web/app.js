@@ -38,6 +38,7 @@ const BRIDGE_URL = `${BRIDGE_BASE}/keyevent`;
 const CHAT_CONFIG_URL = `${BRIDGE_BASE}/api/chat-config`;
 const CHAT_URL = `${BRIDGE_BASE}/chat`;
 const CHAT_COMMAND_URL = `${BRIDGE_BASE}/api/chat-command`;
+const CHAT_SCREEN_URL = `${BRIDGE_BASE}/api/chat-screen`;
 const SCREEN_STATE_POLL_MS = 3000;
 
 const streamEl = document.getElementById('stream');
@@ -588,7 +589,10 @@ function applyChatVisibility() {
   // Icon hidden while disabled: no entry point means no accidental 503s.
   const show = Boolean(chatConfig?.enabled);
   chatFab.hidden = !show;
-  if (!show) chatPanel.hidden = true;
+  if (!show && !chatPanel.hidden) {
+    chatPanel.hidden = true;
+    setChatScreen('restore');
+  }
   syncChatOpenClass();
 }
 
@@ -617,12 +621,27 @@ function syncChatEmpty() {
   chatEmptyEl.hidden = Boolean(chatMessagesEl.querySelector('.chat-msg'));
 }
 
+const CHAT_FOLD_LIMIT = 500;
+
 function addChatBubble(kind, text, steps) {
   const bubble = document.createElement('div');
   bubble.className = `chat-msg chat-msg--${kind}`;
   const body = document.createElement('p');
   body.textContent = text;
   bubble.appendChild(body);
+  // Long messages are folded; double-click the bubble to expand/collapse.
+  if (typeof text === 'string' && text.length > CHAT_FOLD_LIMIT) {
+    bubble.classList.add('chat-msg--foldable');
+    const hint = document.createElement('div');
+    hint.className = 'chat-fold-hint';
+    hint.textContent = t('chat.expand');
+    bubble.appendChild(hint);
+    bubble.addEventListener('dblclick', () => {
+      const expanded = bubble.classList.toggle('expanded');
+      hint.textContent = t(expanded ? 'chat.collapse' : 'chat.expand');
+      chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+    });
+  }
   if (Array.isArray(steps) && steps.length > 0) {
     const line = document.createElement('div');
     line.className = 'chat-steps';
@@ -897,11 +916,22 @@ function syncChatOpenClass() {
   document.body.classList.toggle('chat-open', !chatPanel.hidden);
 }
 
+// Keep the phone screen awake while chat is open (best-effort; a failure here
+// must never break the chat UI).
+function setChatScreen(action) {
+  fetch(CHAT_SCREEN_URL, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ action }),
+  }).catch(() => {});
+}
+
 function closeChat() {
   exitChatDock();
   chatPanel.hidden = true;
   syncChatOpenClass();
   setChatInputModes(chatInputModeTargets(false));
+  setChatScreen('restore');
 }
 
 chatDockButton.addEventListener('click', () => {
@@ -1017,6 +1047,7 @@ chatFab.addEventListener('click', () => {
   if (chatPanel.hidden) {
     chatPanel.hidden = false;
     syncChatOpenClass();
+    setChatScreen('wake');
     // Every open starts floating: clear any persisted dock preference and
     // restore the saved drag position instead of re-entering side-by-side.
     if (chatDocked) exitChatDock();
@@ -1205,5 +1236,17 @@ async function boot() {
     setStatus('status.engineDownError', { error: messageOf(err) });
   }
 }
+
+// If the tab closes while chat is open, restore the phone's screen timeout.
+window.addEventListener('pagehide', () => {
+  if (!chatPanel.hidden) {
+    fetch(CHAT_SCREEN_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'restore' }),
+      keepalive: true,
+    }).catch(() => {});
+  }
+});
 
 boot();

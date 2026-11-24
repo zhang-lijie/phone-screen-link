@@ -60,3 +60,19 @@ test('isLocked: unreadable wakefulness fails closed as locked', async () => {
   const adb = createAdb(async () => '');
   assert.equal(await adb.isLocked(), true);
 });
+
+
+test('wakeScreen sends KEYCODE_WAKEUP on the configured serial', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return ''; });
+  await adb.wakeScreen();
+  assert.deepEqual(calls[0], ['-s', DEFAULT_USB_SERIAL, 'shell', 'input', 'keyevent', '224']);
+});
+
+test('getScreenTimeout parses settings value; setScreenTimeout writes it', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return args.includes('get') ? '30000\n' : ''; });
+  assert.equal(await adb.getScreenTimeout(), 30000);
+  await adb.setScreenTimeout(3600000);
+  assert.deepEqual(calls.at(-1), ['-s', DEFAULT_USB_SERIAL, 'shell', 'settings', 'put', 'system', 'screen_off_timeout', '3600000']);
+});

@@ -621,6 +621,29 @@ body.chat-open .chat-fab {
   word-break: break-word;
 }
 
+/* Foldable long messages: collapsed to a few lines, double-click to expand. */
+.chat-msg--foldable {
+  cursor: pointer;
+}
+
+.chat-msg--foldable:not(.expanded) > p {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  user-select: none;
+}
+
+.chat-fold-hint {
+  margin-top: 4px;
+  font-size: 0.85em;
+  color: #8ea9c9;
+}
+
+.chat-msg--foldable.expanded > p {
+  user-select: text;
+}
+
 .chat-msg--user {
   align-self: flex-end;
   background: #2e5f9e;

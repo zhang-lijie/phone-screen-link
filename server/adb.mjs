@@ -45,6 +45,22 @@ export function createAdb(runner = defaultRunner) {
       return (await list()).includes(DEFAULT_USB_SERIAL);
     },
 
+    // Wake the screen without unlocking (KEYCODE_WAKEUP = 224). Never bypasses
+    // the keyguard; the chat lock gate still rejects locked devices.
+    async wakeScreen() {
+      await runner(['-s', DEFAULT_USB_SERIAL, 'shell', 'input', 'keyevent', '224']);
+    },
+
+    async getScreenTimeout() {
+      const out = await runner(['-s', DEFAULT_USB_SERIAL, 'shell', 'settings', 'get', 'system', 'screen_off_timeout']);
+      const ms = Number.parseInt(String(out).trim(), 10);
+      return Number.isFinite(ms) ? ms : null;
+    },
+
+    async setScreenTimeout(ms) {
+      await runner(['-s', DEFAULT_USB_SERIAL, 'shell', 'settings', 'put', 'system', 'screen_off_timeout', String(ms)]);
+    },
+
     // Real lock/sleep state from ADB. ghost's get_phone_state returns the
     // current app/activity only (no lock info), so the chat gate uses this
     // instead. Unreadable state fails closed: a possibly locked device must

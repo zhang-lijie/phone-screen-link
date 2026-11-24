@@ -4,7 +4,7 @@
 
 import { chatCompletion as defaultChatCompletion } from './model-client.mjs';
 import { filterToolDefinitions, isAllowedTool, validateToolArgs } from '../shared/chat-tools.mjs';
-import { resolveCommand, truncateResult } from '../shared/chat-commands.mjs';
+import { resolveCommand } from '../shared/chat-commands.mjs';
 
 const DEFAULT_MAX_STEPS = 8;
 const DEFAULT_MODEL_TIMEOUT_MS = 60_000;
@@ -91,7 +91,9 @@ export async function runPresetCommand({ commandId, lang, deps = {} }) {
     const result = await callTool(command.tool, { ...command.args });
     const ok = result?.isError !== true;
     const text = textOf(result);
-    const reply = ok ? truncateResult(text || strings(lang).noContent) : (text || strings(lang).noContent);
+    // Full text is returned; the chat panel folds long messages (double-click
+    // to expand) instead of silently truncating command output.
+    const reply = text || strings(lang).noContent;
     return { ok, reply, steps: [{ tool: command.tool, ok }] };
   } catch (err) {
     return { ok: false, reply: String(err?.message ?? err), steps: [{ tool: command.tool, ok: false }] };

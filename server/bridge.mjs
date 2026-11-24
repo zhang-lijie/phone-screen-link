@@ -11,6 +11,7 @@ const PREFLIGHT_METHODS = {
   '/health': 'GET, OPTIONS',
   '/keyevent': 'POST, OPTIONS',
   '/chat': 'POST, OPTIONS',
+  '/api/chat-screen': 'POST, OPTIONS',
   '/api/chat-command': 'POST, OPTIONS',
   '/api/chat-config': 'GET, POST, OPTIONS',
 };
@@ -63,6 +64,7 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
   const bindHost = host ?? DEFAULT_HOST;
   let server;
   let boundAddress;
+  let savedScreenTimeout = null; // original timeout while chat keeps screen awake
 
   async function handleRequest(req, res) {
     try {
@@ -160,6 +162,44 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
           return;
         }
         sendJson(res, 200, { reply: result.reply, steps: result.steps });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/chat-screen') {
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        const action = body?.action;
+        if (action !== 'wake' && action !== 'restore') {
+          sendJson(res, 400, { error: 'invalid action' });
+          return;
+        }
+        if (!(await adb.isOnline())) {
+          sendJson(res, 503, { error: 'device offline' });
+          return;
+        }
+        try {
+          if (action === 'wake') {
+            if (savedScreenTimeout === null) {
+              const current = await adb.getScreenTimeout();
+              if (current !== null) savedScreenTimeout = current;
+            }
+            await adb.wakeScreen();
+            await adb.setScreenTimeout(60 * 60 * 1000); // keep awake for 1h while chatting
+          } else {
+            if (savedScreenTimeout !== null) {
+              await adb.setScreenTimeout(savedScreenTimeout);
+              savedScreenTimeout = null;
+            }
+          }
+          sendJson(res, 200, { ok: true });
+        } catch (err) {
+          const detail = err instanceof Error && err.message ? err.message : 'screen control failed';
+          sendJson(res, 502, { error: detail });
+        }
         return;
       }
 

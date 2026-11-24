@@ -694,3 +694,52 @@ test('chat-command: rejects missing command and when chat unavailable', async ()
     assert.equal(res.status, 503);
   });
 });
+
+
+test('chat-screen: wake saves timeout and sets 1h; restore writes original back', async () => {
+  const fake = {
+    isOnline: async () => true,
+    keyEvent: async () => {},
+    wakeScreen: async () => { fake.woke = true; },
+    getScreenTimeout: async () => 30000,
+    setScreenTimeout: async (ms) => { fake.lastSet = ms; },
+  };
+  await withBridge({ adb: fake }, async (address) => {
+    const wake = await fetch(`${address}/api/chat-screen`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'wake' }),
+    });
+    assert.equal(wake.status, 200);
+    assert.equal(fake.woke, true);
+    assert.equal(fake.lastSet, 3600000);
+
+    fake.lastSet = null;
+    const restore = await fetch(`${address}/api/chat-screen`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'restore' }),
+    });
+    assert.equal(restore.status, 200);
+    assert.equal(fake.lastSet, 30000, 'original timeout restored');
+  });
+});
+
+test('chat-screen: rejects bad action and offline device', async () => {
+  const fake = {
+    isOnline: async () => false,
+    wakeScreen: async () => {},
+    getScreenTimeout: async () => 30000,
+    setScreenTimeout: async () => {},
+  };
+  await withBridge({ adb: fake }, async (address) => {
+    const bad = await fetch(`${address}/api/chat-screen`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'nonsense' }),
+    });
+    assert.equal(bad.status, 400);
+    const wake = await fetch(`${address}/api/chat-screen`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'wake' }),
+    });
+    assert.equal(wake.status, 503);
+  });
+});
