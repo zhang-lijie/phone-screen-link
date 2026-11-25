@@ -85,9 +85,17 @@ export function createBridge({
     Promise.resolve().then(() => onSelectionChange(next)).catch(() => {});
   }
 
-  // Called before any device action: the list is the source of truth, so a
-  // phone that was unplugged stops receiving keys on the next request.
-  async function snapshot() {
+  // The only place that changes the active serial. A saved screen timeout
+  // belongs to the phone that was awake, so it must be discarded on every
+  // change — including an explicit selection (POST /api/devices/select).
+  function setSelected(next) {
+    if (next === selected) return;
+    selected = next;
+    savedScreenTimeout = null;
+    announce(next);
+  }
+
+  async function deviceState() {
     let devices = [];
     let adbMissing = false;
     try {
@@ -96,13 +104,14 @@ export function createBridge({
       if (!isMissingAdbError(err)) throw err;
       adbMissing = true;
     }
-    const next = chooseDevice({ devices, selected, preferred: preferredSerial });
-    if (next !== selected) {
-      selected = next;
-      // A saved timeout belongs to the phone that was awake, not the new one.
-      savedScreenTimeout = null;
-      announce(next);
-    }
+    return { devices, adbMissing };
+  }
+
+  // Called before any device action: the list is the source of truth, so a
+  // phone that was unplugged stops receiving keys on the next request.
+  async function snapshot() {
+    const { devices, adbMissing } = await deviceState();
+    setSelected(chooseDevice({ devices, selected, preferred: preferredSerial }));
     return { devices, adbMissing, selected };
   }
 
@@ -169,13 +178,14 @@ export function createBridge({
           sendJson(res, 400, { error: 'serial required' });
           return;
         }
-        const { devices } = await snapshot();
+        // Validate against the live list, but do not resolve (and announce)
+        // an intermediate preferred device just to replace it immediately.
+        const { devices } = await deviceState();
         if (!devices.some((device) => device.serial === serial && device.selectable)) {
           sendJson(res, 409, { error: 'device not available' });
           return;
         }
-        selected = serial;
-        announce(serial);
+        setSelected(serial);
         sendJson(res, 200, { ok: true, selected });
         return;
       }

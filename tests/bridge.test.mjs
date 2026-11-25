@@ -913,3 +913,38 @@ test('chat-screen targets the selected serial', async () => {
     assert.deepEqual(adb.lastSet, { ms: 3600000, serial: 'B' });
   });
 });
+
+test('select does not restore the previous phone timeout onto the new one', async () => {
+  const adb = deviceAdb([usb('A'), usb('B')]);
+  adb.getScreenTimeout = async () => 15000;
+  await withBridge({ adb, preferredSerial: null }, async (address) => {
+    await selectDevice(address, { serial: 'A' });
+    const wake = await fetch(`${address}/api/chat-screen`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'wake' }),
+    });
+    assert.equal(wake.status, 200);
+    assert.deepEqual(adb.lastSet, { ms: 3600000, serial: 'A' });
+
+    await selectDevice(address, { serial: 'B' });
+    adb.lastSet = undefined;
+    const restore = await fetch(`${address}/api/chat-screen`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'restore' }),
+    });
+    assert.equal(restore.status, 200);
+    assert.equal(adb.lastSet, undefined, 'A\'s timeout must never be written to B');
+  });
+});
+
+test('select skips the intermediate preferred device when announcing', async () => {
+  const changes = [];
+  await withBridge({
+    adb: deviceAdb([usb('A'), usb('B')]),
+    preferredSerial: 'A',
+    onSelectionChange: (serial) => changes.push(serial),
+  }, async (address) => {
+    await selectDevice(address, { serial: 'B' });
+    assert.deepEqual(changes, ['B']);
+  });
+});
