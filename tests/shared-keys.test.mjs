@@ -328,12 +328,13 @@ test('chat dock: width gate, persistence and centering rule', () => {
   assert.equal(shouldCenterDock(400, 400), false);
 });
 
-test('chat dock splitter: clamp stream width to 450 min and chat 240 min', () => {
-  assert.equal(clampDockStreamWidth(300, 1200), 450, 'below min lifts to 450');
+test('chat dock splitter: clamp stream width to 400 min and chat 240 min', () => {
+  assert.equal(clampDockStreamWidth(399, 1200), 400, 'below min lifts to 400');
+  assert.equal(clampDockStreamWidth(400, 1200), 400, 'exact min is preserved');
   assert.equal(clampDockStreamWidth(900, 1200), 900, 'within range untouched');
   assert.equal(clampDockStreamWidth(2000, 1200), 960, 'above max leaves 240 for chat');
-  assert.equal(clampDockStreamWidth(100, 600), 450, 'too-narrow stage still keeps 450');
-  assert.ok(clampDockStreamWidth(700, 1200) >= 450);
+  assert.equal(clampDockStreamWidth(100, 600), 400, 'too-narrow stage still keeps 400');
+  assert.ok(clampDockStreamWidth(700, 1200) >= 400);
 });
 
 test('chat dock splitter: ratio persistence validates 0..1', () => {

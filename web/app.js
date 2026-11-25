@@ -864,7 +864,7 @@ function enterChatDock() {
   document.body.classList.add('chat-docked');
   dockSplitter.hidden = false;
   // On first dock, keep the current picture size; afterwards honour the saved
-  // split ratio. Both are clamped so stream >= 500px and chat >= 240px.
+  // split ratio. Both are clamped so stream >= 400px and chat >= 240px.
   const canvas = streamEl.querySelector('canvas.video-layer');
   const rail = streamEl.querySelector('.control-buttons-list');
   const canvasWidth = canvas ? canvas.getBoundingClientRect().width : 0;
