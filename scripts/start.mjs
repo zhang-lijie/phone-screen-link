@@ -7,6 +7,7 @@ import { runAgentTurn, runPresetCommand } from '../server/chat-agent.mjs';
 import { createChatConfigStore } from '../server/chat-config.mjs';
 import { createBridge } from '../server/bridge.mjs';
 import { createConnectionConfigStore, resolveInitialConnection } from '../server/connection-config.mjs';
+import { createConnectionService } from '../server/connection-service.mjs';
 import { createGhostClient } from '../server/ghost-client.mjs';
 import { engineDir } from './setup.mjs';
 
@@ -135,6 +136,11 @@ export async function main(deps = {}) {
   // Resolve the persisted/environment-selected transport before the engine or
   // any device-specific client starts. USB remains the fallback default.
   const connectionStore = makeConnectionConfig({ file: join(projectDir, 'state', 'connection.json') });
+  const connectionService = createConnectionService({
+    adb: adbClient,
+    store: connectionStore,
+    usbSerial: DEFAULT_USB_SERIAL,
+  });
   const initialConnection = resolveInitialConnection({
     env,
     stored: connectionStore.load(),
@@ -290,7 +296,13 @@ export async function main(deps = {}) {
         }
       : undefined;
 
-    bridge = makeBridge({ adb: adbClient, port: bridgeStep.port, chatConfig, chat });
+    bridge = makeBridge({
+      adb: adbClient,
+      port: bridgeStep.port,
+      chatConfig,
+      chat,
+      connectionService,
+    });
     bridgeStart = bridge.start();
     const { address } = await bridgeStart;
     bridgeStart = undefined;

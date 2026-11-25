@@ -99,6 +99,7 @@ function fakeRuntime(overrides = {}) {
       calls.ensureWireless.push(address);
       return true;
     },
+    isOnline: async () => true,
     isLocked: async () => true,
   };
   const ghost = {
@@ -454,6 +455,25 @@ test('main wires the chat config store and ghost agent into the bridge, ghost be
   // Cleanup unwinds in reverse start order: bridge, then ghost, then engine.
   assert.ok(calls.order.indexOf('bridgeStop') < calls.order.indexOf('ghostStop'));
   assert.ok(calls.order.indexOf('ghostStop') < calls.order.indexOf('kill'));
+});
+
+test('main injects a connection service backed by the active adb client and connection store', async () => {
+  const { deps, calls, handlers, adbClient, connectionStore } = fakeRuntime();
+
+  await main(deps);
+
+  const service = calls.bridgeOptions.connectionService;
+  assert.equal(typeof service.status, 'function');
+  assert.equal(typeof service.pairAndConnect, 'function');
+  assert.equal(typeof service.switchToUsb, 'function');
+  adbClient.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+  assert.deepEqual(await service.status(), { mode: 'wifi', serial: '10.0.0.5:5555', online: true });
+  assert.deepEqual(await service.switchToUsb(), { mode: 'usb', serial: DEFAULT_USB_SERIAL, online: true });
+  assert.equal(adbClient.getMode(), 'usb');
+  assert.equal(adbClient.getSerial(), DEFAULT_USB_SERIAL);
+  assert.deepEqual(connectionStore.load(), { mode: 'usb', address: '' });
+
+  await handlers.get('SIGINT')();
 });
 
 test('chat.run goes through the agent loop and the phone-state gate', async () => {

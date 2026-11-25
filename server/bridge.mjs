@@ -14,6 +14,9 @@ const PREFLIGHT_METHODS = {
   '/api/chat-screen': 'POST, OPTIONS',
   '/api/chat-command': 'POST, OPTIONS',
   '/api/chat-config': 'GET, POST, OPTIONS',
+  '/api/wireless': 'GET, OPTIONS',
+  '/api/wireless/pair': 'POST, OPTIONS',
+  '/api/wireless/usb': 'POST, OPTIONS',
 };
 
 function sendJson(res, status, payload) {
@@ -56,11 +59,68 @@ function readJsonBody(req, res) {
   });
 }
 
+function errorDetail(err, fallback) {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err) return err;
+  return fallback;
+}
+
+function redactedErrorDetail(err, pairingCode, fallback) {
+  const detail = errorDetail(err, fallback);
+  return pairingCode ? detail.split(pairingCode).join('[redacted]') || fallback : detail;
+}
+
+function validateHost(value, field) {
+  const host = typeof value === 'string' ? value.trim() : '';
+  let valid;
+  if (/^[\d.]+$/.test(host)) {
+    const parts = host.split('.');
+    valid = parts.length === 4 && parts.every((part) => (
+      /^\d{1,3}$/.test(part) && Number(part) <= 255
+    ));
+  } else {
+    valid = host.length <= 253 && host.split('.').every((label) => (
+      label.length >= 1
+      && label.length <= 63
+      && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)
+    ));
+  }
+  if (!valid) throw new Error(`${field} must be a valid IPv4 address or hostname`);
+}
+
+function validatePort(value, field) {
+  const text = typeof value === 'string' ? value.trim() : value;
+  const port = typeof text === 'number' ? text : (
+    typeof text === 'string' && /^\d+$/.test(text) ? Number(text) : NaN
+  );
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${field} must be an integer between 1 and 65535`);
+  }
+}
+
+function validatePairingInput(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('pairing input is required');
+  }
+  validateHost(input.pairHost, 'pairHost');
+  validatePort(input.pairPort, 'pairPort');
+  if (typeof input.pairCode !== 'string' || !/^\d{6}$/.test(input.pairCode)) {
+    throw new Error('pairCode must be exactly 6 digits');
+  }
+  validateHost(input.connectHost, 'connectHost');
+  validatePort(input.connectPort, 'connectPort');
+}
+
+function wirelessStatusPayload(status) {
+  return { ok: true, mode: status?.mode, serial: status?.serial, online: status?.online };
+}
+
 // `chat` is `{ run(userText, lang, config) }`, wired in scripts/start.mjs
 // around the agent loop; `config` is the store snapshot the /chat gate already
 // loaded. `chatConfig` is the backend store: it gates /chat and backs the
-// /api/chat-config routes.
-export function createBridge({ adb, host, port, chatConfig, chat }) {
+// /api/chat-config routes. `connectionService` owns pairing, persistence, and
+// the active ADB transport.
+export function createBridge({ adb, host, port, chatConfig, chat, connectionService }) {
   const bindHost = host ?? DEFAULT_HOST;
   let server;
   let boundAddress;
@@ -95,7 +155,63 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
       }
 
       if (req.method === 'GET' && pathname === '/health') {
-        sendJson(res, 200, { ok: true, online: await adb.isOnline(), serial: DEFAULT_USB_SERIAL });
+        const serial = typeof adb.getSerial === 'function' ? adb.getSerial() : DEFAULT_USB_SERIAL;
+        const mode = typeof adb.getMode === 'function' ? adb.getMode() : 'usb';
+        sendJson(res, 200, { ok: true, online: await adb.isOnline(), serial, mode });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/wireless') {
+        if (!connectionService) {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        try {
+          sendJson(res, 200, wirelessStatusPayload(await connectionService.status()));
+        } catch (err) {
+          sendJson(res, 502, { error: errorDetail(err, 'wireless status failed') });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wireless/pair') {
+        if (!connectionService) {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        try {
+          validatePairingInput(body);
+        } catch (err) {
+          sendJson(res, 400, { error: errorDetail(err, 'invalid pairing input') });
+          return;
+        }
+        try {
+          const status = await connectionService.pairAndConnect(body);
+          sendJson(res, 200, wirelessStatusPayload(status));
+        } catch (err) {
+          sendJson(res, 502, {
+            error: redactedErrorDetail(err, body.pairCode, 'wireless pairing failed'),
+          });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wireless/usb') {
+        if (!connectionService) {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        try {
+          sendJson(res, 200, wirelessStatusPayload(await connectionService.switchToUsb()));
+        } catch (err) {
+          sendJson(res, 502, { error: errorDetail(err, 'usb switch failed') });
+        }
         return;
       }
 
