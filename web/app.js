@@ -837,6 +837,7 @@ function setChatDockButton() {
   const label = t(chatDocked ? 'chat.undock' : 'chat.dock');
   chatDockButton.title = label;
   chatDockButton.setAttribute('aria-label', label);
+  chatDockButton.setAttribute('aria-pressed', String(chatDocked));
   chatDockButton.disabled = !canDock(window.innerWidth);
   const hint = t('chat.splitter');
   dockSplitter.title = hint;

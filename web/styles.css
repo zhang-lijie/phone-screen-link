@@ -77,6 +77,7 @@ body {
 #stream {
   position: relative;
   flex: 1;
+  min-width: 400px;
   min-height: 0;
   display: flex;
   align-items: center;
@@ -864,7 +865,7 @@ body.chat-open .chat-fab {
 }
 
 #stream {
-  min-width: 0;
+  min-width: 400px;
 }
 
 .chat-head-actions {
@@ -882,11 +883,20 @@ body.chat-open .chat-fab {
 .chat-head-actions button svg {
   width: 14px;
   height: 14px;
+  fill: currentColor;
 }
 
 .chat-head-actions button:disabled {
   opacity: 0.4;
   cursor: not-allowed;
+}
+
+#chat-dock:not(:disabled) {
+  color: #fff;
+}
+
+body.chat-docked #chat-dock {
+  color: #10b981;
 }
 
 body.chat-docked .stage {
@@ -900,7 +910,7 @@ body.chat-docked.chat-centered .stage {
 body.chat-docked #stream {
   flex: 0 0 auto;
   width: var(--dock-stream-width, 320px);
-  min-width: 0;
+  min-width: 400px;
 }
 
 body.chat-docked .chat-panel {
