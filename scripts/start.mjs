@@ -37,7 +37,7 @@ export function buildPlan({ engineDir, webDir }) {
     {
       kind: 'copyWeb',
       files: ['index.html', 'app.js', 'styles.css'],
-      sharedFiles: ['keys.mjs', 'chat-commands.mjs'],
+      sharedFiles: ['keys.mjs', 'chat-commands.mjs', 'device-ui.mjs'],
       webDir,
       sharedDir: join(dirname(engineDir), 'shared'),
     },

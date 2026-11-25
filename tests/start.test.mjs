@@ -10,7 +10,7 @@ test('plan enforces usb before copying and starting the engine', () => {
   const plan = buildPlan({ engineDir: '/x/engine', webDir: '/x/web' });
   assert.deepEqual(plan.map((s) => s.kind), ['enforceUsb', 'copyWeb', 'spawnEngine', 'startBridge']);
   assert.deepEqual(plan[1].files, ['index.html', 'app.js', 'styles.css']);
-  assert.deepEqual(plan[1].sharedFiles, ['keys.mjs', 'chat-commands.mjs']);
+  assert.deepEqual(plan[1].sharedFiles, ['keys.mjs', 'chat-commands.mjs', 'device-ui.mjs']);
   assert.equal(plan[2].command, 'node');
   assert.deepEqual(plan[2].args, ['dist/index.js']);
 });
@@ -45,16 +45,18 @@ test('copyWeb copies web files and shared modules into the public dir as .js', (
     }
     writeFileSync(join(sharedDir, 'keys.mjs'), 'export const KEY_CODES = {};');
     writeFileSync(join(sharedDir, 'chat-commands.mjs'), 'export const X = 1;');
+    writeFileSync(join(sharedDir, 'device-ui.mjs'), 'export const Y = 2;');
 
     const step = buildPlan({ engineDir: join(root, 'engine'), webDir })[1];
     copyWeb(step, publicDir);
 
-    assert.deepEqual(readdirSync(publicDir).sort(), ['app.js', 'chat-commands.js', 'index.html', 'keys.js', 'styles.css']);
+    assert.deepEqual(readdirSync(publicDir).sort(), ['app.js', 'chat-commands.js', 'device-ui.js', 'index.html', 'keys.js', 'styles.css']);
     for (const [name, content] of Object.entries(webFiles)) {
       assert.equal(readFileSync(join(publicDir, name), 'utf8'), content);
     }
     assert.equal(readFileSync(join(publicDir, 'keys.js'), 'utf8'), 'export const KEY_CODES = {};');
     assert.equal(readFileSync(join(publicDir, 'chat-commands.js'), 'utf8'), 'export const X = 1;');
+    assert.equal(readFileSync(join(publicDir, 'device-ui.js'), 'utf8'), 'export const Y = 2;');
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

@@ -29,6 +29,7 @@ import {
   translateStatLine,
 } from './keys.js';
 import { PRESET_COMMANDS, findCommands } from './chat-commands.js';
+import { canStartStream, restoreSerial } from './device-ui.js';
 
 // The bridge owns the active serial; this page follows it. A second phone or
 // a replug can change it without a page reload.
@@ -94,8 +95,9 @@ let lang = effectiveLanguage(settings, navigator.language);
 let screenState = {};
 let deviceList = [];
 let switching = false;
-let restoreTried = false;
+let restoreAttempted = null;
 let reconnectTimer;
+let startTimer;
 let lockMessage = '';
 let statusKey = 'status.connecting';
 let statusVars = {};
@@ -447,9 +449,28 @@ function rememberedDevice() {
   }
 }
 
+// One pending stream start at a time. A second click or a settings apply
+// within the 250ms stop window must not leave two starts (the engine refuses
+// a second stream on the same container).
+function scheduleStart(delayMs = 250) {
+  clearTimeout(startTimer);
+  const serial = DEVICE_ID;
+  const gen = generation + 1; // startStream bumps the generation when it runs
+  const timer = setTimeout(() => {
+    if (startTimer !== timer) return;
+    startTimer = undefined;
+    if (canStartStream({ serial, gen, currentSerial: DEVICE_ID, currentGen: generation })) {
+      startStream();
+    }
+  }, delayMs);
+  startTimer = timer;
+}
+
 function stopCurrentStream() {
-  generation += 1;
+  clearTimeout(startTimer);
+  startTimer = undefined;
   clearTimeout(reconnectTimer);
+  generation += 1;
   try {
     window.phoneLinkHandle?.stop();
   } catch {
@@ -471,7 +492,7 @@ function switchDevice(serial) {
     if (DEVICE_ID) {
       try { localStorage.setItem(REMEMBERED_DEVICE_KEY, DEVICE_ID); } catch {}
       setStatus('status.connectPhone');
-      setTimeout(startStream, 250);
+      scheduleStart();
     }
     return;
   }
@@ -486,7 +507,7 @@ function switchDevice(serial) {
   }
   setStatus('status.connectPhone');
   // The engine releases its "active stream" flag asynchronously on stop.
-  setTimeout(startStream, 250);
+  scheduleStart();
 }
 
 async function selectDevice(serial) {
@@ -540,15 +561,19 @@ async function refreshDevices() {
   deviceList = Array.isArray(payload.devices) ? payload.devices : [];
   const selected = typeof payload.selected === 'string' && payload.selected ? payload.selected : null;
 
-  // Restore the browser's last choice once, if that phone is present.
-  if (!restoreTried) {
-    restoreTried = true;
-    const remembered = rememberedDevice();
-    if (remembered && remembered !== selected
-        && deviceList.some((device) => device.serial === remembered && device.selectable)) {
-      selectDevice(remembered);
-      return;
-    }
+  // Restore the browser's last choice once that phone actually appears.
+  // An empty first poll must not consume the attempt: adb may still be
+  // downloading, or the phone may be plugged in a second later.
+  const restore = restoreSerial({
+    remembered: rememberedDevice(),
+    devices: deviceList,
+    selected,
+    attempted: restoreAttempted,
+  });
+  if (restore) {
+    restoreAttempted = restore;
+    selectDevice(restore);
+    return;
   }
 
   renderDeviceButton();
@@ -1359,6 +1384,8 @@ let generation = 0;
 let attempts = 0;
 
 function startStream() {
+  if (!DEVICE_ID) return;
+  const serial = DEVICE_ID;
   const gen = ++generation;
   const size = ladder[Math.min(attempts, ladder.length - 1)];
   attempts += 1;
@@ -1374,14 +1401,9 @@ function startStream() {
     const degraded = isDegradedStream(info?.resolution, size);
     const canRetry = attempts < ladder.length;
     if (degraded && canRetry) {
-      generation += 1;
       setStatus('status.retrying', { resolution: info.resolution });
-      try {
-        window.phoneLinkHandle?.stop();
-      } catch {
-        // The session is already gone; starting a new one is all that matters.
-      }
-      setTimeout(startStream, RETRY_DELAY_MS);
+      stopCurrentStream();
+      scheduleStart(RETRY_DELAY_MS);
       return;
     }
     const resolution = info?.resolution ? ` — ${info.resolution}` : '';
@@ -1398,7 +1420,7 @@ function startStream() {
     if (!DEVICE_ID) return;
     clearTimeout(reconnectTimer);
     reconnectTimer = setTimeout(() => {
-      if (gen === generation && DEVICE_ID) startStream();
+      if (gen === generation && DEVICE_ID) scheduleStart(0);
     }, Math.min(attempts, 3) * 1000);
   };
   options.onError = (err) => {
@@ -1410,7 +1432,12 @@ function startStream() {
     handleStreamOrientation(info);
   };
 
-  window.phoneLinkHandle = window.WsScrcpy.startStream(streamEl, DEVICE_ID, options);
+  try {
+    window.phoneLinkHandle = window.WsScrcpy.startStream(streamEl, serial, options);
+  } catch (err) {
+    // e.g. the engine still holds the previous stream's active flag.
+    setStatus('status.engineDownError', { error: messageOf(err) });
+  }
 }
 
 function applySettings() {
@@ -1426,7 +1453,7 @@ function applySettings() {
     return;
   }
   setStatus('status.applying');
-  setTimeout(startStream, 250);
+  scheduleStart();
 }
 
 deviceButton?.addEventListener('click', openDevicePicker);
