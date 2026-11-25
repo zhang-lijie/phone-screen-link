@@ -751,8 +751,16 @@ test('chat-screen: rejects bad action and offline device', async () => {
 // ---------------------------------------------------------------------------
 
 const WIRELESS_SERIAL = '192.168.1.50:5555';
-const WIRELESS_STATUS = Object.freeze({ mode: 'wifi', serial: WIRELESS_SERIAL, online: true });
-const USB_STATUS = Object.freeze({ mode: 'usb', serial: DEFAULT_USB_SERIAL, online: true });
+const WIRELESS_STATUS = Object.freeze({ mode: 'wifi', serial: WIRELESS_SERIAL, online: true, usbOnline: true });
+const USB_STATUS = Object.freeze({ mode: 'usb', serial: DEFAULT_USB_SERIAL, online: true, usbOnline: true });
+const WIRELESS_DISCOVERY = Object.freeze({
+  usbSerial: DEFAULT_USB_SERIAL,
+  pairHost: '192.168.1.42',
+  pairPort: 37123,
+  connectHost: '192.168.1.42',
+  connectPort: 42123,
+  warnings: [],
+});
 const PAIR_INPUT = Object.freeze({
   pairHost: '192.168.1.20',
   pairPort: '37123',
@@ -761,10 +769,16 @@ const PAIR_INPUT = Object.freeze({
   connectPort: 5555,
 });
 
-function fakeConnectionService({ status = WIRELESS_STATUS, pairResult = status, usbResult = USB_STATUS } = {}) {
+function fakeConnectionService({
+  status = WIRELESS_STATUS,
+  pairResult = status,
+  usbResult = USB_STATUS,
+  discovery = WIRELESS_DISCOVERY,
+} = {}) {
   const service = {
     pairCalls: [],
     usbCalls: 0,
+    discoverCalls: 0,
     status: async () => ({ ...status }),
     pairAndConnect: async (input) => {
       service.pairCalls.push(input);
@@ -773,6 +787,10 @@ function fakeConnectionService({ status = WIRELESS_STATUS, pairResult = status, 
     switchToUsb: async () => {
       service.usbCalls += 1;
       return { ...usbResult };
+    },
+    discoverWirelessConfig: async () => {
+      service.discoverCalls += 1;
+      return { ...discovery };
     },
   };
   return service;
@@ -799,6 +817,13 @@ function postWirelessUsb(address, headers = {}) {
   });
 }
 
+function postWirelessAuto(address, headers = {}) {
+  return fetch(`${address}/api/wireless/auto`, {
+    method: 'POST',
+    headers,
+  });
+}
+
 test('wireless: GET returns the active connection status for an allowed origin', async () => {
   const connectionService = fakeConnectionService({
     status: { ...WIRELESS_STATUS, pairCode: PAIR_INPUT.pairCode, debug: 'must not be exposed' },
@@ -808,6 +833,17 @@ test('wireless: GET returns the active connection status for an allowed origin',
     assert.equal(res.status, 200);
     assert.equal(res.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
     assert.deepEqual(await res.json(), { ok: true, ...WIRELESS_STATUS });
+  });
+});
+
+test('wireless: GET reports targeted USB availability independently from active wireless status', async () => {
+  const connectionService = fakeConnectionService({
+    status: { ...WIRELESS_STATUS, usbOnline: false },
+  });
+  await withBridge({ connectionService }, async (address) => {
+    const res = await fetch(`${address}/api/wireless`);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, ...WIRELESS_STATUS, usbOnline: false });
   });
 });
 
@@ -824,6 +860,10 @@ test('wireless: routes return 503 when no connection service is wired', async ()
     const usb = await postWirelessUsb(address);
     assert.equal(usb.status, 503);
     assert.deepEqual(await usb.json(), { error: 'wireless connection unavailable' });
+
+    const auto = await postWirelessAuto(address);
+    assert.equal(auto.status, 503);
+    assert.deepEqual(await auto.json(), { error: 'wireless connection unavailable' });
   });
 });
 
@@ -940,6 +980,76 @@ test('wireless: POST usb restores USB status and maps service failures to 502', 
   });
 });
 
+test('wireless: POST auto returns only full discovery fields for an allowed origin', async () => {
+  const connectionService = fakeConnectionService({
+    discovery: { ...WIRELESS_DISCOVERY, pairCode: PAIR_INPUT.pairCode, debug: 'must not be exposed' },
+  });
+  await withBridge({ connectionService }, async (address) => {
+    const res = await postWirelessAuto(address, { origin: ALLOWED_ORIGIN });
+    assert.equal(res.status, 200);
+    assert.equal(res.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+    const text = await res.text();
+    assert.deepEqual(JSON.parse(text), WIRELESS_DISCOVERY);
+    assert.equal(text.includes(PAIR_INPUT.pairCode), false);
+    assert.equal(connectionService.discoverCalls, 1);
+    assert.equal(connectionService.pairCalls.length, 0);
+    assert.equal(connectionService.usbCalls, 0);
+  });
+});
+
+test('wireless: POST auto returns partial discovery data and warnings without pairing or switching', async () => {
+  const discovery = {
+    usbSerial: DEFAULT_USB_SERIAL,
+    pairHost: '192.168.1.42',
+    pairPort: null,
+    connectHost: '192.168.1.42',
+    connectPort: 42123,
+    warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
+  };
+  const connectionService = fakeConnectionService({ discovery });
+  await withBridge({ connectionService }, async (address) => {
+    const res = await postWirelessAuto(address);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), discovery);
+    assert.equal(connectionService.discoverCalls, 1);
+    assert.equal(connectionService.pairCalls.length, 0);
+    assert.equal(connectionService.usbCalls, 0);
+  });
+});
+
+test('wireless: POST auto maps an offline USB device to 409', async () => {
+  const connectionService = fakeConnectionService();
+  connectionService.discoverWirelessConfig = async () => {
+    connectionService.discoverCalls += 1;
+    throw Object.assign(new Error('USB device is offline'), { code: 'USB_OFFLINE' });
+  };
+  await withBridge({ connectionService }, async (address) => {
+    const res = await postWirelessAuto(address, { origin: ALLOWED_ORIGIN });
+    assert.equal(res.status, 409);
+    assert.equal(res.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
+    assert.deepEqual(await res.json(), { error: 'USB device is offline' });
+    assert.equal(connectionService.discoverCalls, 1);
+    assert.equal(connectionService.pairCalls.length, 0);
+    assert.equal(connectionService.usbCalls, 0);
+  });
+});
+
+test('wireless: POST auto maps ADB failures to 502', async () => {
+  const connectionService = fakeConnectionService();
+  connectionService.discoverWirelessConfig = async () => {
+    connectionService.discoverCalls += 1;
+    throw new Error('adb shell failed');
+  };
+  await withBridge({ connectionService }, async (address) => {
+    const res = await postWirelessAuto(address);
+    assert.equal(res.status, 502);
+    assert.deepEqual(await res.json(), { error: 'adb shell failed' });
+    assert.equal(connectionService.discoverCalls, 1);
+    assert.equal(connectionService.pairCalls.length, 0);
+    assert.equal(connectionService.usbCalls, 0);
+  });
+});
+
 test('wireless: concurrent pair and USB requests wait for serialized transactions and return fresh status', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-wireless-concurrency-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
@@ -988,7 +1098,7 @@ test('wireless: concurrent pair and USB requests wait for serialized transaction
     const pair = await pairResponse;
     assert.equal(pair.status, 200);
     assert.deepEqual(await pair.json(), {
-      ok: true, mode: 'wifi', serial: 'phone.local:5555', online: true,
+      ok: true, mode: 'wifi', serial: 'phone.local:5555', online: true, usbOnline: true,
     });
 
     const usb = await usbResponse;
@@ -1016,8 +1126,20 @@ test('wireless: cross-origin POSTs are rejected before pairing or switching', as
     assert.equal(usb.status, 403);
     assert.deepEqual(await usb.json(), { error: 'origin not allowed' });
     assert.equal(usb.headers.get('access-control-allow-origin'), null);
+
+    for (const contentType of ['application/json', 'text/plain']) {
+      const auto = await fetch(`${address}/api/wireless/auto`, {
+        method: 'POST',
+        headers: { 'content-type': contentType, origin: 'http://evil.example' },
+        body: '{}',
+      });
+      assert.equal(auto.status, 403);
+      assert.deepEqual(await auto.json(), { error: 'origin not allowed' });
+      assert.equal(auto.headers.get('access-control-allow-origin'), null);
+    }
     assert.equal(connectionService.pairCalls.length, 0);
     assert.equal(connectionService.usbCalls, 0);
+    assert.equal(connectionService.discoverCalls, 0);
   });
 });
 
@@ -1028,6 +1150,7 @@ test('wireless: OPTIONS preflights advertise only the supported methods', async 
         ['/api/wireless', 'GET, OPTIONS'],
         ['/api/wireless/pair', 'POST, OPTIONS'],
         ['/api/wireless/usb', 'POST, OPTIONS'],
+        ['/api/wireless/auto', 'POST, OPTIONS'],
       ]) {
         const res = await fetch(`${address}${path}`, {
           method: 'OPTIONS',

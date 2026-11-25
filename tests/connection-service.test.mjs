@@ -9,6 +9,11 @@ import { createConnectionService } from '../server/connection-service.mjs';
 
 const USB_SERIAL = 'USB-DEFAULT';
 const WIRELESS_ADDRESS = 'phone.local:5555';
+const PHONE_IP = '192.168.1.42';
+const PAIR_PORT = 37123;
+const CONNECT_PORT = 42123;
+const PAIR_SERVICE = '_adb-tls-pairing._tcp';
+const CONNECT_SERVICE = '_adb-tls-connect._tcp';
 const PAIR_INPUT = Object.freeze({
   pairHost: '192.168.1.20',
   pairPort: '37123',
@@ -17,15 +22,42 @@ const PAIR_INPUT = Object.freeze({
   connectPort: '5555',
 });
 
-function setup(t, { runner, initial, stored } = {}) {
+function setup(t, { runner, initial, stored, sleep } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'connection-service-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const file = join(dir, 'connection.json');
   const store = createConnectionConfigStore({ file });
   store.save(stored ?? { mode: 'usb', address: '' });
   const adb = createAdb(runner ?? (async () => ''), initial ?? { mode: 'usb', serial: 'USB-ORIGINAL' });
-  const service = createConnectionService({ adb, store, usbSerial: USB_SERIAL });
+  const service = createConnectionService({ adb, store, usbSerial: USB_SERIAL, sleep });
   return { adb, store, service, file };
+}
+
+function mdnsOutput(services) {
+  return [
+    'List of discovered mdns services',
+    ...services.map(({ service, host = PHONE_IP, port }) => `${service}\t${host}:${port}`),
+  ].join('\n');
+}
+
+function discoveryRunner({
+  calls,
+  ipOutput = `    inet ${PHONE_IP}/24 scope global wlan0\n`,
+  connectOutput = `${CONNECT_PORT}\n`,
+  services = [],
+} = {}) {
+  return async (args) => {
+    calls?.push(args);
+    if (args[0] === '-s' && args[2] === 'get-state') return 'device\n';
+    if (args[0] === '-s' && args[2] === 'shell' && args.includes('addr')) return ipOutput;
+    if (args[0] === '-s' && args[2] === 'shell' && args.includes('route')) return '';
+    if (args[0] === '-s' && args[2] === 'shell' && args.includes('getprop')) return connectOutput;
+    if (args[0] === 'mdns') {
+      const current = typeof services === 'function' ? services() : services;
+      return mdnsOutput(current);
+    }
+    throw new Error(`unexpected adb command: ${args.join(' ')}`);
+  };
 }
 
 function deferred() {
@@ -34,7 +66,7 @@ function deferred() {
   return { promise, resolve };
 }
 
-test('connection service: status reports the active wireless device without enumerating USB devices', async (t) => {
+test('connection service: status reports active wireless and targeted USB state without enumerating USB devices', async (t) => {
   const calls = [];
   const { service } = setup(t, {
     initial: { mode: 'wifi', serial: WIRELESS_ADDRESS },
@@ -42,8 +74,13 @@ test('connection service: status reports the active wireless device without enum
     runner: async (args) => { calls.push(args); return 'device\n'; },
   });
 
-  assert.deepEqual(await service.status(), { mode: 'wifi', serial: WIRELESS_ADDRESS, online: true });
-  assert.deepEqual(calls, [['-s', WIRELESS_ADDRESS, 'get-state']]);
+  assert.deepEqual(await service.status(), {
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true,
+  });
+  assert.deepEqual(calls, [
+    ['-s', WIRELESS_ADDRESS, 'get-state'],
+    ['-s', USB_SERIAL, 'get-state'],
+  ]);
 });
 
 test('connection service: pairAndConnect pairs, connects, confirms online, then switches and persists', async (t) => {
@@ -64,7 +101,9 @@ test('connection service: pairAndConnect pairs, connects, confirms online, then 
   assert.equal(adb.getSerial(), WIRELESS_ADDRESS);
   assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { mode: 'wifi', address: WIRELESS_ADDRESS });
-  assert.deepEqual(result, { mode: 'wifi', serial: WIRELESS_ADDRESS, online: true });
+  assert.deepEqual(result, {
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true,
+  });
   assert.equal(JSON.stringify(result).includes(PAIR_INPUT.pairCode), false);
 });
 
@@ -106,7 +145,7 @@ test('connection service: a post-commit wireless status failure does not turn pa
   adb.isOnline = async () => { throw new Error('status read failed after commit'); };
 
   assert.deepEqual(await service.pairAndConnect(PAIR_INPUT), {
-    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true,
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: false,
   });
   assert.equal(adb.getMode(), 'wifi');
   assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
@@ -117,13 +156,15 @@ test('connection service: a post-commit USB status failure does not turn a compl
     initial: { mode: 'wifi', serial: WIRELESS_ADDRESS },
     stored: { mode: 'wifi', address: WIRELESS_ADDRESS },
     runner: async (args) => {
-      if (args[0] === 'devices') throw new Error('USB status read failed after commit');
+      if (args[0] === '-s' && args[1] === USB_SERIAL && args[2] === 'get-state') {
+        throw new Error('USB status read failed after commit');
+      }
       return '';
     },
   });
 
   assert.deepEqual(await service.switchToUsb(), {
-    mode: 'usb', serial: USB_SERIAL, online: false,
+    mode: 'usb', serial: USB_SERIAL, online: false, usbOnline: false,
   });
   assert.equal(adb.getMode(), 'usb');
   assert.deepEqual(store.load(), { mode: 'usb', address: '' });
@@ -241,7 +282,7 @@ test('connection service: switchToUsb restores the supplied USB serial and clear
     stored: { mode: 'wifi', address: WIRELESS_ADDRESS },
     runner: async (args) => {
       calls.push(args);
-      return args[0] === 'devices' ? `List of devices attached\n${USB_SERIAL} device\n` : 'device\n';
+      return args[0] === '-s' && args[2] === 'get-state' ? 'device\n' : '';
     },
   });
 
@@ -250,8 +291,8 @@ test('connection service: switchToUsb restores the supplied USB serial and clear
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), USB_SERIAL);
   assert.deepEqual(store.load(), { mode: 'usb', address: '' });
-  assert.deepEqual(result, { mode: 'usb', serial: USB_SERIAL, online: true });
-  assert.deepEqual(calls, [['devices']]);
+  assert.deepEqual(result, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true });
+  assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
 });
 
 test('connection service: concurrent pair and USB mutations serialize and return their own transaction status', async (t) => {
@@ -285,8 +326,10 @@ test('connection service: concurrent pair and USB mutations serialize and return
     await Promise.allSettled([pairPromise, usbPromise]);
   }
 
-  assert.deepEqual(await pairPromise, { mode: 'wifi', serial: WIRELESS_ADDRESS, online: true });
-  assert.deepEqual(await usbPromise, { mode: 'usb', serial: USB_SERIAL, online: true });
+  assert.deepEqual(await pairPromise, {
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true,
+  });
+  assert.deepEqual(await usbPromise, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true });
   assert.equal(adb.getMode(), 'usb');
   assert.deepEqual(store.load(), { mode: 'usb', address: '' });
 });
@@ -309,4 +352,268 @@ test('connection service: wireless-to-wireless connect failure leaves the previo
   assert.equal(adb.getSerial(), previousAddress);
   assert.deepEqual(store.load(), { mode: 'wifi', address: previousAddress });
   assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: discovery rejects an offline or missing USB serial before shell or mDNS work', async (t) => {
+  for (const state of ['offline', 'missing']) {
+    const calls = [];
+    const { service } = setup(t, {
+      runner: async (args) => {
+        calls.push(args);
+        if (args[0] === '-s' && args[2] === 'get-state') {
+          if (state === 'missing') throw new Error('device not found');
+          return 'offline\n';
+        }
+        throw new Error('discovery must stop when USB is offline');
+      },
+    });
+
+    await assert.rejects(service.discoverWirelessConfig(), (err) => {
+      assert.equal(err.code, 'USB_OFFLINE');
+      assert.match(err.message, /USB device is offline/);
+      return true;
+    });
+    assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
+  }
+});
+
+test('connection service: discovery preserves a missing-adb failure instead of reporting USB offline', async (t) => {
+  const calls = [];
+  const failure = Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' });
+  const { service } = setup(t, {
+    runner: async (args) => {
+      calls.push(args);
+      throw failure;
+    },
+  });
+
+  await assert.rejects(service.discoverWirelessConfig(), (err) => err === failure);
+  assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
+});
+
+test('connection service: status reports usbOnline from the configured USB serial while wireless is active', async (t) => {
+  const calls = [];
+  const { service } = setup(t, {
+    initial: { mode: 'wifi', serial: WIRELESS_ADDRESS },
+    stored: { mode: 'wifi', address: WIRELESS_ADDRESS },
+    runner: async (args) => {
+      calls.push(args);
+      if (args[0] === '-s' && args[1] === USB_SERIAL) return 'offline\n';
+      return 'device\n';
+    },
+  });
+
+  assert.deepEqual(await service.status(), {
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: false,
+  });
+  assert.deepEqual(calls, [
+    ['-s', WIRELESS_ADDRESS, 'get-state'],
+    ['-s', USB_SERIAL, 'get-state'],
+  ]);
+});
+
+test('connection service: discovery returns an IP-only partial result when wireless debugging is disabled', async (t) => {
+  const calls = [];
+  const sleeps = [];
+  const { service } = setup(t, {
+    runner: discoveryRunner({ calls, connectOutput: '\n', services: [] }),
+    sleep: async (ms) => { sleeps.push(ms); },
+  });
+
+  assert.deepEqual(await service.discoverWirelessConfig(), {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: null,
+    connectHost: PHONE_IP,
+    connectPort: null,
+    warnings: [
+      'Wireless connect port is unavailable; make sure Wireless debugging is enabled.',
+      'Wireless pairing port is unavailable; open the Android pairing dialog and try again.',
+    ],
+  });
+  assert.deepEqual(calls, [
+    ['-s', USB_SERIAL, 'get-state'],
+    ['-s', USB_SERIAL, 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+    ['-s', USB_SERIAL, 'shell', 'getprop', 'service.adb.tls.port'],
+    ...Array.from({ length: 17 }, () => ['mdns', 'services']),
+  ]);
+  assert.deepEqual(sleeps, Array(16).fill(500));
+});
+
+test('connection service: discovery uses the TLS connect property and same-IP pairing endpoint without mutating state', async (t) => {
+  const calls = [];
+  const sleeps = [];
+  const { adb, store, service, file } = setup(t, {
+    initial: { mode: 'wifi', serial: WIRELESS_ADDRESS },
+    stored: { mode: 'wifi', address: WIRELESS_ADDRESS },
+    runner: discoveryRunner({
+      calls,
+      services: [
+        { service: PAIR_SERVICE, host: '192.168.1.99', port: 40000 },
+        { service: CONNECT_SERVICE, host: '192.168.1.99', port: 40001 },
+        { service: PAIR_SERVICE, port: PAIR_PORT },
+      ],
+    }),
+    sleep: async (ms) => { sleeps.push(ms); },
+  });
+  const before = readFileSync(file);
+  adb.setConnection = () => { throw new Error('discovery must not change the active connection'); };
+  store.save = () => { throw new Error('discovery must not persist connection config'); };
+
+  const result = await service.discoverWirelessConfig();
+
+  assert.deepEqual(result, {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: PAIR_PORT,
+    connectHost: PHONE_IP,
+    connectPort: CONNECT_PORT,
+    warnings: [],
+  });
+  assert.equal(Object.hasOwn(result, 'pairCode'), false);
+  assert.equal(JSON.stringify(result).includes(PAIR_INPUT.pairCode), false);
+  assert.deepEqual(calls, [
+    ['-s', USB_SERIAL, 'get-state'],
+    ['-s', USB_SERIAL, 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+    ['-s', USB_SERIAL, 'shell', 'getprop', 'service.adb.tls.port'],
+    ['mdns', 'services'],
+  ]);
+  assert.deepEqual(sleeps, []);
+  assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getSerial(), WIRELESS_ADDRESS);
+  assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
+  assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: discovery falls back to same-IP mDNS connect data while polling for pairing', async (t) => {
+  const calls = [];
+  const sleeps = [];
+  let poll = 0;
+  const { service } = setup(t, {
+    runner: discoveryRunner({
+      calls,
+      connectOutput: '\n',
+      services: () => {
+        poll += 1;
+        return poll === 1
+          ? [
+            { service: CONNECT_SERVICE, host: '192.168.1.99', port: 40001 },
+            { service: CONNECT_SERVICE, port: CONNECT_PORT },
+          ]
+          : [
+            { service: PAIR_SERVICE, host: '192.168.1.99', port: 40000 },
+            { service: PAIR_SERVICE, port: PAIR_PORT },
+            { service: CONNECT_SERVICE, port: CONNECT_PORT },
+          ];
+      },
+    }),
+    sleep: async (ms) => { sleeps.push(ms); },
+  });
+
+  assert.deepEqual(await service.discoverWirelessConfig(), {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: PAIR_PORT,
+    connectHost: PHONE_IP,
+    connectPort: CONNECT_PORT,
+    warnings: [],
+  });
+  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 2);
+  assert.deepEqual(sleeps, [500]);
+});
+
+test('connection service: a connect-property command failure falls back to mDNS without discarding the IP', async (t) => {
+  const calls = [];
+  const runner = discoveryRunner({
+    calls,
+    services: [
+      { service: CONNECT_SERVICE, port: CONNECT_PORT },
+      { service: PAIR_SERVICE, port: PAIR_PORT },
+    ],
+  });
+  const { service } = setup(t, {
+    runner: async (args) => {
+      if (args[0] === '-s' && args.includes('getprop')) {
+        calls.push(args);
+        throw new Error('getprop unavailable');
+      }
+      return runner(args);
+    },
+    sleep: async () => {},
+  });
+
+  assert.deepEqual(await service.discoverWirelessConfig(), {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: PAIR_PORT,
+    connectHost: PHONE_IP,
+    connectPort: CONNECT_PORT,
+    warnings: [],
+  });
+  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 1);
+});
+
+test('connection service: pairing poll timeout returns connect data with an actionable warning', async (t) => {
+  const calls = [];
+  const sleeps = [];
+  const { service } = setup(t, {
+    runner: discoveryRunner({ calls, services: [] }),
+    sleep: async (ms) => { sleeps.push(ms); },
+  });
+
+  assert.deepEqual(await service.discoverWirelessConfig(), {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: null,
+    connectHost: PHONE_IP,
+    connectPort: CONNECT_PORT,
+    warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
+  });
+  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 17);
+  assert.deepEqual(sleeps, Array(16).fill(500));
+});
+
+test('connection service: mDNS command failures preserve connect data and return a pairing warning', async (t) => {
+  const calls = [];
+  const sleeps = [];
+  const runner = discoveryRunner({ calls });
+  const { service } = setup(t, {
+    runner: async (args) => {
+      if (args[0] === 'mdns') {
+        calls.push(args);
+        throw new Error('mdns unavailable');
+      }
+      return runner(args);
+    },
+    sleep: async (ms) => { sleeps.push(ms); },
+  });
+
+  assert.deepEqual(await service.discoverWirelessConfig(), {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: null,
+    connectHost: PHONE_IP,
+    connectPort: CONNECT_PORT,
+    warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
+  });
+  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 17);
+  assert.deepEqual(sleeps, Array(16).fill(500));
+});
+
+test('connection service: discovery surfaces a Wi-Fi IP command failure without polling mDNS', async (t) => {
+  const calls = [];
+  const { service } = setup(t, {
+    runner: async (args) => {
+      calls.push(args);
+      if (args[0] === '-s' && args[2] === 'get-state') return 'device\n';
+      throw new Error('wlan0 query failed');
+    },
+  });
+
+  await assert.rejects(service.discoverWirelessConfig(), /wlan0 query failed/);
+  assert.deepEqual(calls, [
+    ['-s', USB_SERIAL, 'get-state'],
+    ['-s', USB_SERIAL, 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+    ['-s', USB_SERIAL, 'shell', 'ip', 'route', 'show', 'dev', 'wlan0'],
+  ]);
 });

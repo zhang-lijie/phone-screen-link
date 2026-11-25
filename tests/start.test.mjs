@@ -100,6 +100,7 @@ function fakeRuntime(overrides = {}) {
       return true;
     },
     isOnline: async () => true,
+    getState: async () => 'device\n',
     isLocked: async () => true,
   };
   const ghost = {
@@ -466,9 +467,14 @@ test('main injects a connection service backed by the active adb client and conn
   assert.equal(typeof service.status, 'function');
   assert.equal(typeof service.pairAndConnect, 'function');
   assert.equal(typeof service.switchToUsb, 'function');
+  assert.equal(typeof service.discoverWirelessConfig, 'function');
   adbClient.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
-  assert.deepEqual(await service.status(), { mode: 'wifi', serial: '10.0.0.5:5555', online: true });
-  assert.deepEqual(await service.switchToUsb(), { mode: 'usb', serial: DEFAULT_USB_SERIAL, online: true });
+  assert.deepEqual(await service.status(), {
+    mode: 'wifi', serial: '10.0.0.5:5555', online: true, usbOnline: true,
+  });
+  assert.deepEqual(await service.switchToUsb(), {
+    mode: 'usb', serial: DEFAULT_USB_SERIAL, online: true, usbOnline: true,
+  });
   assert.equal(adbClient.getMode(), 'usb');
   assert.equal(adbClient.getSerial(), DEFAULT_USB_SERIAL);
   assert.deepEqual(connectionStore.load(), { mode: 'usb', address: '' });

@@ -1,3 +1,23 @@
+import { isMissingAdbError } from './adb.mjs';
+
+const MDNS_POLL_INTERVAL_MS = 500;
+const MDNS_POLL_TIMEOUT_MS = 8_000;
+const MDNS_POLL_ATTEMPTS = MDNS_POLL_TIMEOUT_MS / MDNS_POLL_INTERVAL_MS + 1;
+const PAIRING_SERVICE = '_adb-tls-pairing._tcp';
+const CONNECT_SERVICE = '_adb-tls-connect._tcp';
+
+function defaultSleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function usbOfflineError() {
+  return Object.assign(new Error('USB device is offline'), { code: 'USB_OFFLINE' });
+}
+
+function matchingPort(services, service, host) {
+  return services.find((entry) => entry.service === service && entry.host === host)?.port ?? null;
+}
+
 function normalizeHost(value, field) {
   const host = typeof value === 'string' ? value.trim() : '';
   let valid;
@@ -34,7 +54,7 @@ function redactedError(err, pairingCode) {
   return new Error(redacted || 'wireless connection failed');
 }
 
-export function createConnectionService({ adb, store, usbSerial }) {
+export function createConnectionService({ adb, store, usbSerial, sleep = defaultSleep }) {
   let mutationTail = Promise.resolve();
 
   function serializeMutation(work) {
@@ -43,10 +63,24 @@ export function createConnectionService({ adb, store, usbSerial }) {
     return result;
   }
 
+  async function targetedDeviceOnline(serial) {
+    try {
+      return String(await adb.getState(serial)).trim() === 'device';
+    } catch {
+      return false;
+    }
+  }
+
   async function status() {
     const mode = adb.getMode();
     const serial = adb.getSerial();
-    return { mode, serial, online: await adb.isOnline() };
+    const online = mode === 'usb'
+      ? await targetedDeviceOnline(serial)
+      : await adb.isOnline();
+    const usbOnline = mode === 'usb' && serial === usbSerial
+      ? online
+      : await targetedDeviceOnline(usbSerial);
+    return { mode, serial, online, usbOnline };
   }
 
   // Activation and persistence have committed. A status probe is diagnostic:
@@ -57,7 +91,7 @@ export function createConnectionService({ adb, store, usbSerial }) {
     try {
       return await status();
     } catch {
-      return { mode, serial, online: knownOnline };
+      return { mode, serial, online: knownOnline, usbOnline: false };
     }
   }
 
@@ -111,5 +145,65 @@ export function createConnectionService({ adb, store, usbSerial }) {
     });
   }
 
-  return { status, pairAndConnect, switchToUsb };
+  // Read-only discovery is deliberately outside the mutation queue: it always
+  // targets the configured USB serial and never activates or persists what it
+  // finds. Missing endpoints are partial success, not a failed transaction.
+  async function discoverWirelessConfig() {
+    let usbState;
+    try {
+      usbState = String(await adb.getState(usbSerial)).trim();
+    } catch (err) {
+      if (isMissingAdbError(err)) throw err;
+      throw usbOfflineError();
+    }
+    if (usbState !== 'device') throw usbOfflineError();
+
+    const host = await adb.getWifiIp(usbSerial);
+    let connectPort = null;
+    try {
+      connectPort = (await adb.getWirelessConnectPort(usbSerial)) ?? null;
+    } catch {
+      // The IP is still useful when the TLS property cannot be read; mDNS
+      // below may provide the connect endpoint instead.
+    }
+    let pairPort = null;
+
+    if (host) {
+      for (let attempt = 0; attempt < MDNS_POLL_ATTEMPTS; attempt += 1) {
+        let services = [];
+        try {
+          services = await adb.mdnsServices();
+        } catch {
+          // mDNS can be unavailable or still starting. Preserve the USB data
+          // and keep polling rather than discarding a useful partial result.
+        }
+        pairPort = matchingPort(services, PAIRING_SERVICE, host);
+        if (connectPort === null) {
+          connectPort = matchingPort(services, CONNECT_SERVICE, host);
+        }
+        if (pairPort !== null) break;
+        if (attempt + 1 < MDNS_POLL_ATTEMPTS) await sleep(MDNS_POLL_INTERVAL_MS);
+      }
+    }
+
+    const warnings = [];
+    if (!host) warnings.push('Could not read the phone Wi-Fi IP address.');
+    if (connectPort === null) {
+      warnings.push('Wireless connect port is unavailable; make sure Wireless debugging is enabled.');
+    }
+    if (pairPort === null) {
+      warnings.push('Wireless pairing port is unavailable; open the Android pairing dialog and try again.');
+    }
+
+    return {
+      usbSerial,
+      pairHost: host,
+      pairPort,
+      connectHost: host,
+      connectPort,
+      warnings,
+    };
+  }
+
+  return { status, pairAndConnect, switchToUsb, discoverWirelessConfig };
 }

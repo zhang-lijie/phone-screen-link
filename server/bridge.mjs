@@ -17,6 +17,7 @@ const PREFLIGHT_METHODS = {
   '/api/wireless': 'GET, OPTIONS',
   '/api/wireless/pair': 'POST, OPTIONS',
   '/api/wireless/usb': 'POST, OPTIONS',
+  '/api/wireless/auto': 'POST, OPTIONS',
 };
 
 function sendJson(res, status, payload) {
@@ -112,7 +113,26 @@ function validatePairingInput(input) {
 }
 
 function wirelessStatusPayload(status) {
-  return { ok: true, mode: status?.mode, serial: status?.serial, online: status?.online };
+  return {
+    ok: true,
+    mode: status?.mode,
+    serial: status?.serial,
+    online: status?.online,
+    usbOnline: status?.usbOnline === true,
+  };
+}
+
+function wirelessDiscoveryPayload(result) {
+  return {
+    usbSerial: result?.usbSerial,
+    pairHost: result?.pairHost ?? null,
+    pairPort: result?.pairPort ?? null,
+    connectHost: result?.connectHost ?? null,
+    connectPort: result?.connectPort ?? null,
+    warnings: Array.isArray(result?.warnings)
+      ? result.warnings.filter((warning) => typeof warning === 'string')
+      : [],
+  };
 }
 
 // `chat` is `{ run(userText, lang, config) }`, wired in scripts/start.mjs
@@ -170,6 +190,24 @@ export function createBridge({ adb, host, port, chatConfig, chat, connectionServ
           sendJson(res, 200, wirelessStatusPayload(await connectionService.status()));
         } catch (err) {
           sendJson(res, 502, { error: errorDetail(err, 'wireless status failed') });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wireless/auto') {
+        if (!connectionService || typeof connectionService.discoverWirelessConfig !== 'function') {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        try {
+          const discovery = await connectionService.discoverWirelessConfig();
+          sendJson(res, 200, wirelessDiscoveryPayload(discovery));
+        } catch (err) {
+          if (err?.code === 'USB_OFFLINE') {
+            sendJson(res, 409, { error: errorDetail(err, 'USB device is offline') });
+            return;
+          }
+          sendJson(res, 502, { error: errorDetail(err, 'wireless auto discovery failed') });
         }
         return;
       }
