@@ -455,7 +455,10 @@ function rememberedDevice() {
 function scheduleStart(delayMs = 250) {
   clearTimeout(startTimer);
   const serial = DEVICE_ID;
-  const gen = generation + 1; // startStream bumps the generation when it runs
+  // stopCurrentStream() has already advanced generation before this runs.
+  // Capture it as-is: the guard compares against the still-current value,
+  // then startStream() bumps it when it actually starts.
+  const gen = generation;
   const timer = setTimeout(() => {
     if (startTimer !== timer) return;
     startTimer = undefined;
