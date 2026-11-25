@@ -30,6 +30,7 @@ import {
   loadSettings,
   lockHint,
   normalizeSettings,
+  parseWirelessAutoResult,
   saveSettings,
   sizeLadder,
   translate,
@@ -47,6 +48,7 @@ const CHAT_URL = `${BRIDGE_BASE}/chat`;
 const CHAT_COMMAND_URL = `${BRIDGE_BASE}/api/chat-command`;
 const CHAT_SCREEN_URL = `${BRIDGE_BASE}/api/chat-screen`;
 const WIRELESS_STATUS_URL = `${BRIDGE_BASE}/api/wireless`;
+const WIRELESS_AUTO_URL = `${BRIDGE_BASE}/api/wireless/auto`;
 const WIRELESS_PAIR_URL = `${BRIDGE_BASE}/api/wireless/pair`;
 const WIRELESS_USB_URL = `${BRIDGE_BASE}/api/wireless/usb`;
 const SCREEN_STATE_POLL_MS = 3000;
@@ -347,6 +349,7 @@ function applyLanguage() {
   renderChatStatus();
   renderChatSaveStatus();
   renderWirelessStatus();
+  renderWirelessAutoButton();
   renderWirelessFeedback();
   renderWirelessStorage();
 }
@@ -550,15 +553,18 @@ const wirelessFeedbackEl = document.getElementById('wireless-feedback');
 const wirelessStorageEl = document.getElementById('wireless-storage');
 const wirelessWarning = document.getElementById('wireless-warning');
 const wirelessSubmit = document.getElementById('wireless-submit');
+const wirelessAuto = document.getElementById('wireless-auto');
 const wirelessUsb = document.getElementById('wireless-usb');
 const wirelessClear = document.getElementById('wireless-clear');
 let wirelessTrigger = null;
 let wirelessBusy = false;
+let wirelessAutoBusy = false;
 let wirelessRefreshTimer = null;
-let wirelessState = { mode: 'unknown', serial: '—', online: false };
+let wirelessState = { mode: 'unknown', serial: '—', online: false, usbOnline: false };
 let wirelessFeedbackKey = '';
 let wirelessFeedbackVars = {};
 let wirelessFeedbackIsError = false;
+let wirelessFeedbackIsWarning = false;
 let wirelessStorageKey = '';
 const wirelessRequests = createWirelessRequestGuard();
 
@@ -587,10 +593,11 @@ function saveWirelessFormFromDom() {
   return result;
 }
 
-function setWirelessFeedback(key, vars = {}, isError = false) {
+function setWirelessFeedback(key, vars = {}, isError = false, isWarning = false) {
   wirelessFeedbackKey = key;
   wirelessFeedbackVars = vars;
   wirelessFeedbackIsError = isError;
+  wirelessFeedbackIsWarning = isWarning;
   renderWirelessFeedback();
 }
 
@@ -599,7 +606,8 @@ function renderWirelessFeedback() {
     ? t(wirelessFeedbackKey, wirelessFeedbackVars)
     : '';
   wirelessFeedbackEl.classList.toggle('is-error', wirelessFeedbackIsError);
-  wirelessFeedbackEl.classList.toggle('is-success', Boolean(wirelessFeedbackKey && !wirelessFeedbackIsError));
+  wirelessFeedbackEl.classList.toggle('is-warning', wirelessFeedbackIsWarning);
+  wirelessFeedbackEl.classList.toggle('is-success', Boolean(wirelessFeedbackKey && !wirelessFeedbackIsError && !wirelessFeedbackIsWarning));
 }
 
 function setWirelessStorageFeedback(key) {
@@ -623,6 +631,13 @@ function renderWirelessStatus() {
   wirelessStatusEl.dataset.online = String(wirelessState.online);
 }
 
+function renderWirelessAutoButton() {
+  wirelessAuto.disabled = wirelessBusy || wirelessAutoBusy || wirelessState.usbOnline !== true;
+  wirelessAuto.textContent = t(wirelessAutoBusy ? 'wireless.auto.loading' : 'wireless.auto');
+  wirelessAuto.classList.toggle('is-loading', wirelessAutoBusy);
+  wirelessAuto.setAttribute('aria-busy', String(wirelessAutoBusy));
+}
+
 function applyWirelessStatus(payload) {
   if (!payload || typeof payload !== 'object'
       || !['usb', 'wifi'].includes(payload.mode)
@@ -630,8 +645,9 @@ function applyWirelessStatus(payload) {
       || typeof payload.online !== 'boolean') {
     return false;
   }
-  wirelessState = { mode: payload.mode, serial: payload.serial, online: payload.online };
+  wirelessState = { mode: payload.mode, serial: payload.serial, online: payload.online, usbOnline: payload.usbOnline === true };
   renderWirelessStatus();
+  renderWirelessAutoButton();
   return true;
 }
 
@@ -641,6 +657,7 @@ function setWirelessBusy(busy) {
   wirelessUsb.disabled = busy;
   wirelessClear.disabled = busy;
   wirelessPanel.setAttribute('aria-busy', String(busy));
+  renderWirelessAutoButton();
 }
 
 function wirelessRequestError(res, payload) {
@@ -668,6 +685,59 @@ async function refreshWirelessStatus() {
   }
   if (!applyWirelessStatus(payload)) {
     setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+  }
+}
+
+async function autoFetchWireless() {
+  if (wirelessBusy || wirelessAutoBusy || wirelessState.usbOnline !== true) return;
+  wirelessAutoBusy = true;
+  setWirelessBusy(true);
+  setWirelessFeedback('wireless.auto.loading');
+  try {
+    // Discovery is read-only, but it uses the mutation lane so an up-to-8-second
+    // mDNS poll cannot be invalidated by the modal's status refresh timer.
+    const result = await wirelessRequests.mutate(async () => {
+      const res = await fetch(WIRELESS_AUTO_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const payload = await res.json().catch(() => ({}));
+      return { res, payload };
+    });
+    if (result.stale) return;
+    if (result.error) {
+      setWirelessFeedback('wireless.error.network', { error: messageOf(result.error) }, true);
+      return;
+    }
+    const { res, payload } = result.value;
+    if (res.status === 409) {
+      wirelessState.usbOnline = false;
+      renderWirelessAutoButton();
+      setWirelessFeedback('wireless.error.usbOffline', {}, true);
+      return;
+    }
+    if (!res.ok) {
+      setWirelessFeedback('wireless.error.request', wirelessRequestError(res, payload), true);
+      return;
+    }
+    const parsed = parseWirelessAutoResult(payload);
+    if (!parsed) {
+      setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+      return;
+    }
+    fillWirelessForm({ ...readWirelessForm(), ...parsed.updates });
+    saveWirelessFormFromDom();
+    if (!parsed.complete || parsed.warnings.length > 0) {
+      const warnings = parsed.warnings.length > 0 ? ` ${parsed.warnings.join(' ')}` : '';
+      setWirelessFeedback('wireless.auto.partial', { warnings }, false, true);
+    } else {
+      setWirelessFeedback('wireless.auto.fetched');
+    }
+    wirelessFields.pairCode.focus();
+  } finally {
+    wirelessAutoBusy = false;
+    setWirelessBusy(false);
   }
 }
 
@@ -820,6 +890,7 @@ wirelessForm.addEventListener('submit', (event) => {
   pairWireless();
 });
 wirelessUsb.addEventListener('click', switchToUsb);
+wirelessAuto.addEventListener('click', autoFetchWireless);
 wirelessClear.addEventListener('click', () => {
   const result = clearWirelessPairingResult(() => localStorage);
   if (!result.cleared) {
@@ -838,6 +909,7 @@ wirelessOverlay.addEventListener('click', (event) => {
   if (event.target === wirelessOverlay) closeWireless();
 });
 fillWirelessForm(loadWirelessPairing(() => localStorage));
+renderWirelessAutoButton();
 
 const toolboxObserver = new MutationObserver(() => {
   labelToolbox();

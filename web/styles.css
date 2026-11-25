@@ -401,6 +401,10 @@ body.nav-text-only #stream .control-button[data-label]::after {
   color: #6fd2a8;
 }
 
+.wireless-feedback.is-warning {
+  color: #d8bd83;
+}
+
 .wireless-form fieldset {
   min-width: 0;
   margin: 12px 0 0;
@@ -413,6 +417,32 @@ body.nav-text-only #stream .control-button[data-label]::after {
   padding: 0 5px;
   color: var(--ui-text-soft);
   font-weight: 600;
+}
+
+.wireless-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.wireless-auto {
+  padding: 4px 8px;
+  border: 1px solid #3a6fb5;
+  border-radius: 6px;
+  background: #243d5d;
+  color: #dce9fb;
+  font: 600 calc(11px * var(--ui-font-scale))/1.2 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.wireless-auto:hover:not(:disabled) {
+  background: #2e5f9e;
+}
+
+.wireless-panel .wireless-auto.is-loading:disabled {
+  cursor: progress;
 }
 
 .wireless-hint {

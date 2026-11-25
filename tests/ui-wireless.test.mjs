@@ -235,7 +235,7 @@ test('wireless form automatically saves and reloads all inputs, and clear resets
 test('wireless status and mode changes share the stale-response guard', () => {
   assert.match(app, /const wirelessRequests = createWirelessRequestGuard\(\);/);
   assert.match(app, /wirelessRequests\.refresh\(/);
-  assert.equal([...app.matchAll(/wirelessRequests\.mutate\(/g)].length, 2, 'pair and USB both invalidate refreshes');
+  assert.equal([...app.matchAll(/wirelessRequests\.mutate\(/g)].length, 3, 'auto-fetch, pair and USB all exclude stale refreshes');
 });
 
 test('wireless panel calls the bridge APIs with the documented pairing payload', () => {
@@ -333,4 +333,136 @@ test('wireless security warning explicitly covers plaintext localStorage and the
   assert.match(html, /id="wireless-warning"[^>]*data-i18n="wireless\.warning"/);
   assert.equal(keys.MESSAGES.en['tool.wireless'], 'WIFI');
   assert.equal(keys.MESSAGES.zh['tool.wireless'], '无线');
+});
+
+test('wireless modal exposes an initially disabled USB auto-fetch control with bilingual guidance', () => {
+  const buttonTag = html.match(/<button[^>]*id="wireless-auto"[^>]*>/)?.[0];
+  assert.ok(buttonTag, 'auto-fetch button is present');
+  assert.match(buttonTag, /type="button"/);
+  assert.match(buttonTag, /\sdisabled(?:\s|>)/);
+  assert.match(buttonTag, /data-i18n="wireless\.auto"/);
+  assert.match(html, /data-i18n="wireless\.autoHint"/);
+  assert.match(css, /\.wireless-legend\s*\{[^}]*display:\s*flex;/);
+  assert.match(css, /\.wireless-auto\.is-loading/);
+  assert.equal(keys.MESSAGES.en['wireless.auto'], 'Auto-fetch over USB');
+  assert.equal(keys.MESSAGES.zh['wireless.auto'], 'USB 自动获取');
+  assert.match(keys.MESSAGES.en['wireless.autoHint'], /USB/);
+  assert.match(keys.MESSAGES.en['wireless.autoHint'], /pairing code/i);
+  assert.match(keys.MESSAGES.en['wireless.autoHint'], /manually/i);
+  assert.match(keys.MESSAGES.zh['wireless.autoHint'], /USB/);
+  assert.match(keys.MESSAGES.zh['wireless.autoHint'], /配对码/);
+  assert.match(keys.MESSAGES.zh['wireless.autoHint'], /手动/);
+});
+
+test('wireless auto result parser accepts a full response without accepting a pairing code', () => {
+  assert.equal(typeof keys.parseWirelessAutoResult, 'function');
+  assert.deepEqual(keys.parseWirelessAutoResult({
+    usbSerial: 'USB123456',
+    pairHost: '192.168.3.10',
+    pairPort: 43127,
+    connectHost: '192.168.3.10',
+    connectPort: 39541,
+    warnings: [],
+    pairCode: '654321',
+  }), {
+    usbSerial: 'USB123456',
+    updates: {
+      pairHost: '192.168.3.10',
+      pairPort: '43127',
+      connectHost: '192.168.3.10',
+      connectPort: '39541',
+    },
+    warnings: [],
+    complete: true,
+  });
+});
+
+test('wireless auto result parser preserves useful partial data and warnings', () => {
+  assert.equal(typeof keys.parseWirelessAutoResult, 'function');
+  assert.deepEqual(keys.parseWirelessAutoResult({
+    usbSerial: 'USB123456',
+    pairHost: '192.168.3.10',
+    pairPort: null,
+    connectHost: '192.168.3.10',
+    connectPort: null,
+    warnings: ['Pairing port unavailable.', 'Connect port unavailable.'],
+  }), {
+    usbSerial: 'USB123456',
+    updates: {
+      pairHost: '192.168.3.10',
+      connectHost: '192.168.3.10',
+    },
+    warnings: ['Pairing port unavailable.', 'Connect port unavailable.'],
+    complete: false,
+  });
+});
+
+test('wireless auto result parser rejects malformed envelopes and unsafe field values', () => {
+  assert.equal(typeof keys.parseWirelessAutoResult, 'function');
+  for (const payload of [
+    null,
+    {},
+    { usbSerial: '', warnings: [] },
+    { usbSerial: 'USB123456', warnings: 'not an array' },
+  ]) {
+    assert.equal(keys.parseWirelessAutoResult(payload), null);
+  }
+  assert.deepEqual(keys.parseWirelessAutoResult({
+    usbSerial: 'USB123456',
+    pairHost: 'not a host',
+    pairPort: 0,
+    connectHost: '192.168.3.10',
+    connectPort: '39541',
+    warnings: ['Partial result.', '', 42, 'Partial result.'],
+  }), {
+    usbSerial: 'USB123456',
+    updates: { connectHost: '192.168.3.10' },
+    warnings: ['Partial result.'],
+    complete: false,
+  });
+});
+
+test('wireless auto availability follows usbOnline and the shared busy state', () => {
+  assert.match(app, /let wirelessState = \{ mode: 'unknown', serial: '—', online: false, usbOnline: false \};/);
+  assert.match(app, /wirelessState = \{ mode: payload\.mode, serial: payload\.serial, online: payload\.online, usbOnline: payload\.usbOnline === true \};/);
+  assert.match(app, /function renderWirelessAutoButton\(\) \{[\s\S]*?wirelessAuto\.disabled = wirelessBusy \|\| wirelessAutoBusy \|\| wirelessState\.usbOnline !== true;[\s\S]*?wirelessAuto\.textContent = t\(wirelessAutoBusy \? 'wireless\.auto\.loading' : 'wireless\.auto'\);[\s\S]*?wirelessAuto\.classList\.toggle\('is-loading', wirelessAutoBusy\);[\s\S]*?wirelessAuto\.setAttribute\('aria-busy', String\(wirelessAutoBusy\)\);/);
+  assert.match(app, /function applyWirelessStatus\(payload\)\s*\{[\s\S]*?renderWirelessAutoButton\(\);/);
+  assert.match(app, /function setWirelessBusy\(busy\)\s*\{[\s\S]*?renderWirelessAutoButton\(\);/);
+  assert.match(app, /renderWirelessStatus\(\);\s*renderWirelessAutoButton\(\);/);
+});
+
+test('wireless auto-fetch calls only the read-only API, merges fields, saves and focuses the pairing code', () => {
+  assert.match(app, /const WIRELESS_AUTO_URL = `\$\{BRIDGE_BASE\}\/api\/wireless\/auto`;/);
+  const autoBody = app.match(/async function autoFetchWireless\(\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(autoBody, 'auto-fetch handler exists');
+  assert.match(autoBody, /if \(wirelessBusy \|\| wirelessAutoBusy \|\| wirelessState\.usbOnline !== true\) return;/);
+  assert.match(autoBody, /wirelessRequests\.mutate\(/);
+  assert.match(autoBody, /fetch\(WIRELESS_AUTO_URL,\s*\{[\s\S]*?method: 'POST',[\s\S]*?body: '\{\}'/);
+  assert.match(autoBody, /const parsed = parseWirelessAutoResult\(payload\);/);
+  assert.match(autoBody, /if \(!parsed\)\s*\{[\s\S]*?setWirelessFeedback\('wireless\.error\.invalidResponse'/);
+  assert.match(autoBody, /fillWirelessForm\(\{ \.\.\.readWirelessForm\(\), \.\.\.parsed\.updates \}\);/);
+  assert.match(autoBody, /saveWirelessFormFromDom\(\);/);
+  assert.match(autoBody, /wirelessFields\.pairCode\.focus\(\);/);
+  assert.match(autoBody, /wirelessAutoBusy = false;[\s\S]*?setWirelessBusy\(false\);/);
+  assert.doesNotMatch(autoBody, /pairWireless|WIRELESS_PAIR_URL|activateDevice|restartStream/);
+  assert.match(app, /wirelessAuto\.addEventListener\('click', autoFetchWireless\);/);
+});
+
+test('wireless auto-fetch reports partial results as warnings without pairing', () => {
+  const autoBody = app.match(/async function autoFetchWireless\(\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(autoBody, 'auto-fetch handler exists');
+  assert.match(autoBody, /if \(!parsed\.complete \|\| parsed\.warnings\.length > 0\)\s*\{[\s\S]*?setWirelessFeedback\('wireless\.auto\.partial',[\s\S]*?false,\s*true\);/);
+  assert.match(autoBody, /setWirelessFeedback\('wireless\.auto\.fetched'\);/);
+  assert.match(app, /function renderWirelessFeedback\(\)\s*\{[\s\S]*?classList\.toggle\('is-warning', wirelessFeedbackIsWarning\);/);
+  assert.match(css, /\.wireless-feedback\.is-warning\s*\{[^}]*color:\s*#d8bd83;/);
+  assert.match(keys.MESSAGES.en['wireless.auto.partial'], /partial/i);
+  assert.match(keys.MESSAGES.zh['wireless.auto.partial'], /部分/);
+});
+
+test('wireless auto-fetch surfaces USB-offline responses and disables further fetches', () => {
+  const autoBody = app.match(/async function autoFetchWireless\(\) \{([\s\S]*?)\n\}/)?.[1];
+  assert.ok(autoBody, 'auto-fetch handler exists');
+  assert.match(autoBody, /if \(res\.status === 409\)\s*\{[\s\S]*?wirelessState\.usbOnline = false;[\s\S]*?renderWirelessAutoButton\(\);[\s\S]*?setWirelessFeedback\('wireless\.error\.usbOffline', \{\}, true\);/);
+  assert.match(keys.MESSAGES.en['wireless.error.usbOffline'], /USB.*offline/i);
+  assert.match(keys.MESSAGES.zh['wireless.error.usbOffline'], /USB.*离线/);
 });

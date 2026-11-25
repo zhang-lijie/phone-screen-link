@@ -252,7 +252,11 @@
 
       <form id="wireless-form" class="wireless-form">
         <fieldset>
-          <legend data-i18n="wireless.groupPair">Pair (Android 11+)</legend>
+          <legend class="wireless-legend">
+            <span data-i18n="wireless.groupPair">Pair (Android 11+)</span>
+            <button type="button" id="wireless-auto" class="wireless-auto" data-i18n="wireless.auto" aria-busy="false" disabled>Auto-fetch over USB</button>
+          </legend>
+          <p class="wireless-hint" data-i18n="wireless.autoHint">Connect the phone by USB, enable Wireless debugging, and open the pairing-code dialog. Auto-fetch reads the IP and ports; enter the 6-digit pairing code manually.</p>
           <p class="wireless-hint" data-i18n="wireless.pairHint">Open Developer options → Wireless debugging → Pair device with pairing code.</p>
           <label class="wireless-field">
             <span data-i18n="wireless.pairHost">Pair IP</span>

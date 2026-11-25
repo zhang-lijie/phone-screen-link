@@ -133,6 +133,11 @@ export const MESSAGES = {
     'wireless.loading': 'Loading wireless status…',
     'wireless.groupPair': 'Pair (Android 11+)',
     'wireless.pairHint': 'Open Developer options → Wireless debugging → Pair device with pairing code.',
+    'wireless.auto': 'Auto-fetch over USB',
+    'wireless.autoHint': 'Connect the phone by USB, enable Wireless debugging, and open the pairing-code dialog. Auto-fetch reads the IP and ports; enter the 6-digit pairing code manually.',
+    'wireless.auto.loading': 'Fetching wireless details…',
+    'wireless.auto.fetched': 'Wireless details fetched — enter the pairing code.',
+    'wireless.auto.partial': 'Only partial wireless details were fetched. Check the fields before pairing.{warnings}',
     'wireless.pairHost': 'Pair IP',
     'wireless.pairPort': 'Pair port',
     'wireless.pairCode': '6-digit pairing code',
@@ -152,6 +157,7 @@ export const MESSAGES = {
     'wireless.error.network': 'Cannot reach the control bridge — {error}',
     'wireless.error.invalidResponse': 'The control bridge returned an invalid wireless response',
     'wireless.error.offline': 'The wireless device is offline — it was not activated',
+    'wireless.error.usbOffline': 'The USB device is offline — connect and authorize it before auto-fetching',
     'wireless.error.storage': 'Cannot access browser storage — saved pairing information was not removed',
     'wireless.error.save': 'Browser storage is unavailable — pairing still works, but the form will be lost on reload',
     'wireless.warning': 'Warning: the full form, including the pairing code, is saved in plain text in this browser\'s localStorage. Anyone with access to this browser profile can read it. Pairing codes expire; if pairing fails, get the current code from the phone. Use “Clear saved pairing information” to remove it.',
@@ -331,6 +337,11 @@ export const MESSAGES = {
     'wireless.loading': '正在读取无线状态…',
     'wireless.groupPair': '配对（Android 11+）',
     'wireless.pairHint': '打开开发者选项 → 无线调试 → 使用配对码配对设备。',
+    'wireless.auto': 'USB 自动获取',
+    'wireless.autoHint': '请用 USB 连接手机，开启无线调试并打开配对码弹窗。自动获取只读取 IP 和端口，6 位配对码仍需手动输入。',
+    'wireless.auto.loading': '正在获取无线调试信息…',
+    'wireless.auto.fetched': '已获取无线调试信息 — 请输入配对码。',
+    'wireless.auto.partial': '仅获取到部分无线调试信息，请检查表单后再配对。{warnings}',
     'wireless.pairHost': '配对 IP',
     'wireless.pairPort': '配对端口',
     'wireless.pairCode': '6 位配对码',
@@ -350,6 +361,7 @@ export const MESSAGES = {
     'wireless.error.network': '无法连接控制桥 — {error}',
     'wireless.error.invalidResponse': '控制桥返回了无效的无线状态',
     'wireless.error.offline': '无线设备已离线 — 未切换活动设备',
+    'wireless.error.usbOffline': 'USB 设备已离线 — 请连接并授权 USB 调试后再自动获取',
     'wireless.error.storage': '无法访问浏览器存储 — 未删除已保存的配对信息',
     'wireless.error.save': '浏览器存储不可用 — 仍可正常配对，但表单会在刷新后丢失',
     'wireless.warning': '警告：完整表单（含配对码）会以明文保存到此浏览器的 localStorage。能够访问此浏览器配置文件的任何人都可读取。配对码会过期；如果配对失败，请从手机获取最新配对码。使用“清除已保存配对信息”可删除。',
@@ -583,6 +595,59 @@ export function isWirelessPairingSuccess(payload) {
     && payload.serial.trim() !== ''
     && payload.online === true,
   );
+}
+
+function normalizeWirelessAutoHost(value) {
+  if (typeof value !== 'string') return '';
+  const host = value.trim();
+  if (host === '' || host.length > 253 || /\s/.test(host)) return '';
+  if (/^[\d.]+$/.test(host)) {
+    const parts = host.split('.');
+    return parts.length === 4 && parts.every((part) => (
+      /^\d{1,3}$/.test(part) && Number(part) <= 255
+    )) ? host : '';
+  }
+  return host.split('.').every((label) => (
+    label.length >= 1
+    && label.length <= 63
+    && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)
+  )) ? host : '';
+}
+
+function normalizeWirelessAutoPort(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 65535 ? String(value) : '';
+}
+
+// The auto endpoint is read-only and may return partial data. Validate its
+// envelope, keep only usable address fields, and never accept a pairing code
+// from it: the user must always enter that short-lived credential manually.
+export function parseWirelessAutoResult(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+      || typeof payload.usbSerial !== 'string' || payload.usbSerial.trim() === ''
+      || !Array.isArray(payload.warnings)) {
+    return null;
+  }
+
+  const updates = {};
+  const pairHost = normalizeWirelessAutoHost(payload.pairHost);
+  const pairPort = normalizeWirelessAutoPort(payload.pairPort);
+  const connectHost = normalizeWirelessAutoHost(payload.connectHost);
+  const connectPort = normalizeWirelessAutoPort(payload.connectPort);
+  if (pairHost) updates.pairHost = pairHost;
+  if (pairPort) updates.pairPort = pairPort;
+  if (connectHost) updates.connectHost = connectHost;
+  if (connectPort) updates.connectPort = connectPort;
+
+  const warnings = [...new Set(payload.warnings
+    .map((warning) => typeof warning === 'string' ? warning.trim() : '')
+    .filter(Boolean))];
+
+  return {
+    usbSerial: payload.usbSerial.trim(),
+    updates,
+    warnings,
+    complete: Boolean(updates.pairHost && updates.pairPort && updates.connectHost && updates.connectPort),
+  };
 }
 
 export function clearWirelessPairing(storageOrProvider) {
