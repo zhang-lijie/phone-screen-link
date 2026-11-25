@@ -41,6 +41,23 @@ test('connection config: save persists and reloads a wireless address', (t) => {
   assert.deepEqual(createConnectionConfigStore({ file }).load(), wifi);
 });
 
+test('connection config: save returns the committed config without a post-commit reread', (t) => {
+  const { file } = tempStore(t);
+  let reads = 0;
+  const store = createConnectionConfigStore({ file }, {
+    readFile(path, encoding) {
+      reads += 1;
+      if (reads > 1) throw Object.assign(new Error('post-commit read failed'), { code: 'EACCES' });
+      return readFileSync(path, encoding);
+    },
+  });
+  const wifi = { mode: 'wifi', address: ' phone.local:5555 ' };
+
+  assert.deepEqual(store.save(wifi), { mode: 'wifi', address: 'phone.local:5555' });
+  assert.equal(reads, 1, 'a completed atomic write must not depend on reading the file back');
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { mode: 'wifi', address: 'phone.local:5555' });
+});
+
 test('connection config: public config and disk never retain a pairing code', (t) => {
   const { file, store } = tempStore(t);
   store.save({ mode: 'wifi', address: 'phone.local:5555', pairCode: '654321' });

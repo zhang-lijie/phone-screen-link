@@ -35,10 +35,30 @@ function redactedError(err, pairingCode) {
 }
 
 export function createConnectionService({ adb, store, usbSerial }) {
+  let mutationTail = Promise.resolve();
+
+  function serializeMutation(work) {
+    const result = mutationTail.then(work);
+    mutationTail = result.catch(() => {});
+    return result;
+  }
+
   async function status() {
     const mode = adb.getMode();
     const serial = adb.getSerial();
     return { mode, serial, online: await adb.isOnline() };
+  }
+
+  // Activation and persistence have committed. A status probe is diagnostic:
+  // its failure must not report the completed mutation as failed. The pair
+  // transaction already proved the wireless endpoint online; USB has no such
+  // proof, so a failed USB probe is reported as offline.
+  async function committedStatus(mode, serial, knownOnline) {
+    try {
+      return await status();
+    } catch {
+      return { mode, serial, online: knownOnline };
+    }
   }
 
   async function pairAndConnect(input) {
@@ -55,34 +75,40 @@ export function createConnectionService({ adb, store, usbSerial }) {
     const connectPort = normalizePort(input.connectPort, 'connectPort');
     const address = `${connectHost}:${connectPort}`;
 
-    try {
-      await adb.pair({ host: pairHost, port: pairPort, code: pairCode });
-    } catch (err) {
-      throw redactedError(err, pairCode);
-    }
-    try {
-      await adb.connect(address);
-    } catch (err) {
-      throw redactedError(err, pairCode);
-    }
+    return serializeMutation(async () => {
+      try {
+        await adb.pair({ host: pairHost, port: pairPort, code: pairCode });
+      } catch (err) {
+        throw redactedError(err, pairCode);
+      }
+      try {
+        await adb.connect(address);
+      } catch (err) {
+        throw redactedError(err, pairCode);
+      }
 
-    let online = false;
-    try {
-      online = String(await adb.getState(address)).trim() === 'device';
-    } catch {
-      // A nonzero get-state is how adb reports an offline or unknown device.
-    }
-    if (!online) throw new Error('wireless device is offline after connect');
+      let online = false;
+      try {
+        online = String(await adb.getState(address)).trim() === 'device';
+      } catch {
+        // A nonzero get-state is how adb reports an offline or unknown device.
+      }
+      if (!online) throw new Error('wireless device is offline after connect');
 
-    adb.setConnection({ mode: 'wifi', serial: address });
-    store.save({ mode: 'wifi', address });
-    return status();
+      // Disk is the commit record. Do not activate a transport that was not
+      // durably selected; save() returns exactly what its atomic rename wrote.
+      const saved = store.save({ mode: 'wifi', address });
+      adb.setConnection({ mode: 'wifi', serial: saved.address });
+      return committedStatus('wifi', saved.address, true);
+    });
   }
 
-  async function switchToUsb() {
-    adb.setConnection({ mode: 'usb', serial: usbSerial });
-    store.save({ mode: 'usb', address: '' });
-    return status();
+  function switchToUsb() {
+    return serializeMutation(async () => {
+      store.save({ mode: 'usb', address: '' });
+      adb.setConnection({ mode: 'usb', serial: usbSerial });
+      return committedStatus('usb', usbSerial, false);
+    });
   }
 
   return { status, pairAndConnect, switchToUsb };

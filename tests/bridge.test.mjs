@@ -5,7 +5,9 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createBridge } from '../server/bridge.mjs';
-import { DEFAULT_USB_SERIAL } from '../server/adb.mjs';
+import { createAdb, DEFAULT_USB_SERIAL } from '../server/adb.mjs';
+import { createConnectionConfigStore } from '../server/connection-config.mjs';
+import { createConnectionService } from '../server/connection-service.mjs';
 import { DEFAULT_CHAT_CONFIG, createChatConfigStore } from '../server/chat-config.mjs';
 
 const fakeAdb = {
@@ -776,6 +778,12 @@ function fakeConnectionService({ status = WIRELESS_STATUS, pairResult = status, 
   return service;
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((yes) => { resolve = yes; });
+  return { promise, resolve };
+}
+
 function postWirelessPair(address, body, headers = {}) {
   return fetch(`${address}/api/wireless/pair`, {
     method: 'POST',
@@ -929,6 +937,64 @@ test('wireless: POST usb restores USB status and maps service failures to 502', 
     const res = await postWirelessUsb(address);
     assert.equal(res.status, 502);
     assert.deepEqual(await res.json(), { error: 'usb switch failed' });
+  });
+});
+
+test('wireless: concurrent pair and USB requests wait for serialized transactions and return fresh status', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'bridge-wireless-concurrency-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const previousAddress = '10.0.0.9:5555';
+  const store = createConnectionConfigStore({ file: join(dir, 'connection.json') });
+  store.save({ mode: 'wifi', address: previousAddress });
+  const pairGate = deferred();
+  let markPairStarted;
+  const pairStarted = new Promise((resolve) => { markPairStarted = resolve; });
+  let markUsbInvoked;
+  const usbInvoked = new Promise((resolve) => { markUsbInvoked = resolve; });
+  const adb = createAdb(async (args) => {
+    if (args[0] === 'pair') {
+      markPairStarted();
+      await pairGate.promise;
+      return '';
+    }
+    if (args[0] === '-s') return 'device\n';
+    if (args[0] === 'devices') return `List of devices attached\n${DEFAULT_USB_SERIAL} device\n`;
+    return '';
+  }, { mode: 'wifi', serial: previousAddress });
+  const service = createConnectionService({ adb, store, usbSerial: DEFAULT_USB_SERIAL });
+  const connectionService = {
+    status: () => service.status(),
+    pairAndConnect: (input) => service.pairAndConnect(input),
+    switchToUsb: () => {
+      markUsbInvoked();
+      return service.switchToUsb();
+    },
+  };
+
+  await withBridge({ adb, connectionService }, async (address) => {
+    const pairResponse = postWirelessPair(address, PAIR_INPUT);
+    let usbResponse;
+    try {
+      await pairStarted;
+      usbResponse = postWirelessUsb(address);
+      await usbInvoked;
+      assert.equal(adb.getMode(), 'wifi', 'USB transaction must wait for pairing to commit');
+      assert.deepEqual(store.load(), { mode: 'wifi', address: previousAddress });
+    } finally {
+      pairGate.resolve();
+      await Promise.allSettled([pairResponse, usbResponse]);
+    }
+
+    const pair = await pairResponse;
+    assert.equal(pair.status, 200);
+    assert.deepEqual(await pair.json(), {
+      ok: true, mode: 'wifi', serial: 'phone.local:5555', online: true,
+    });
+
+    const usb = await usbResponse;
+    assert.equal(usb.status, 200);
+    assert.deepEqual(await usb.json(), { ok: true, ...USB_STATUS });
+    assert.deepEqual(store.load(), { mode: 'usb', address: '' });
   });
 });
 

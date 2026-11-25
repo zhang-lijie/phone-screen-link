@@ -28,6 +28,12 @@ function setup(t, { runner, initial, stored } = {}) {
   return { adb, store, service, file };
 }
 
+function deferred() {
+  let resolve;
+  const promise = new Promise((yes) => { resolve = yes; });
+  return { promise, resolve };
+}
+
 test('connection service: status reports the active wireless device without enumerating USB devices', async (t) => {
   const calls = [];
   const { service } = setup(t, {
@@ -60,6 +66,67 @@ test('connection service: pairAndConnect pairs, connects, confirms online, then 
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { mode: 'wifi', address: WIRELESS_ADDRESS });
   assert.deepEqual(result, { mode: 'wifi', serial: WIRELESS_ADDRESS, online: true });
   assert.equal(JSON.stringify(result).includes(PAIR_INPUT.pairCode), false);
+});
+
+test('connection service: a persistence failure before USB-to-wireless activation leaves runtime and disk unchanged', async (t) => {
+  const { adb, store, service, file } = setup(t, {
+    runner: async () => 'device\n',
+  });
+  store.save = () => { throw new Error('connection config is read-only'); };
+  const before = readFileSync(file);
+
+  await assert.rejects(service.pairAndConnect(PAIR_INPUT), /read-only/);
+
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: a persistence failure before wireless-to-USB activation leaves runtime and disk unchanged', async (t) => {
+  const { adb, store, service, file } = setup(t, {
+    initial: { mode: 'wifi', serial: WIRELESS_ADDRESS },
+    stored: { mode: 'wifi', address: WIRELESS_ADDRESS },
+  });
+  store.save = () => { throw new Error('connection config is read-only'); };
+  const before = readFileSync(file);
+
+  await assert.rejects(service.switchToUsb(), /read-only/);
+
+  assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getSerial(), WIRELESS_ADDRESS);
+  assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
+  assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: a post-commit wireless status failure does not turn pairing into a failure', async (t) => {
+  const { adb, store, service } = setup(t, {
+    runner: async () => 'device\n',
+  });
+  adb.isOnline = async () => { throw new Error('status read failed after commit'); };
+
+  assert.deepEqual(await service.pairAndConnect(PAIR_INPUT), {
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true,
+  });
+  assert.equal(adb.getMode(), 'wifi');
+  assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
+});
+
+test('connection service: a post-commit USB status failure does not turn a completed switch into a failure', async (t) => {
+  const { adb, store, service } = setup(t, {
+    initial: { mode: 'wifi', serial: WIRELESS_ADDRESS },
+    stored: { mode: 'wifi', address: WIRELESS_ADDRESS },
+    runner: async (args) => {
+      if (args[0] === 'devices') throw new Error('USB status read failed after commit');
+      return '';
+    },
+  });
+
+  assert.deepEqual(await service.switchToUsb(), {
+    mode: 'usb', serial: USB_SERIAL, online: false,
+  });
+  assert.equal(adb.getMode(), 'usb');
+  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
 });
 
 test('connection service: a pair failure leaves the active device and persisted config unchanged', async (t) => {
@@ -185,4 +252,61 @@ test('connection service: switchToUsb restores the supplied USB serial and clear
   assert.deepEqual(store.load(), { mode: 'usb', address: '' });
   assert.deepEqual(result, { mode: 'usb', serial: USB_SERIAL, online: true });
   assert.deepEqual(calls, [['devices']]);
+});
+
+test('connection service: concurrent pair and USB mutations serialize and return their own transaction status', async (t) => {
+  const pairGate = deferred();
+  let pairStartedResolve;
+  const pairStarted = new Promise((resolve) => { pairStartedResolve = resolve; });
+  const previousAddress = '10.0.0.9:5555';
+  const { adb, store, service } = setup(t, {
+    initial: { mode: 'wifi', serial: previousAddress },
+    stored: { mode: 'wifi', address: previousAddress },
+    runner: async (args) => {
+      if (args[0] === 'pair') {
+        pairStartedResolve();
+        await pairGate.promise;
+        return '';
+      }
+      if (args[0] === '-s') return 'device\n';
+      if (args[0] === 'devices') return `List of devices attached\n${USB_SERIAL} device\n`;
+      return '';
+    },
+  });
+
+  const pairPromise = service.pairAndConnect(PAIR_INPUT);
+  await pairStarted;
+  const usbPromise = service.switchToUsb();
+  try {
+    assert.equal(adb.getMode(), 'wifi', 'USB mutation must wait for the in-flight pair transaction');
+    assert.deepEqual(store.load(), { mode: 'wifi', address: previousAddress });
+  } finally {
+    pairGate.resolve();
+    await Promise.allSettled([pairPromise, usbPromise]);
+  }
+
+  assert.deepEqual(await pairPromise, { mode: 'wifi', serial: WIRELESS_ADDRESS, online: true });
+  assert.deepEqual(await usbPromise, { mode: 'usb', serial: USB_SERIAL, online: true });
+  assert.equal(adb.getMode(), 'usb');
+  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+});
+
+test('connection service: wireless-to-wireless connect failure leaves the previous wireless runtime and disk state unchanged', async (t) => {
+  const previousAddress = '10.0.0.9:5555';
+  const { adb, store, service, file } = setup(t, {
+    initial: { mode: 'wifi', serial: previousAddress },
+    stored: { mode: 'wifi', address: previousAddress },
+    runner: async (args) => {
+      if (args[0] === 'connect') throw new Error('new wireless endpoint rejected');
+      return '';
+    },
+  });
+  const before = readFileSync(file);
+
+  await assert.rejects(service.pairAndConnect(PAIR_INPUT), /new wireless endpoint rejected/);
+
+  assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getSerial(), previousAddress);
+  assert.deepEqual(store.load(), { mode: 'wifi', address: previousAddress });
+  assert.deepEqual(readFileSync(file), before);
 });

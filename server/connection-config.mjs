@@ -57,11 +57,11 @@ export function resolveInitialConnection({
   return { mode: 'usb', serial: usbSerial || FALLBACK_USB_SERIAL };
 }
 
-export function createConnectionConfigStore({ file }) {
+export function createConnectionConfigStore({ file }, { readFile = readFileSync } = {}) {
   function load() {
     let raw;
     try {
-      raw = readFileSync(file, 'utf8');
+      raw = readFile(file, 'utf8');
     } catch (error) {
       if (error.code === 'ENOENT') return { ...DEFAULT_CONNECTION_CONFIG };
       throw error;
@@ -92,7 +92,7 @@ export function createConnectionConfigStore({ file }) {
     rmSync(tmp, { force: true });
     writeFileSync(tmp, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
     renameSync(tmp, file);
-    return publicConfig();
+    return { ...config };
   }
 
   function publicConfig() {
