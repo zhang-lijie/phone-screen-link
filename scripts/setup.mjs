@@ -165,6 +165,215 @@ export const KEYBOARD_FOCUS_PATCH = {
         const keyCode = KeyToCodeMap.get(keyboardEvent.code);`,
 };
 
+// Audio startup must survive a stop() that lands while the worklet module is
+// still loading, and must still play when AudioWorklet cannot load at all.
+// The worklet stays the preferred path; a ScriptProcessorNode is the fallback.
+export const AUDIO_WORKLET_FALLBACK_PATCHES = [
+  {
+    file: 'src/app/audio/AudioPlayer.ts',
+    from: `    private workletNode?: AudioWorkletNode | undefined;
+    private gainNode?: GainNode | undefined;
+    private started = false;`,
+    to: `    private workletNode?: AudioWorkletNode | undefined;
+    private scriptNode?: ScriptProcessorNode | undefined;
+    private gainNode?: GainNode | undefined;
+    private outputQueue: Array<{ channels: Float32Array[]; numFrames: number; offset: number }> = [];
+    private started = false;`,
+  },
+  {
+    file: 'src/app/audio/AudioPlayer.ts',
+    from: `        this.audioContext = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
+
+        // Load worklet via Blob URL
+        const blob = new Blob([PCM_WORKLET_SOURCE], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        await this.audioContext.audioWorklet.addModule(url);
+        URL.revokeObjectURL(url);
+
+        this.workletNode = new AudioWorkletNode(this.audioContext, PCM_WORKLET_NAME, {
+            outputChannelCount: [2],
+        });
+        this.gainNode = this.audioContext.createGain();
+        this.workletNode.connect(this.gainNode);
+        this.gainNode.connect(this.audioContext.destination);
+        this.workletReady = true;`,
+    to: `        const context = new AudioContext({ latencyHint: 'interactive', sampleRate: 48000 });
+        this.audioContext = context;
+
+        const worklet = await this.loadWorklet(context);
+        // stop() may have run while addModule() was pending. It already tore the
+        // context down, so leave without touching the state it reset.
+        if (!this.started || this.audioContext !== context) {
+            if (context.state !== 'closed') context.close().catch(() => {});
+            return;
+        }
+
+        this.gainNode = context.createGain();
+        this.gainNode.connect(context.destination);
+        if (worklet.ok) {
+            this.workletNode = new AudioWorkletNode(context, PCM_WORKLET_NAME, {
+                outputChannelCount: [2],
+            });
+            this.workletNode.connect(this.gainNode);
+        } else {
+            console.warn(
+                '[AudioPlayer] AudioWorklet unavailable, using ScriptProcessor:',
+                worklet.reason,
+            );
+            this.startScriptProcessor(context);
+        }
+        this.workletReady = true;`,
+  },
+  {
+    file: 'src/app/audio/AudioPlayer.ts',
+    from: `    async resume(): Promise<void> {`,
+    to: `    /**
+     * Load the PCM worklet. Returns the failure reason instead of throwing, so
+     * the caller can decide whether to fall back (and can stay silent when the
+     * player was stopped while the module was loading).
+     *
+     * Some embedders leave addModule() pending forever instead of rejecting,
+     * hence the timeout. The load promise carries its own handlers, so a late
+     * rejection after the timeout cannot surface as an unhandled rejection.
+     */
+    private async loadWorklet(
+        context: AudioContext,
+    ): Promise<{ ok: true } | { ok: false; reason: string }> {
+        const blob = new Blob([PCM_WORKLET_SOURCE], { type: 'application/javascript' });
+        const url = URL.createObjectURL(blob);
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            const load = context.audioWorklet.addModule(url).then(
+                () => ({ ok: true as const }),
+                (error: unknown) => ({
+                    ok: false as const,
+                    reason: error instanceof Error ? error.message : String(error),
+                }),
+            );
+            const timeout = new Promise<{ ok: false; reason: string }>((resolve) => {
+                timer = setTimeout(
+                    () => resolve({ ok: false, reason: 'timed out after 1500ms' }),
+                    1500,
+                );
+            });
+            return await Promise.race([load, timeout]);
+        } catch (error) {
+            // audioWorklet can be missing entirely; a synchronous throw must
+            // still end in the fallback path rather than rejecting start().
+            return {
+                ok: false,
+                reason: error instanceof Error ? error.message : String(error),
+            };
+        } finally {
+            if (timer !== undefined) clearTimeout(timer);
+            URL.revokeObjectURL(url);
+        }
+    }
+
+    private startScriptProcessor(context: AudioContext): void {
+        const node = context.createScriptProcessor(2048, 1, 2);
+        node.onaudioprocess = (event: AudioProcessingEvent): void => {
+            const output = event.outputBuffer;
+            const frameCount = output.length;
+            let written = 0;
+
+            while (written < frameCount && this.outputQueue.length > 0) {
+                const block = this.outputQueue[0]!;
+                const remaining = block.numFrames - block.offset;
+                const toWrite = Math.min(frameCount - written, remaining);
+                for (let ch = 0; ch < output.numberOfChannels; ch++) {
+                    const src = ch < block.channels.length ? block.channels[ch] : block.channels[0];
+                    if (!src) continue;
+                    output
+                        .getChannelData(ch)
+                        .set(src.subarray(block.offset, block.offset + toWrite), written);
+                }
+                written += toWrite;
+                block.offset += toWrite;
+                if (block.offset >= block.numFrames) this.outputQueue.shift();
+            }
+
+            if (written < frameCount) {
+                for (let ch = 0; ch < output.numberOfChannels; ch++) {
+                    output.getChannelData(ch).fill(0, written);
+                }
+            }
+        };
+        node.connect(this.gainNode!);
+        this.scriptNode = node;
+    }
+
+    /** Hand decoded PCM to whichever output node is active. */
+    private enqueue(channels: Float32Array[], numFrames: number): void {
+        if (this.workletNode) {
+            this.workletNode.port.postMessage(
+                { channels, numFrames },
+                channels.map((c) => c.buffer),
+            );
+            return;
+        }
+        if (!this.scriptNode) return;
+        this.outputQueue.push({ channels, numFrames, offset: 0 });
+        while (this.outputQueue.length > 50) this.outputQueue.shift();
+    }
+
+    async resume(): Promise<void> {`,
+  },
+  {
+    file: 'src/app/audio/AudioPlayer.ts',
+    from: `        audioData.close();
+        this.workletNode!.port.postMessage(
+            { channels, numFrames },
+            channels.map((c) => c.buffer),
+        );
+    }`,
+    to: `        audioData.close();
+        this.enqueue(channels, numFrames);
+    }`,
+  },
+  {
+    file: 'src/app/audio/AudioPlayer.ts',
+    from: `        this.workletNode!.port.postMessage(
+            { channels, numFrames: framesPerChannel },
+            channels.map((c) => c.buffer),
+        );
+    }`,
+    to: `        this.enqueue(channels, framesPerChannel);
+    }`,
+  },
+  {
+    file: 'src/app/audio/AudioPlayer.ts',
+    from: `        this.workletNode?.disconnect();
+        this.gainNode?.disconnect();
+        if (this.audioContext && this.audioContext.state !== 'closed') {
+            this.audioContext.close().catch(() => {
+                // Already closed elsewhere — nothing to do, and an unhandled
+                // rejection here is the exact bug this method is fixing.
+            });
+        }
+        this.decoder = undefined;
+        this.workletNode = undefined;
+        this.gainNode = undefined;`,
+    to: `        this.workletNode?.disconnect();
+        if (this.scriptNode) {
+            this.scriptNode.onaudioprocess = null;
+            this.scriptNode.disconnect();
+        }
+        this.gainNode?.disconnect();
+        if (this.audioContext && this.audioContext.state !== 'closed') {
+            this.audioContext.close().catch(() => {
+                // Already closed elsewhere — nothing to do, and an unhandled
+                // rejection here is the exact bug this method is fixing.
+            });
+        }
+        this.decoder = undefined;
+        this.workletNode = undefined;
+        this.scriptNode = undefined;
+        this.gainNode = undefined;
+        this.outputQueue = [];`,
+  },
+];
+
 // UHID input is an alternative keyboard path enabled from the engine toolbox.
 // It bypasses KeyInputHandler entirely, so it needs the same focus guard or
 // typing in the chat/settings fields still drives the phone.
@@ -318,6 +527,7 @@ function applyEnginePatches() {
   applyPatch(WHEEL_SCALE_PATCH, 'wheel scroll scale');
   applyPatch(KEYBOARD_FOCUS_PATCH, 'keyboard focus handoff');
   for (const patch of UHID_KEYBOARD_FOCUS_PATCHES) applyPatch(patch, 'UHID keyboard focus handoff');
+  for (const patch of AUDIO_WORKLET_FALLBACK_PATCHES) applyPatch(patch, 'audio worklet fallback');
   for (const patch of AUDIO_VOLUME_PATCHES) applyPatch(patch, 'audio volume handle');
   for (const patch of RESIZE_PATCHES) applyPatch(patch, 'resize handle');
   applyPatch(FETCH_NODE_DARWIN_PATCH, 'darwin-arm64 node bootstrap');
