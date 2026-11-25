@@ -6,6 +6,7 @@ import { adb, bundledAdbDir, DEFAULT_USB_SERIAL, isMissingAdbError } from '../se
 import { runAgentTurn, runPresetCommand } from '../server/chat-agent.mjs';
 import { createChatConfigStore } from '../server/chat-config.mjs';
 import { createBridge } from '../server/bridge.mjs';
+import { createConnectionConfigStore, resolveInitialConnection } from '../server/connection-config.mjs';
 import { createGhostClient } from '../server/ghost-client.mjs';
 import { engineDir } from './setup.mjs';
 
@@ -33,7 +34,7 @@ export function ghostEnv(env = process.env, root) {
 
 export function buildPlan({ engineDir, webDir }) {
   return [
-    { kind: 'enforceUsb' },
+    { kind: 'configureConnection' },
     {
       kind: 'copyWeb',
       files: ['index.html', 'app.js', 'styles.css'],
@@ -109,11 +110,13 @@ export async function main(deps = {}) {
     adb: adbClient = adb,
     createBridge: makeBridge = createBridge,
     createChatConfigStore: makeChatConfig = createChatConfigStore,
+    createConnectionConfigStore: makeConnectionConfig = createConnectionConfigStore,
     createGhostClient: makeGhost = createGhostClient,
     spawn: spawnChild = spawn,
     waitForEngine: checkEngine = waitForEngine,
     engineDir: getEngineDir = engineDir,
     copyWeb: copyFiles = copyWeb,
+    env = process.env,
     setTimer = setInterval,
     clearTimer = clearInterval,
     ghostStartTimeoutMs = GHOST_START_TIMEOUT_MS,
@@ -129,14 +132,26 @@ export async function main(deps = {}) {
     webDir: join(projectDir, 'web'),
   });
 
+  // Resolve the persisted/environment-selected transport before the engine or
+  // any device-specific client starts. USB remains the fallback default.
+  const connectionStore = makeConnectionConfig({ file: join(projectDir, 'state', 'connection.json') });
+  const initialConnection = resolveInitialConnection({
+    env,
+    stored: connectionStore.load(),
+    usbSerial: DEFAULT_USB_SERIAL,
+  });
+  adbClient.setConnection(initialConnection);
+
   // A missing adb must not abort startup: on a fresh install the engine's
   // bundled copy only appears after the engine boots and its background
-  // dependency install finishes. The USB-only rule is re-checked every 5s.
-  try {
-    await adbClient.ensureUsbOnly();
-  } catch (err) {
-    if (!isMissingAdbError(err)) throw err;
-    log(ADB_MISSING_HINT);
+  // dependency install finishes. The active connection is re-checked every 5s.
+  if (initialConnection.mode === 'usb') {
+    try {
+      await adbClient.ensureUsbOnly();
+    } catch (err) {
+      if (!isMissingAdbError(err)) throw err;
+      log(ADB_MISSING_HINT);
+    }
   }
 
   copyFiles(copyStep, join(spawnStep.cwd, 'dist', 'public'));
@@ -235,7 +250,7 @@ export async function main(deps = {}) {
     // absent and the bridge reports it as unavailable.
     const chatConfig = makeChatConfig({ file: join(projectDir, 'state', 'chat.json') });
     try {
-      ghost = makeGhost({ serial: DEFAULT_USB_SERIAL, env: ghostEnv(process.env, projectDir) });
+      ghost = makeGhost({ getSerial: () => adbClient.getSerial(), env: ghostEnv(env, projectDir) });
       // A hanging ghost.start() (e.g. uvx stuck downloading) must not block
       // the bridge: bound it and fall into the chat-disabled catch below.
       ghostStart = withTimeout(ghost.start(), ghostStartTimeoutMs, 'ghost MCP server start');
@@ -288,11 +303,17 @@ export async function main(deps = {}) {
     if (ready === ABORTED || aborted) throw new Error('startup aborted');
 
     usbInterval = setTimer(() => {
-      adbClient.ensureUsbOnly().catch((err) => {
+      // The mode can change live through the connection service, so branch on
+      // every tick rather than capturing the startup mode in the timer.
+      const mode = adbClient.getMode();
+      const check = mode === 'wifi'
+        ? adbClient.ensureWirelessConnected(adbClient.getSerial())
+        : adbClient.ensureUsbOnly();
+      check.catch((err) => {
         // The engine may still be installing adb in the background; that is
-        // not a USB failure and must not spam the log every 5 seconds.
+        // not a connection failure and must not spam the log every 5 seconds.
         if (isMissingAdbError(err)) return;
-        error('USB re-check failed:', err);
+        error(mode === 'wifi' ? 'Wireless re-check failed:' : 'USB re-check failed:', err);
       });
     }, USB_RECHECK_MS);
     running = true;

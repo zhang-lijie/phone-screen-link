@@ -6,9 +6,9 @@ import { delimiter, join } from 'node:path';
 import { DEFAULT_USB_SERIAL } from '../server/adb.mjs';
 import { ADB_MISSING_HINT, buildPlan, copyWeb, engineEnv, main } from '../scripts/start.mjs';
 
-test('plan enforces usb before copying and starting the engine', () => {
+test('plan configures the connection before copying and starting the engine', () => {
   const plan = buildPlan({ engineDir: '/x/engine', webDir: '/x/web' });
-  assert.deepEqual(plan.map((s) => s.kind), ['enforceUsb', 'copyWeb', 'spawnEngine', 'startBridge']);
+  assert.deepEqual(plan.map((s) => s.kind), ['configureConnection', 'copyWeb', 'spawnEngine', 'startBridge']);
   assert.deepEqual(plan[1].files, ['index.html', 'app.js', 'styles.css']);
   assert.deepEqual(plan[1].sharedFiles, ['keys.mjs', 'chat-commands.mjs']);
   assert.equal(plan[2].command, 'node');
@@ -65,6 +65,9 @@ test('copyWeb copies web files and shared modules into the public dir as .js', (
 function fakeRuntime(overrides = {}) {
   const calls = {
     ensureUsb: 0,
+    ensureWireless: [],
+    setConnection: [],
+    connectionLoad: 0,
     copy: 0,
     spawn: [],
     order: [],
@@ -79,8 +82,25 @@ function fakeRuntime(overrides = {}) {
     clearTimer: 0,
   };
   const handlers = new Map();
-  const interval = Symbol('usb-interval');
+  const interval = Symbol('connection-interval');
   const child = { kill: () => { calls.order.push('kill'); calls.kill += 1; } };
+  let connection = { mode: 'usb', serial: DEFAULT_USB_SERIAL };
+  const adbClient = {
+    getMode: () => connection.mode,
+    getSerial: () => connection.serial,
+    setConnection: (next) => {
+      calls.order.push('setConnection');
+      calls.setConnection.push(next);
+      connection = next;
+    },
+    ensureUsbOnly: async () => { calls.order.push('ensureUsb'); calls.ensureUsb += 1; },
+    ensureWirelessConnected: async (address) => {
+      calls.order.push('ensureWireless');
+      calls.ensureWireless.push(address);
+      return true;
+    },
+    isLocked: async () => true,
+  };
   const ghost = {
     start: async () => { calls.order.push('ghostStart'); calls.ghostStart += 1; },
     stop: async () => { calls.order.push('ghostStop'); calls.ghostStop += 1; },
@@ -108,10 +128,22 @@ function fakeRuntime(overrides = {}) {
     save: () => ({}),
     publicConfig: () => ({}),
   };
+  const connectionConfig = { mode: 'usb', address: '' };
+  const connectionStore = {
+    load: () => { calls.connectionLoad += 1; return { ...connectionConfig }; },
+    save: (patch) => {
+      Object.assign(connectionConfig, patch);
+      if (connectionConfig.mode === 'usb') connectionConfig.address = '';
+      return { ...connectionConfig };
+    },
+    publicConfig: () => ({ ...connectionConfig }),
+  };
   const deps = {
-    adb: {
-      ensureUsbOnly: async () => { calls.ensureUsb += 1; },
-      isLocked: async () => true,
+    adb: adbClient,
+    env: { ...process.env, PHONE_SERIAL: '', PHONE_USB_SERIAL: '' },
+    createConnectionConfigStore: (options) => {
+      calls.connectionConfigOptions = options;
+      return connectionStore;
     },
     engineDir: () => '/x/engine',
     copyWeb: () => { calls.copy += 1; },
@@ -137,7 +169,7 @@ function fakeRuntime(overrides = {}) {
     offSignal: (signal, handler) => { if (handlers.get(signal) === handler) handlers.delete(signal); },
     ...overrides,
   };
-  return { deps, calls, handlers, child, bridge, ghost, chatConfig };
+  return { deps, calls, handlers, child, bridge, ghost, chatConfig, adbClient, connectionStore };
 }
 
 test('the engine is spawned with proxy-aware fetch settings when a proxy is configured', () => {
@@ -164,7 +196,10 @@ test('main installs signal handlers before spawning and cleans up when readiness
 
   await assert.rejects(main(deps), /readiness failed/);
 
-  assert.deepEqual(calls.order.slice(0, 3), ['on:SIGINT', 'on:SIGTERM', 'spawn']);
+  assert.deepEqual(
+    calls.order.filter((entry) => entry === 'spawn' || entry.startsWith('on:')).slice(0, 3),
+    ['on:SIGINT', 'on:SIGTERM', 'spawn'],
+  );
   assert.equal(calls.ensureUsb, 1);
   assert.equal(calls.copy, 1);
   assert.deepEqual(calls.spawn, [
@@ -179,8 +214,13 @@ test('main installs signal handlers before spawning and cleans up when readiness
 
 function missingAdb() {
   const err = Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' });
+  let connection = { mode: 'usb', serial: DEFAULT_USB_SERIAL };
   return {
+    getMode: () => connection.mode,
+    getSerial: () => connection.serial,
+    setConnection: (next) => { connection = next; },
     ensureUsbOnly: async () => { throw err; },
+    ensureWirelessConnected: async () => true,
     isLocked: async () => true,
   };
 }
@@ -219,6 +259,97 @@ test('the periodic USB check stays quiet while adb is still being installed', as
   await new Promise((resolve) => setImmediate(resolve));
 
   assert.deepEqual(errors, []);
+
+  await handlers.get('SIGINT')();
+});
+
+test('main defaults to USB, applies it before engine spawn, and rechecks USB every 5 seconds', async () => {
+  let tick;
+  let intervalMs;
+  const { deps, calls, handlers } = fakeRuntime({
+    setTimer: (fn, ms) => { tick = fn; intervalMs = ms; return Symbol('usb-timer'); },
+  });
+
+  await main(deps);
+
+  assert.equal(calls.connectionConfigOptions.file, join('/x', 'state', 'connection.json'));
+  assert.equal(calls.connectionLoad, 1);
+  assert.deepEqual(calls.setConnection, [{ mode: 'usb', serial: DEFAULT_USB_SERIAL }]);
+  assert.ok(calls.order.indexOf('setConnection') < calls.order.indexOf('ensureUsb'));
+  assert.ok(calls.order.indexOf('setConnection') < calls.order.indexOf('spawn'));
+  assert.equal(calls.ensureUsb, 1);
+  assert.equal(intervalMs, 5_000);
+
+  tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.ensureUsb, 2);
+  assert.deepEqual(calls.ensureWireless, []);
+
+  await handlers.get('SIGINT')();
+});
+
+test('stored wireless mode skips USB enforcement and reconnects only the active address', async () => {
+  let tick;
+  const address = '10.0.0.5:5555';
+  const { deps, calls, handlers } = fakeRuntime({
+    createConnectionConfigStore: () => ({
+      load: () => ({ mode: 'wifi', address }),
+      save: () => ({}),
+      publicConfig: () => ({ mode: 'wifi', address }),
+    }),
+    setTimer: (fn) => { tick = fn; return Symbol('wifi-timer'); },
+  });
+
+  await main(deps);
+
+  assert.deepEqual(calls.setConnection, [{ mode: 'wifi', serial: address }]);
+  assert.ok(calls.order.indexOf('setConnection') < calls.order.indexOf('spawn'));
+  assert.equal(calls.ensureUsb, 0);
+  assert.deepEqual(calls.ensureWireless, []);
+
+  tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.ensureUsb, 0);
+  assert.deepEqual(calls.ensureWireless, [address]);
+
+  await handlers.get('SIGINT')();
+});
+
+test('PHONE_SERIAL wireless override takes precedence over stored USB mode', async () => {
+  const { deps, calls, handlers } = fakeRuntime({
+    env: { PHONE_SERIAL: ' 10.0.0.8:5555 ' },
+  });
+
+  await main(deps);
+
+  assert.deepEqual(calls.setConnection, [{ mode: 'wifi', serial: '10.0.0.8:5555' }]);
+  assert.equal(calls.ensureUsb, 0);
+
+  await handlers.get('SIGINT')();
+});
+
+test('the supervision timer honors a live mode change on its next tick', async () => {
+  let tick;
+  const { deps, calls, handlers, adbClient } = fakeRuntime({
+    setTimer: (fn) => { tick = fn; return Symbol('mode-timer'); },
+  });
+
+  await main(deps);
+  tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.ensureUsb, 2);
+
+  adbClient.setConnection({ mode: 'wifi', serial: '10.0.0.9:5555' });
+  tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.ensureUsb, 2);
+  assert.deepEqual(calls.ensureWireless, ['10.0.0.9:5555']);
+
+  adbClient.setConnection({ mode: 'usb', serial: DEFAULT_USB_SERIAL });
+  tick();
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(calls.ensureUsb, 3);
+  assert.deepEqual(calls.ensureWireless, ['10.0.0.9:5555']);
 
   await handlers.get('SIGINT')();
 });
@@ -301,13 +432,20 @@ test('repeated signals after startup trigger cleanup only once', async () => {
 // ---------------------------------------------------------------------------
 
 test('main wires the chat config store and ghost agent into the bridge, ghost before bridge', async () => {
-  const { deps, calls, handlers, chatConfig } = fakeRuntime();
+  const { deps, calls, handlers, chatConfig, adbClient } = fakeRuntime();
 
   await main(deps);
 
-  assert.equal(calls.ghostOptions.serial, DEFAULT_USB_SERIAL);
+  assert.equal(calls.ghostOptions.serial, undefined);
+  assert.equal(typeof calls.ghostOptions.getSerial, 'function');
+  assert.equal(calls.ghostOptions.getSerial(), DEFAULT_USB_SERIAL);
+  adbClient.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+  assert.equal(calls.ghostOptions.getSerial(), '10.0.0.5:5555');
   assert.equal(calls.ghostStart, 1);
-  assert.deepEqual(calls.order.slice(2, 5), ['spawn', 'ghostStart', 'bridgeStart']);
+  assert.deepEqual(
+    calls.order.filter((entry) => ['spawn', 'ghostStart', 'bridgeStart'].includes(entry)),
+    ['spawn', 'ghostStart', 'bridgeStart'],
+  );
   assert.equal(calls.bridgeOptions.chatConfig, chatConfig);
   assert.equal(typeof calls.bridgeOptions.chat.run, 'function');
 
