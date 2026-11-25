@@ -668,6 +668,11 @@ body.chat-open .chat-fab {
   color: var(--ui-text-color);
 }
 
+#chat-dock svg {
+  /* The path has no fill attribute; make the icon follow the button colour. */
+  fill: currentColor;
+}
+
 body.chat-docked #chat-dock {
   color: #5fd39b;
 }

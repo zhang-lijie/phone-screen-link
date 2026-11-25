@@ -25,4 +25,7 @@ test('chat dock button colour follows the docked state', () => {
   assert.match(ruleBody('#chat-dock'), /color:\s*var\(--ui-text-color\)\s*;/);
   assert.match(ruleBody('body.chat-docked #chat-dock'), /color:\s*#5fd39b\s*;/i);
   assert.match(ruleBody('body.chat-docked #chat-dock:hover'), /color:\s*#5fd39b\s*;/i);
+  // The SVG icon has no fill attribute; without this rule its path stays
+  // black no matter what colour the button has.
+  assert.match(ruleBody('#chat-dock svg'), /fill:\s*currentColor\s*;/);
 });
