@@ -20,6 +20,13 @@ class TokenTest(unittest.TestCase):
         self.assertFalse(srv.check_token({"X-Token": token}, token, fragment=None))
 
 
+class ChatDefaultsTest(unittest.TestCase):
+    def test_default_model_endpoint_and_name(self):
+        self.assertEqual(srv.CHAT_DEFAULTS["baseUrl"], "http://192.168.3.123:8080/v1")
+        self.assertEqual(srv.CHAT_DEFAULTS["model"], "local")
+        self.assertEqual(srv.CHAT_DEFAULTS["apiKey"], "")
+
+
 class DetectTest(unittest.TestCase):
     def test_detect_marks_missing_git_as_error_and_adb_as_warning(self):
         with tempfile.TemporaryDirectory() as d:

@@ -3,8 +3,8 @@ import { dirname } from 'node:path';
 
 export const DEFAULT_CHAT_CONFIG = Object.freeze({
   enabled: false,
-  baseUrl: 'http://127.0.0.1:11434/v1',
-  model: '',
+  baseUrl: 'http://192.168.3.123:8080/v1',
+  model: 'local',
   maxSteps: 100,
   screenshot: true,
   apiKey: '',

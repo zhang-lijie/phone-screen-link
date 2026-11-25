@@ -173,8 +173,8 @@ ghost 连接失败时其子进程传输会被立即关闭，不留残余进程�
 | 设置项 | 字段 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | 启用聊天 | `enabled` | 关 | 关闭时右下角图标不显示，后端 `/chat` 直接返回 503 `chat disabled`，不发任何模型请求 |
-| 模型服务地址 | `baseUrl` | `http://127.0.0.1:11434/v1` | OpenAI 兼容 base URL，本项目按 `<baseUrl>/chat/completions` 请求；填自己的局域网地址 |
-| 模型名 | `model` | 空 | **留空即禁用**（后端强制，不信任前端开关）；需支持 function/tool calling |
+| 模型服务地址 | `baseUrl` | `http://192.168.3.123:8080/v1` | OpenAI 兼容 base URL，本项目按 `<baseUrl>/chat/completions` 请求；填自己的局域网地址 |
+| 模型名 | `model` | `local` | 需支持 function/tool calling；留空仍会禁用聊天 |
 | API Key | `apiKey` | 空 | 可选，局域网模型通常不需要；只在请求里作 `Authorization: Bearer`，**从不回传前端**（前端只看到 `hasApiKey`） |
 | 截图发给模型 | `screenshot` | 开 | 关闭时连 `screenshot` 工具都不暴露给模型；开启时截图以 base64 data URI 作视觉消息回灌，模型不支持视觉会报可读错误 |
 | 单次最大步数 | `maxSteps` | 100 | agent 一次请求最多调几轮工具（界面 1–100），到了就停并提示「已达到最大步数」。后端强制：整数收敛到 1–100，非整数丢弃 |

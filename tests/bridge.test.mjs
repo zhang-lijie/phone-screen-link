@@ -288,7 +288,7 @@ function postChatConfig(address, body, headers = {}) {
 const PUBLIC_CHAT_CONFIG_DEFAULT = {
   enabled: false,
   baseUrl: DEFAULT_CHAT_CONFIG.baseUrl,
-  model: '',
+  model: DEFAULT_CHAT_CONFIG.model,
   maxSteps: 100,
   screenshot: true,
   hasApiKey: false,
@@ -544,7 +544,7 @@ test('chat: POST /chat returns 503 without running the agent when enabled is fal
 
 test('chat: POST /chat returns 503 without running the agent when model is empty', async (t) => {
   const chatConfig = tempChatConfig(t);
-  chatConfig.save({ enabled: true }); // enabled, but model stays ''
+  chatConfig.save({ enabled: true, model: '' }); // explicitly empty still disables
   const chat = fakeChat();
   await withBridge({ chatConfig, chat }, async (address) => {
     const res = await postChat(address, { message: '打开设置', lang: 'zh' });

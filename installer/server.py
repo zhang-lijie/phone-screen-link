@@ -137,8 +137,8 @@ def set_state(**fields):
 
 CHAT_DEFAULTS = {
     "enabled": True,
-    "baseUrl": "http://127.0.0.1:11434/v1",
-    "model": "",
+    "baseUrl": "http://192.168.3.123:8080/v1",
+    "model": "local",
     "apiKey": "",
     "maxSteps": 100,
     "screenshot": True,

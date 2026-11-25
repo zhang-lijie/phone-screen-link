@@ -162,8 +162,8 @@ test('model client: forwards abort signal to fetch', async () => {
   assert.equal(fetchImpl.calls[0].options.signal, controller.signal);
 });
 
-test('model client: defaults baseUrl to the local OpenAI-compatible endpoint', async () => {
+test('model client: defaults baseUrl to the configured OpenAI-compatible endpoint', async () => {
   const fetchImpl = fakeFetch(CONTENT_RESPONSE);
   await chatCompletion({ model: 'm', messages: [], fetchImpl });
-  assert.equal(fetchImpl.calls[0].url, 'http://127.0.0.1:11434/v1/chat/completions');
+  assert.equal(fetchImpl.calls[0].url, 'http://192.168.3.123:8080/v1/chat/completions');
 });
