@@ -354,22 +354,38 @@ test('connection service: wireless-to-wireless connect failure leaves the previo
   assert.deepEqual(readFileSync(file), before);
 });
 
-test('connection service: discovery rejects an offline or missing USB serial before shell or mDNS work', async (t) => {
-  for (const state of ['offline', 'missing']) {
+test('connection service: discovery rejects explicit offline or device-not-found output before shell or mDNS work', async (t) => {
+  const cases = [
+    { label: 'offline stdout', output: 'offline\n' },
+    {
+      label: 'not-found stderr',
+      failure: Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
+        stderr: `error: device '${USB_SERIAL}' not found\n`,
+      }),
+    },
+    {
+      label: 'offline stderr',
+      failure: Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
+        stderr: `error: device '${USB_SERIAL}' offline\n`,
+      }),
+    },
+  ];
+
+  for (const { label, output, failure } of cases) {
     const calls = [];
     const { service } = setup(t, {
       runner: async (args) => {
         calls.push(args);
         if (args[0] === '-s' && args[2] === 'get-state') {
-          if (state === 'missing') throw new Error('device not found');
-          return 'offline\n';
+          if (failure) throw failure;
+          return output;
         }
         throw new Error('discovery must stop when USB is offline');
       },
     });
 
     await assert.rejects(service.discoverWirelessConfig(), (err) => {
-      assert.equal(err.code, 'USB_OFFLINE');
+      assert.equal(err.code, 'USB_OFFLINE', label);
       assert.match(err.message, /USB device is offline/);
       return true;
     });
@@ -389,6 +405,31 @@ test('connection service: discovery preserves a missing-adb failure instead of r
 
   await assert.rejects(service.discoverWirelessConfig(), (err) => err === failure);
   assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
+});
+
+test('connection service: discovery propagates host-side get-state rejections instead of reporting USB offline', async (t) => {
+  const failures = [
+    new Error('get-state failed unexpectedly'),
+    Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
+      stderr: "error: cannot connect to daemon at 'tcp:5037': Connection refused\n",
+    }),
+    Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
+      stderr: 'error: failed to open transport: Permission denied\n',
+    }),
+  ];
+
+  for (const failure of failures) {
+    const calls = [];
+    const { service } = setup(t, {
+      runner: async (args) => {
+        calls.push(args);
+        throw failure;
+      },
+    });
+
+    await assert.rejects(service.discoverWirelessConfig(), (err) => err === failure);
+    assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
+  }
 });
 
 test('connection service: status reports usbOnline from the configured USB serial while wireless is active', async (t) => {

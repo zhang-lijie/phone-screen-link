@@ -1050,6 +1050,46 @@ test('wireless: POST auto maps ADB failures to 502', async () => {
   });
 });
 
+test('wireless: POST auto distinguishes explicit USB absence from host-side get-state failures', async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'bridge-wireless-get-state-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const store = createConnectionConfigStore({ file: join(dir, 'connection.json') });
+  store.save({ mode: 'usb', address: '' });
+  const cases = [
+    {
+      label: 'device not found',
+      failure: Object.assign(new Error('Command failed: adb get-state'), {
+        stderr: `error: device '${DEFAULT_USB_SERIAL}' not found\n`,
+      }),
+      status: 409,
+      error: 'USB device is offline',
+    },
+    {
+      label: 'adb server failure',
+      failure: Object.assign(new Error('adb server failure'), {
+        stderr: "error: cannot connect to daemon at 'tcp:5037': Connection refused\n",
+      }),
+      status: 502,
+      error: 'adb server failure',
+    },
+  ];
+
+  for (const { label, failure, status, error } of cases) {
+    const calls = [];
+    const adb = createAdb(async (args) => {
+      calls.push(args);
+      throw failure;
+    });
+    const connectionService = createConnectionService({ adb, store, usbSerial: DEFAULT_USB_SERIAL });
+    await withBridge({ adb, connectionService }, async (address) => {
+      const res = await postWirelessAuto(address);
+      assert.equal(res.status, status, label);
+      assert.deepEqual(await res.json(), { error });
+    });
+    assert.deepEqual(calls, [['-s', DEFAULT_USB_SERIAL, 'get-state']]);
+  }
+});
+
 test('wireless: concurrent pair and USB requests wait for serialized transactions and return fresh status', async (t) => {
   const dir = mkdtempSync(join(tmpdir(), 'bridge-wireless-concurrency-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));

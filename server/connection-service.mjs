@@ -14,6 +14,19 @@ function usbOfflineError() {
   return Object.assign(new Error('USB device is offline'), { code: 'USB_OFFLINE' });
 }
 
+function adbFailureText(err) {
+  const output = [err?.stderr, err?.stdout]
+    .filter((value) => value !== undefined && value !== null && String(value).trim() !== '')
+    .map((value) => String(value));
+  if (output.length > 0) return output.join('\n');
+  return err instanceof Error ? err.message : String(err ?? '');
+}
+
+function isExplicitUsbOfflineError(err) {
+  const output = adbFailureText(err);
+  return /(?:^|\n)[ \t]*(?:error:[ \t]*)?device(?:[ \t]+(?:'[^']+'|"[^"]+"))?(?:[ \t]+is)?[ \t]+(?:not[ \t]+found|offline)\b/i.test(output);
+}
+
 function matchingPort(services, service, host) {
   return services.find((entry) => entry.service === service && entry.host === host)?.port ?? null;
 }
@@ -153,7 +166,10 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
     try {
       usbState = String(await adb.getState(usbSerial)).trim();
     } catch (err) {
-      if (isMissingAdbError(err)) throw err;
+      // ADB exits nonzero for an absent serial, but the same shape carries
+      // server/permission failures. Only explicit device absence is a 409;
+      // every other host-side failure must reach the bridge as a 502.
+      if (isMissingAdbError(err) || !isExplicitUsbOfflineError(err)) throw err;
       throw usbOfflineError();
     }
     if (usbState !== 'device') throw usbOfflineError();
