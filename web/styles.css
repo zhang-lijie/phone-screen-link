@@ -895,7 +895,7 @@ body.chat-open .chat-fab {
   color: #fff;
 }
 
-body.chat-docked #chat-dock {
+body.chat-docked #chat-dock:not(:disabled) {
   color: #10b981;
 }
 

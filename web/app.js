@@ -1028,12 +1028,12 @@ dockSplitter.addEventListener('pointerup', endSplitDrag);
 dockSplitter.addEventListener('pointercancel', endSplitDrag);
 
 window.addEventListener('resize', () => {
+  setChatDockButton();
   if (chatDocked) {
     if (!canDock(window.innerWidth)) {
       exitChatDock();
       setStatus('chat.dockNarrow');
     } else {
-      setChatDockButton();
       const ratio = readChatSplitRatio(localStorage);
       if (ratio !== null) applyDockWidth(ratio * dockAvailableWidth());
       else updateDockCentering();
