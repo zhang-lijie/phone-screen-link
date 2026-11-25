@@ -147,6 +147,9 @@ export async function main(deps = {}) {
   let ghost;
   let ghostStart;
   let ghostStopped = false;
+  // The bridge owns the active device; chat follows it. A null selection
+  // means "no device chosen" and never becomes a ghost device argument.
+  let activeSerial = DEFAULT_USB_SERIAL;
   let usbInterval;
   let bridgeStopped = false;
   let engineKilled = false;
@@ -265,17 +268,27 @@ export async function main(deps = {}) {
             userText,
             lang,
             // Real lock/sleep state comes from ADB; ghost has no lock tool.
-            deps: { isLocked: () => adbClient.isLocked() },
+            deps: { isLocked: () => adbClient.isLocked(activeSerial) },
           }),
           runCommand: (commandId, lang) => runPresetCommand({
             commandId,
             lang,
-            deps: { ghost, isLocked: () => adbClient.isLocked() },
+            deps: { ghost, isLocked: () => adbClient.isLocked(activeSerial) },
           }),
         }
       : undefined;
 
-    bridge = makeBridge({ adb: adbClient, port: bridgeStep.port, chatConfig, chat });
+    bridge = makeBridge({
+      adb: adbClient,
+      port: bridgeStep.port,
+      chatConfig,
+      chat,
+      onSelectionChange: (next) => {
+        if (!next) return; // chat stays on the last real device while unselected
+        activeSerial = next;
+        ghost?.setSerial?.(next);
+      },
+    });
     bridgeStart = bridge.start();
     const { address } = await bridgeStart;
     bridgeStart = undefined;

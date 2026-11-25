@@ -21,9 +21,17 @@ export function createGhostClient(
   const TransportImpl = deps.StdioClientTransport ?? StdioClientTransport;
 
   let client = null;
-  // Names of tools whose schema requires a `device` argument. Populated by
+  let activeSerial = serial;
+  // Names of tools whose schema accepts a `device` argument. Populated by
   // listTools(); null until then (we inject conservatively in that case).
-  let deviceRequiredTools = null;
+  let deviceTools = null;
+
+  // The bridge calls this when the user picks a different phone. ghost's
+  // DEFAULT_DEVICE is fixed at spawn, so per-tool arguments are what actually
+  // retarget an already-running session.
+  function setSerial(next) {
+    activeSerial = next;
+  }
 
   async function start() {
     if (client) return;
@@ -65,9 +73,10 @@ export function createGhostClient(
   async function listTools() {
     const result = await requireClient().listTools();
     const tools = Array.isArray(result?.tools) ? result.tools : [];
-    deviceRequiredTools = new Set(
+    deviceTools = new Set(
       tools
-        .filter((tool) => Array.isArray(tool?.inputSchema?.required) && tool.inputSchema.required.includes('device'))
+        .filter((tool) => Object.hasOwn(tool?.inputSchema?.properties ?? {}, 'device')
+          || (Array.isArray(tool?.inputSchema?.required) && tool.inputSchema.required.includes('device')))
         .map((tool) => tool.name),
     );
     return tools;
@@ -77,11 +86,11 @@ export function createGhostClient(
     const args = { ...toolArgs };
     // ghost tools are device-scoped. Inject/override the serial so neither
     // internal calls nor model-generated calls can target the wrong device.
-    if (serial && (deviceRequiredTools === null || deviceRequiredTools.has(name))) {
-      args.device = serial;
+    if (activeSerial && (deviceTools === null || deviceTools.has(name))) {
+      args.device = activeSerial;
     }
     return requireClient().callTool({ name, arguments: args });
   }
 
-  return { start, stop, listTools, callTool };
+  return { start, stop, listTools, callTool, setSerial };
 }

@@ -227,3 +227,35 @@ test('ghost client: callTool overrides a wrong device with the configured serial
     name: 'wait', arguments: { seconds: 1 },
   });
 });
+
+test('ghost client: setSerial retargets tools whose schema has an optional device', async () => {
+  const deps = makeDeps();
+  const client = createGhostClient({ serial: SERIAL }, deps);
+  await client.start();
+  deps.clients[0].tools = [
+    { name: 'list_apps', inputSchema: { type: 'object', properties: { device: { type: 'string' } } } },
+    { name: 'wait', inputSchema: { type: 'object', properties: { seconds: { type: 'number' } } } },
+  ];
+  await client.listTools();
+  client.setSerial('SERIAL-B');
+
+  await client.callTool('list_apps', {});
+  assert.deepEqual(deps.clients[0].callToolCalls[0], {
+    name: 'list_apps', arguments: { device: 'SERIAL-B' },
+  });
+  await client.callTool('wait', { seconds: 1 });
+  assert.deepEqual(deps.clients[0].callToolCalls[1], {
+    name: 'wait', arguments: { seconds: 1 },
+  });
+});
+
+test('ghost client: setSerial before listTools still overrides device', async () => {
+  const deps = makeDeps();
+  const client = createGhostClient({ serial: SERIAL }, deps);
+  await client.start();
+  client.setSerial('SERIAL-B');
+  await client.callTool('tap', { device: 'wrong' });
+  assert.deepEqual(deps.clients[0].callToolCalls[0], {
+    name: 'tap', arguments: { device: 'SERIAL-B' },
+  });
+});

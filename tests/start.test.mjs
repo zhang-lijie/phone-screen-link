@@ -74,6 +74,7 @@ function fakeRuntime(overrides = {}) {
     ghostStop: 0,
     ghostListTools: 0,
     ghostCalls: [],
+    ghostSerials: [],
     kill: 0,
     setTimer: 0,
     clearTimer: 0,
@@ -82,6 +83,7 @@ function fakeRuntime(overrides = {}) {
   const interval = Symbol('usb-interval');
   const child = { kill: () => { calls.order.push('kill'); calls.kill += 1; } };
   const ghost = {
+    setSerial: (serial) => { calls.ghostSerials.push(serial); },
     start: async () => { calls.order.push('ghostStart'); calls.ghostStart += 1; },
     stop: async () => { calls.order.push('ghostStop'); calls.ghostStop += 1; },
     listTools: async () => { calls.ghostListTools += 1; return []; },
@@ -415,4 +417,29 @@ test('a ghost that fails to start leaves the bridge and buttons running without 
   assert.equal(calls.ghostStop, 1); // stopped exactly once
   assert.equal(calls.bridgeStop, 1);
   assert.equal(calls.kill, 1);
+});
+
+
+test('device selection retargets ghost tools and the phone lock check', async () => {
+  const { deps, calls, handlers, chatConfig } = fakeRuntime();
+  const lockedSerials = [];
+  deps.adb.isLocked = async (serial) => { lockedSerials.push(serial); return true; };
+
+  await main(deps);
+  assert.equal(typeof calls.bridgeOptions.onSelectionChange, 'function');
+
+  calls.bridgeOptions.onSelectionChange('SERIAL-B');
+  assert.deepEqual(calls.ghostSerials, ['SERIAL-B']);
+
+  await calls.bridgeOptions.chat.run('回到桌面', 'zh', chatConfig.load());
+  assert.deepEqual(lockedSerials, ['SERIAL-B']);
+
+  // With no device selected the bridge gates chat before it runs; chat keeps
+  // the last real serial rather than pointing ghost at null.
+  calls.bridgeOptions.onSelectionChange(null);
+  assert.deepEqual(calls.ghostSerials, ['SERIAL-B']);
+  await calls.bridgeOptions.chat.run('回到桌面', 'zh', chatConfig.load());
+  assert.deepEqual(lockedSerials, ['SERIAL-B', 'SERIAL-B']);
+
+  await handlers.get('SIGINT')();
 });
