@@ -2,7 +2,6 @@ import { isMissingAdbError } from './adb.mjs';
 
 const MDNS_POLL_INTERVAL_MS = 500;
 const MDNS_POLL_TIMEOUT_MS = 8_000;
-const MDNS_POLL_ATTEMPTS = MDNS_POLL_TIMEOUT_MS / MDNS_POLL_INTERVAL_MS + 1;
 const PAIRING_SERVICE = '_adb-tls-pairing._tcp';
 const CONNECT_SERVICE = '_adb-tls-connect._tcp';
 
@@ -67,7 +66,7 @@ function redactedError(err, pairingCode) {
   return new Error(redacted || 'wireless connection failed');
 }
 
-export function createConnectionService({ adb, store, usbSerial, sleep = defaultSleep }) {
+export function createConnectionService({ adb, store, usbSerial, sleep = defaultSleep, now = Date.now }) {
   let mutationTail = Promise.resolve();
 
   function serializeMutation(work) {
@@ -185,7 +184,8 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
     let pairPort = null;
 
     if (host) {
-      for (let attempt = 0; attempt < MDNS_POLL_ATTEMPTS; attempt += 1) {
+      const deadline = now() + MDNS_POLL_TIMEOUT_MS;
+      while (now() < deadline) {
         let services = [];
         try {
           services = await adb.mdnsServices();
@@ -198,7 +198,9 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
           connectPort = matchingPort(services, CONNECT_SERVICE, host);
         }
         if (pairPort !== null) break;
-        if (attempt + 1 < MDNS_POLL_ATTEMPTS) await sleep(MDNS_POLL_INTERVAL_MS);
+        const remaining = deadline - now();
+        if (remaining <= 0) break;
+        await sleep(Math.min(MDNS_POLL_INTERVAL_MS, remaining));
       }
     }
 

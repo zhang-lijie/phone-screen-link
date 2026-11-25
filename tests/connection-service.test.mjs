@@ -22,14 +22,25 @@ const PAIR_INPUT = Object.freeze({
   connectPort: '5555',
 });
 
-function setup(t, { runner, initial, stored, sleep } = {}) {
+function setup(t, { runner, initial, stored, sleep, now } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'connection-service-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const file = join(dir, 'connection.json');
   const store = createConnectionConfigStore({ file });
   store.save(stored ?? { mode: 'usb', address: '' });
   const adb = createAdb(runner ?? (async () => ''), initial ?? { mode: 'usb', serial: 'USB-ORIGINAL' });
-  const service = createConnectionService({ adb, store, usbSerial: USB_SERIAL, sleep });
+  let testSleep = sleep;
+  let testNow = now;
+  if (testSleep && testNow === undefined) {
+    let elapsed = 0;
+    testNow = () => elapsed;
+    const injectSleep = testSleep;
+    testSleep = async (ms) => {
+      elapsed += ms;
+      await injectSleep(ms);
+    };
+  }
+  const service = createConnectionService({ adb, store, usbSerial: USB_SERIAL, sleep: testSleep, now: testNow });
   return { adb, store, service, file };
 }
 
@@ -476,7 +487,7 @@ test('connection service: discovery returns an IP-only partial result when wirel
     ['-s', USB_SERIAL, 'get-state'],
     ['-s', USB_SERIAL, 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
     ['-s', USB_SERIAL, 'shell', 'getprop', 'service.adb.tls.port'],
-    ...Array.from({ length: 17 }, () => ['mdns', 'services']),
+    ...Array.from({ length: 16 }, () => ['mdns', 'services']),
   ]);
   assert.deepEqual(sleeps, Array(16).fill(500));
 });
@@ -610,8 +621,38 @@ test('connection service: pairing poll timeout returns connect data with an acti
     connectPort: CONNECT_PORT,
     warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
   });
-  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 17);
+  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 16);
   assert.deepEqual(sleeps, Array(16).fill(500));
+});
+
+test('connection service: mDNS execution time counts toward the absolute polling deadline', async (t) => {
+  const calls = [];
+  const sleeps = [];
+  let elapsed = 0;
+  const runner = discoveryRunner({ calls, services: [] });
+  const { service } = setup(t, {
+    runner: async (args) => {
+      if (args[0] === 'mdns') elapsed += 7_800;
+      return runner(args);
+    },
+    now: () => elapsed,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      elapsed += ms;
+    },
+  });
+
+  assert.deepEqual(await service.discoverWirelessConfig(), {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: null,
+    connectHost: PHONE_IP,
+    connectPort: CONNECT_PORT,
+    warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
+  });
+  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 1);
+  assert.deepEqual(sleeps, [200]);
+  assert.equal(elapsed, 8_000);
 });
 
 test('connection service: mDNS command failures preserve connect data and return a pairing warning', async (t) => {
@@ -637,7 +678,7 @@ test('connection service: mDNS command failures preserve connect data and return
     connectPort: CONNECT_PORT,
     warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
   });
-  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 17);
+  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 16);
   assert.deepEqual(sleeps, Array(16).fill(500));
 });
 
