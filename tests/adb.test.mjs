@@ -115,3 +115,145 @@ test('getScreenTimeout parses settings value; setScreenTimeout writes it', async
   await adb.setScreenTimeout(3600000);
   assert.deepEqual(calls.at(-1), ['-s', DEFAULT_USB_SERIAL, 'shell', 'settings', 'put', 'system', 'screen_off_timeout', '3600000']);
 });
+
+test('createAdb defaults to USB and exposes mutable connection state', () => {
+  const adb = createAdb(async () => '');
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), DEFAULT_USB_SERIAL);
+
+  adb.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+  assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getSerial(), '10.0.0.5:5555');
+});
+
+test('pair runs adb pair with the pairing endpoint and code', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return ''; });
+  await adb.pair({ host: '192.168.1.20', port: 37123, code: '123456' });
+  assert.deepEqual(calls, [['pair', '192.168.1.20:37123', '123456']]);
+});
+
+test('connect runs adb connect with the supplied address', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return ''; });
+  await adb.connect('192.168.1.20:5555');
+  assert.deepEqual(calls, [['connect', '192.168.1.20:5555']]);
+});
+
+test('getState checks the explicit serial rather than the active serial', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return 'device\n'; }, {
+    mode: 'wifi',
+    serial: '10.0.0.5:5555',
+  });
+  await adb.getState('10.0.0.6:5555');
+  assert.deepEqual(calls, [['-s', '10.0.0.6:5555', 'get-state']]);
+});
+
+test('keyEvent and wakeScreen follow the active serial after a connection switch', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return ''; });
+  adb.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+
+  await adb.keyEvent('home');
+  await adb.wakeScreen();
+  assert.deepEqual(calls, [
+    ['-s', '10.0.0.5:5555', 'shell', 'input', 'keyevent', '3'],
+    ['-s', '10.0.0.5:5555', 'shell', 'input', 'keyevent', '224'],
+  ]);
+});
+
+test('screen timeout commands follow the active serial after a connection switch', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return args.includes('get') ? '30000\n' : ''; });
+  adb.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+
+  assert.equal(await adb.getScreenTimeout(), 30000);
+  await adb.setScreenTimeout(3600000);
+  assert.deepEqual(calls, [
+    ['-s', '10.0.0.5:5555', 'shell', 'settings', 'get', 'system', 'screen_off_timeout'],
+    ['-s', '10.0.0.5:5555', 'shell', 'settings', 'put', 'system', 'screen_off_timeout', '3600000'],
+  ]);
+});
+
+test('isLocked reads power and trust from the active serial after a connection switch', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    return args.includes('power') ? 'mWakefulness=Awake\n' : 'deviceLocked=0\n';
+  });
+  adb.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+
+  assert.equal(await adb.isLocked(), false);
+  assert.deepEqual(calls, [
+    ['-s', '10.0.0.5:5555', 'shell', 'dumpsys', 'power'],
+    ['-s', '10.0.0.5:5555', 'shell', 'dumpsys', 'trust'],
+  ]);
+});
+
+test('isOnline uses get-state without enumerating devices in wireless mode', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return 'device\n'; }, {
+    mode: 'wifi',
+    serial: '10.0.0.5:5555',
+  });
+  assert.equal(await adb.isOnline(), true);
+  assert.deepEqual(calls, [['-s', '10.0.0.5:5555', 'get-state']]);
+});
+
+test('ensureWirelessConnected returns true without connect or devices when already online', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return 'device\n'; });
+  assert.equal(await adb.ensureWirelessConnected('10.0.0.5:5555'), true);
+  assert.deepEqual(calls, [['-s', '10.0.0.5:5555', 'get-state']]);
+});
+
+test('ensureWirelessConnected reconnects an offline address and confirms it without devices', async () => {
+  const calls = [];
+  let stateChecks = 0;
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === 'get-state' || args[2] === 'get-state') stateChecks += 1;
+    return stateChecks === 1 ? 'offline\n' : 'device\n';
+  });
+
+  assert.equal(await adb.ensureWirelessConnected('10.0.0.5:5555'), true);
+  assert.deepEqual(calls, [
+    ['-s', '10.0.0.5:5555', 'get-state'],
+    ['connect', '10.0.0.5:5555'],
+    ['-s', '10.0.0.5:5555', 'get-state'],
+  ]);
+});
+
+test('ensureWirelessConnected still reconnects when the initial get-state exits nonzero', async () => {
+  const calls = [];
+  let stateChecks = 0;
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[2] === 'get-state') {
+      stateChecks += 1;
+      if (stateChecks === 1) throw new Error('error: device offline');
+      return 'device\n';
+    }
+    return '';
+  });
+
+  assert.equal(await adb.ensureWirelessConnected('10.0.0.5:5555'), true);
+  assert.deepEqual(calls, [
+    ['-s', '10.0.0.5:5555', 'get-state'],
+    ['connect', '10.0.0.5:5555'],
+    ['-s', '10.0.0.5:5555', 'get-state'],
+  ]);
+});
+
+test('ensureWirelessConnected returns false if the address remains offline', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return 'offline\n'; });
+  assert.equal(await adb.ensureWirelessConnected('10.0.0.5:5555'), false);
+  assert.equal(calls.some((args) => args[0] === 'devices'), false);
+  assert.deepEqual(calls, [
+    ['-s', '10.0.0.5:5555', 'get-state'],
+    ['connect', '10.0.0.5:5555'],
+    ['-s', '10.0.0.5:5555', 'get-state'],
+  ]);
+});
