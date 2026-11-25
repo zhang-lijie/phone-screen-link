@@ -26,6 +26,7 @@ import {
   effectiveLanguage,
   isDegradedStream,
   isUsableContext,
+  isWirelessPairingSuccess,
   loadSettings,
   lockHint,
   normalizeSettings,
@@ -347,6 +348,7 @@ function applyLanguage() {
   renderChatSaveStatus();
   renderWirelessStatus();
   renderWirelessFeedback();
+  renderWirelessStorage();
 }
 
 // Every status update funnels through here as a key + variables, so a language
@@ -545,15 +547,19 @@ const wirelessFields = {
 };
 const wirelessStatusEl = document.getElementById('wireless-status');
 const wirelessFeedbackEl = document.getElementById('wireless-feedback');
+const wirelessStorageEl = document.getElementById('wireless-storage');
+const wirelessWarning = document.getElementById('wireless-warning');
 const wirelessSubmit = document.getElementById('wireless-submit');
 const wirelessUsb = document.getElementById('wireless-usb');
 const wirelessClear = document.getElementById('wireless-clear');
 let wirelessTrigger = null;
 let wirelessBusy = false;
+let wirelessRefreshTimer = null;
 let wirelessState = { mode: 'unknown', serial: '—', online: false };
 let wirelessFeedbackKey = '';
 let wirelessFeedbackVars = {};
 let wirelessFeedbackIsError = false;
+let wirelessStorageKey = '';
 const wirelessRequests = createWirelessRequestGuard();
 
 function fillWirelessForm(values = DEFAULT_WIRELESS_PAIRING) {
@@ -571,7 +577,14 @@ function readWirelessForm() {
 }
 
 function saveWirelessFormFromDom() {
-  saveWirelessPairing(() => localStorage, readWirelessForm());
+  const result = saveWirelessPairing(() => localStorage, readWirelessForm());
+  wirelessWarning.hidden = !result.saved;
+  if (!result.saved) {
+    setWirelessStorageFeedback('wireless.error.save');
+  } else {
+    setWirelessStorageFeedback('');
+  }
+  return result;
 }
 
 function setWirelessFeedback(key, vars = {}, isError = false) {
@@ -587,6 +600,16 @@ function renderWirelessFeedback() {
     : '';
   wirelessFeedbackEl.classList.toggle('is-error', wirelessFeedbackIsError);
   wirelessFeedbackEl.classList.toggle('is-success', Boolean(wirelessFeedbackKey && !wirelessFeedbackIsError));
+}
+
+function setWirelessStorageFeedback(key) {
+  wirelessStorageKey = key;
+  renderWirelessStorage();
+}
+
+function renderWirelessStorage() {
+  wirelessStorageEl.textContent = wirelessStorageKey ? t(wirelessStorageKey) : '';
+  wirelessStorageEl.hidden = !wirelessStorageKey;
 }
 
 function renderWirelessStatus() {
@@ -648,18 +671,48 @@ async function refreshWirelessStatus() {
   }
 }
 
+function trapWirelessFocus(event) {
+  if (event.key !== 'Tab' || wirelessOverlay.hidden) return;
+  const focusable = [...wirelessPanel.querySelectorAll(
+    'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+  )].filter((el) => el.getClientRects().length > 0);
+  if (focusable.length === 0) {
+    event.preventDefault();
+    wirelessPanel.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  if (!wirelessPanel.contains(document.activeElement)) {
+    event.preventDefault();
+    first.focus();
+  } else if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
 function openWireless() {
   if (!wirelessOverlay.hidden) return;
   wirelessTrigger = document.activeElement;
   fillWirelessForm(loadWirelessPairing(() => localStorage));
+  saveWirelessFormFromDom();
   setWirelessFeedback('');
   wirelessOverlay.hidden = false;
   wirelessFields.pairHost.focus();
   refreshWirelessStatus();
+  wirelessRefreshTimer = setInterval(refreshWirelessStatus, SCREEN_STATE_POLL_MS);
 }
 
 function closeWireless() {
   wirelessOverlay.hidden = true;
+  if (wirelessRefreshTimer !== null) {
+    clearInterval(wirelessRefreshTimer);
+    wirelessRefreshTimer = null;
+  }
   if (wirelessTrigger instanceof HTMLElement && wirelessTrigger.isConnected) wirelessTrigger.focus();
 }
 
@@ -673,7 +726,7 @@ function activateDevice(serial) {
 async function pairWireless() {
   if (wirelessBusy) return;
   const values = readWirelessForm();
-  saveWirelessPairing(() => localStorage, values);
+  saveWirelessFormFromDom();
   const body = {
     pairHost: values.pairHost.trim(),
     pairPort: Number(values.pairPort),
@@ -705,6 +758,10 @@ async function pairWireless() {
     }
     if (!applyWirelessStatus(payload)) {
       setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+      return;
+    }
+    if (!isWirelessPairingSuccess(payload)) {
+      setWirelessFeedback('wireless.error.offline', {}, true);
       return;
     }
     if (!activateDevice(payload.serial)) {
@@ -770,10 +827,13 @@ wirelessClear.addEventListener('click', () => {
     return;
   }
   fillWirelessForm(DEFAULT_WIRELESS_PAIRING);
+  wirelessWarning.hidden = true;
+  setWirelessStorageFeedback('');
   setWirelessFeedback(result.feedbackKey, {}, result.isError);
   wirelessFields.pairHost.focus();
 });
 document.getElementById('wireless-close').addEventListener('click', closeWireless);
+wirelessOverlay.addEventListener('keydown', trapWirelessFocus);
 wirelessOverlay.addEventListener('click', (event) => {
   if (event.target === wirelessOverlay) closeWireless();
 });
@@ -786,11 +846,15 @@ const toolboxObserver = new MutationObserver(() => {
 toolboxObserver.observe(streamEl, { childList: true, subtree: true });
 
 async function pollScreenState() {
+  const requestedDevice = DEVICE_ID;
   try {
     // Same origin as the page (port 8000), so no CORS or bridge is involved.
-    const res = await fetch(`/api/devices/screen-state?udid=${encodeURIComponent(DEVICE_ID)}`);
+    const res = await fetch(`/api/devices/screen-state?udid=${encodeURIComponent(requestedDevice)}`);
     if (!res.ok) return;
-    screenState = await res.json();
+    if (requestedDevice !== DEVICE_ID) return;
+    const nextState = await res.json();
+    if (requestedDevice !== DEVICE_ID) return;
+    screenState = nextState;
     const hint = lockHint(screenState, lang);
     if (hint !== lockMessage) {
       lockMessage = hint;

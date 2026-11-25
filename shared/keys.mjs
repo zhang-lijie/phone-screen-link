@@ -151,7 +151,9 @@ export const MESSAGES = {
     'wireless.error.request': 'Wireless request failed ({status}) — {error}',
     'wireless.error.network': 'Cannot reach the control bridge — {error}',
     'wireless.error.invalidResponse': 'The control bridge returned an invalid wireless response',
+    'wireless.error.offline': 'The wireless device is offline — it was not activated',
     'wireless.error.storage': 'Cannot access browser storage — saved pairing information was not removed',
+    'wireless.error.save': 'Browser storage is unavailable — pairing still works, but the form will be lost on reload',
     'wireless.warning': 'Warning: the full form, including the pairing code, is saved in plain text in this browser\'s localStorage. Anyone with access to this browser profile can read it. Pairing codes expire; if pairing fails, get the current code from the phone. Use “Clear saved pairing information” to remove it.',
     // Chat feature: floating button, panel and the settings group. The
     // config itself lives on the backend; these are display strings only.
@@ -347,7 +349,9 @@ export const MESSAGES = {
     'wireless.error.request': '无线请求失败（{status}）— {error}',
     'wireless.error.network': '无法连接控制桥 — {error}',
     'wireless.error.invalidResponse': '控制桥返回了无效的无线状态',
+    'wireless.error.offline': '无线设备已离线 — 未切换活动设备',
     'wireless.error.storage': '无法访问浏览器存储 — 未删除已保存的配对信息',
+    'wireless.error.save': '浏览器存储不可用 — 仍可正常配对，但表单会在刷新后丢失',
     'wireless.warning': '警告：完整表单（含配对码）会以明文保存到此浏览器的 localStorage。能够访问此浏览器配置文件的任何人都可读取。配对码会过期；如果配对失败，请从手机获取最新配对码。使用“清除已保存配对信息”可删除。',
     'chat.button': '聊天助手',
     'chat.title': '聊天助手',
@@ -559,11 +563,26 @@ export function saveWirelessPairing(storageOrProvider, values) {
   const normalized = normalizeWirelessPairing(values);
   try {
     const storage = resolveWirelessStorage(storageOrProvider);
-    storage?.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify(normalized));
+    if (!storage || typeof storage.setItem !== 'function') {
+      return { saved: false, values: normalized };
+    }
+    storage.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify(normalized));
+    return { saved: true, values: normalized };
   } catch {
-    // Private browsing or a full quota: the current session still has the form.
+    // Private browsing or a full quota: pairing remains usable for this
+    // session, but the caller must not claim the form will survive reload.
+    return { saved: false, values: normalized };
   }
-  return normalized;
+}
+
+export function isWirelessPairingSuccess(payload) {
+  return Boolean(
+    payload
+    && payload.mode === 'wifi'
+    && typeof payload.serial === 'string'
+    && payload.serial.trim() !== ''
+    && payload.online === true,
+  );
 }
 
 export function clearWirelessPairing(storageOrProvider) {

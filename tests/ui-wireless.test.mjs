@@ -128,7 +128,7 @@ test('wireless form persistence preserves every field, including the pairing cod
     connectHost: '192.168.3.10',
     connectPort: '39541',
   };
-  assert.deepEqual(keys.saveWirelessPairing(storage, form), form);
+  assert.deepEqual(keys.saveWirelessPairing(storage, form), { saved: true, values: form });
   assert.deepEqual(JSON.parse(storage.data.get('phone-link-wireless-pairing')), form);
   assert.deepEqual(keys.loadWirelessPairing(storage), form);
 });
@@ -149,6 +149,21 @@ test('wireless form persistence tolerates missing, malformed and non-string valu
   assert.deepEqual(keys.loadWirelessPairing(storage), { ...empty, pairHost: 'phone.local' });
 });
 
+test('wireless form save reports success only when a storage provider accepts the write', () => {
+  const values = { pairHost: 'phone.local', pairCode: '123456' };
+  const normalized = {
+    pairHost: 'phone.local', pairPort: '', pairCode: '123456', connectHost: '', connectPort: '',
+  };
+  assert.deepEqual(keys.saveWirelessPairing(undefined, values), { saved: false, values: normalized });
+  assert.deepEqual(keys.saveWirelessPairing({}, values), { saved: false, values: normalized });
+  assert.deepEqual(keys.saveWirelessPairing(() => { throw new Error('storage denied'); }, values), {
+    saved: false, values: normalized,
+  });
+
+  const storage = memoryStorage();
+  assert.deepEqual(keys.saveWirelessPairing(storage, values), { saved: true, values: normalized });
+});
+
 test('clear removes the saved wireless form and storage failures never break the UI', () => {
   const storage = memoryStorage();
   keys.saveWirelessPairing(storage, { pairHost: 'phone.local', pairCode: '123456' });
@@ -164,7 +179,8 @@ test('clear removes the saved wireless form and storage failures never break the
     pairHost: '', pairPort: '', pairCode: '', connectHost: '', connectPort: '',
   });
   assert.deepEqual(keys.saveWirelessPairing(unavailable, { pairCode: '123456' }), {
-    pairHost: '', pairPort: '', pairCode: '123456', connectHost: '', connectPort: '',
+    saved: false,
+    values: { pairHost: '', pairPort: '', pairCode: '123456', connectHost: '', connectPort: '' },
   });
   assert.equal(keys.clearWirelessPairing(unavailable), false);
 });
@@ -191,7 +207,7 @@ test('failed wireless clear reports an error without claiming the code was remov
   assert.deepEqual(keys.loadWirelessPairing(inaccessible), {
     pairHost: '', pairPort: '', pairCode: '', connectHost: '', connectPort: '',
   });
-  assert.equal(keys.saveWirelessPairing(inaccessible, { pairCode: '654321' }).pairCode, '654321');
+  assert.equal(keys.saveWirelessPairing(inaccessible, { pairCode: '654321' }).values.pairCode, '654321');
 
   const successful = memoryStorage();
   keys.saveWirelessPairing(successful, { pairCode: '654321' });
@@ -210,7 +226,7 @@ test('wireless form automatically saves and reloads all inputs, and clear resets
   assert.match(app, /saveWirelessPairing/);
   assert.match(app, /clearWirelessPairingResult/);
   assert.match(app, /fillWirelessForm\(loadWirelessPairing\(\(\) => localStorage\)\)/);
-  assert.match(app, /saveWirelessPairing\(\(\) => localStorage, readWirelessForm\(\)\)/);
+  assert.match(app, /saveWirelessFormFromDom\(\)/);
   assert.match(app, /wirelessForm\.addEventListener\('input', saveWirelessFormFromDom\)/);
   assert.match(app, /for \(const field of WIRELESS_PAIRING_FIELDS\)\s*\{\s*values\[field\] = wirelessFields\[field\]\.value;/);
   assert.match(app, /wirelessClear\.addEventListener\('click', \(\) => \{[\s\S]*?clearWirelessPairingResult\(\(\) => localStorage\)[\s\S]*?if \(!result\.cleared\)[\s\S]*?fillWirelessForm\(DEFAULT_WIRELESS_PAIRING\);/);
@@ -250,6 +266,57 @@ test('wireless actions expose pending and error states instead of failing silent
   assert.match(app, /setWirelessFeedback\('wireless\.error\.request'/);
   assert.match(app, /setWirelessFeedback\('wireless\.error\.network'/);
   assert.match(app, /setWirelessFeedback\('wireless\.error\.invalidResponse'/);
+});
+
+test('wireless storage failure is explicit, non-sensitive, and hides the plaintext persistence warning', () => {
+  assert.match(html, /id="wireless-storage"[^>]*role="status"[^>]*aria-live="polite"/);
+  assert.match(html, /id="wireless-warning"[^>]*hidden/);
+  assert.match(app, /function saveWirelessFormFromDom\(\)\s*\{[\s\S]*?const result = saveWirelessPairing\(\(\) => localStorage, readWirelessForm\(\)\);[\s\S]*?wirelessWarning\.hidden = !result\.saved;/);
+  assert.match(app, /if \(!result\.saved\)\s*\{\s*setWirelessStorageFeedback\('wireless\.error\.save'\);/);
+  assert.match(keys.MESSAGES.en['wireless.error.save'], /pairing still works/i);
+  assert.match(keys.MESSAGES.en['wireless.error.save'], /lost on reload/i);
+  assert.match(keys.MESSAGES.zh['wireless.error.save'], /仍可.*配对/);
+  assert.match(keys.MESSAGES.zh['wireless.error.save'], /刷新后丢失/);
+});
+
+test('wireless status refreshes only while the modal is visible', () => {
+  assert.match(app, /function openWireless\(\)\s*\{[\s\S]*?refreshWirelessStatus\(\);[\s\S]*?wirelessRefreshTimer = setInterval\(refreshWirelessStatus, SCREEN_STATE_POLL_MS\);/);
+  assert.match(app, /function closeWireless\(\)\s*\{[\s\S]*?clearInterval\(wirelessRefreshTimer\);/);
+  assert.match(app, /wirelessRefreshTimer = null;/);
+});
+
+test('wireless pairing success requires an online wireless target before activating it', () => {
+  assert.equal(typeof keys.isWirelessPairingSuccess, 'function');
+  assert.equal(keys.isWirelessPairingSuccess({ mode: 'wifi', serial: 'phone.local:5555', online: true }), true);
+  assert.equal(keys.isWirelessPairingSuccess({ mode: 'wifi', serial: 'phone.local:5555', online: false }), false);
+  assert.equal(keys.isWirelessPairingSuccess({ mode: 'usb', serial: 'phone.local:5555', online: true }), false);
+  assert.equal(keys.isWirelessPairingSuccess({ mode: 'wifi', serial: '', online: true }), false);
+  assert.match(app, /if \(!isWirelessPairingSuccess\(payload\)\)\s*\{[\s\S]*?setWirelessFeedback\('wireless\.error\.offline'[\s\S]*?return;/);
+});
+
+test('screen-state polling discards responses for a device that is no longer active', () => {
+  assert.match(app, /async function pollScreenState\(\)\s*\{[\s\S]*?const requestedDevice = DEVICE_ID;[\s\S]*?fetch\(`\/api\/devices\/screen-state\?udid=\$\{encodeURIComponent\(requestedDevice\)\}`\)[\s\S]*?if \(requestedDevice !== DEVICE_ID\) return;[\s\S]*?const nextState = await res\.json\(\);[\s\S]*?if \(requestedDevice !== DEVICE_ID\) return;[\s\S]*?screenState = nextState;/);
+});
+
+test('wireless modal traps Tab focus and restores the opening control on close', () => {
+  assert.match(html, /class="wireless-panel"[^>]*tabindex="-1"/);
+  assert.match(app, /function trapWirelessFocus\(event\)\s*\{[\s\S]*?event\.key !== 'Tab'[\s\S]*?wirelessPanel\.contains\(document\.activeElement\)[\s\S]*?first\.focus\(\)[\s\S]*?last\.focus\(\)/);
+  assert.match(app, /wirelessOverlay\.addEventListener\('keydown', trapWirelessFocus\)/);
+  assert.match(app, /function closeWireless\(\)\s*\{[\s\S]*?wirelessTrigger\.focus\(\);/);
+});
+
+test('all five wireless pairing and connect inputs are required', () => {
+  for (const id of [
+    'wireless-pair-host',
+    'wireless-pair-port',
+    'wireless-pair-code',
+    'wireless-connect-host',
+    'wireless-connect-port',
+  ]) {
+    const tag = html.match(new RegExp(`<input[^>]*id="${id}"[^>]*>`))?.[0];
+    assert.ok(tag, `${id} input is present`);
+    assert.match(tag, /\srequired(?:\s|>)/, `${id} must be required`);
+  }
 });
 
 test('wireless security warning explicitly covers plaintext localStorage and the pairing code in both languages', () => {

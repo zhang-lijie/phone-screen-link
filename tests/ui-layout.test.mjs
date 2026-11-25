@@ -29,6 +29,12 @@ test('chat dock button refreshes on resize in both directions', () => {
   assert.match(app, /window\.addEventListener\('resize',\s*\(\)\s*=>\s*\{\s*setChatDockButton\(\);/);
 });
 
+test('README avoids exact test-count snapshots that become stale', () => {
+  assert.doesNotMatch(readme, /共\s*256\s*个\s*node\s*用例/);
+  assert.doesNotMatch(readme, /另有\s*22\s*个\s*python\s*用例/);
+  assert.doesNotMatch(readme, /运行\s*256\s*个\s*node\s*单元测试/);
+});
+
 test('README documents the 400px stream and 240px chat dock minimums', () => {
   assert.match(readme, /画面侧最小 400px、聊天侧最小 240px/);
   assert.match(readme, /画面 ≥ 400px、聊天 ≥ 240px/);

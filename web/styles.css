@@ -370,10 +370,19 @@ body.nav-text-only #stream .control-button[data-label]::after {
 }
 
 .wireless-status,
-.wireless-feedback {
+.wireless-feedback,
+.wireless-storage {
   margin: 0 0 8px;
   line-height: 1.45;
   overflow-wrap: anywhere;
+}
+
+.wireless-storage {
+  color: #e8a49e;
+}
+
+.wireless-storage[hidden] {
+  display: none;
 }
 
 .wireless-status {
