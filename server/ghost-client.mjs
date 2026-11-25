@@ -11,6 +11,7 @@ export const DEFAULT_GHOST_ARGS = Object.freeze(['--from', 'ghost-in-the-droid',
 export function createGhostClient(
   {
     serial,
+    getSerial,
     command = DEFAULT_GHOST_COMMAND,
     args = DEFAULT_GHOST_ARGS,
     env = {},
@@ -19,6 +20,10 @@ export function createGhostClient(
 ) {
   const ClientImpl = deps.Client ?? Client;
   const TransportImpl = deps.StdioClientTransport ?? StdioClientTransport;
+
+  function currentSerial() {
+    return getSerial ? getSerial() : serial;
+  }
 
   let client = null;
   // Names of tools whose schema requires a `device` argument. Populated by
@@ -32,7 +37,7 @@ export function createGhostClient(
       args,
       // ghost selects the device via DEFAULT_DEVICE; the SDK merges these
       // over its safe inherited-environment defaults.
-      env: { ...env, DEFAULT_DEVICE: serial },
+      env: { ...env, DEFAULT_DEVICE: currentSerial() },
     });
     const next = new ClientImpl({ name: 'phone-screen-link', version: '1.0.0' });
     try {
@@ -75,10 +80,11 @@ export function createGhostClient(
 
   async function callTool(name, toolArgs = {}) {
     const args = { ...toolArgs };
+    const deviceSerial = currentSerial();
     // ghost tools are device-scoped. Inject/override the serial so neither
     // internal calls nor model-generated calls can target the wrong device.
-    if (serial && (deviceRequiredTools === null || deviceRequiredTools.has(name))) {
-      args.device = serial;
+    if (deviceSerial && (deviceRequiredTools === null || deviceRequiredTools.has(name))) {
+      args.device = deviceSerial;
     }
     return requireClient().callTool({ name, arguments: args });
   }

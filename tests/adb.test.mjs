@@ -74,6 +74,34 @@ test('ensureUsbOnly is idempotent when wifi is already gone', async () => {
   assert.equal(calls.some((a) => a[0] === 'disconnect'), false);
 });
 
+test('ensureUsbOnly skips device enumeration in wireless mode', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return devicesText; }, {
+    mode: 'wifi',
+    serial: '10.0.0.5:5555',
+  });
+
+  await adb.ensureUsbOnly();
+  assert.deepEqual(calls, []);
+});
+
+test('ensureUsbOnly does not disconnect when wireless mode starts while listing devices', async () => {
+  const calls = [];
+  let resolveList;
+  const listing = new Promise((resolve) => { resolveList = resolve; });
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    return args[0] === 'devices' ? listing : '';
+  });
+
+  const pending = adb.ensureUsbOnly();
+  adb.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+  resolveList(devicesText);
+  await pending;
+
+  assert.deepEqual(calls, [['devices']]);
+});
+
 test('keyEvent pins the usb serial', async () => {
   const calls = [];
   const adb = createAdb(async (args) => { calls.push(args); return ''; });

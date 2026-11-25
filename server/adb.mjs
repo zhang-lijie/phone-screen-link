@@ -117,7 +117,11 @@ export function createAdb(runner = defaultRunner, {
     },
 
     async ensureUsbOnly() {
-      if ((await list()).includes(WIFI_ADDRESS)) {
+      if (activeMode !== 'usb') return;
+      const devices = await list();
+      // Pairing can switch modes while `adb devices` is in flight. Re-check
+      // before disconnecting so an active wireless transport is never torn down.
+      if (activeMode === 'usb' && devices.includes(WIFI_ADDRESS)) {
         await runner(['disconnect', WIFI_ADDRESS]);
       }
     },

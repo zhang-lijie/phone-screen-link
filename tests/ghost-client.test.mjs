@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createGhostClient } from '../server/ghost-client.mjs';
+import { createAdb } from '../server/adb.mjs';
 
 const SERIAL = '2FD0221C09004177';
 
@@ -120,6 +121,28 @@ test('ghost client: callTool() passes { name, arguments } to the MCP client and 
 
   await client.callTool('tap', { x: 10, y: 20 });
   assert.deepEqual(deps.clients[0].callToolCalls[1], { name: 'tap', arguments: { x: 10, y: 20, device: SERIAL } });
+});
+
+test('ghost client: callTool follows the active adb serial after a connection switch', async () => {
+  const deps = makeDeps();
+  const adb = createAdb(async () => '', { mode: 'usb', serial: SERIAL });
+  const client = createGhostClient({ getSerial: () => adb.getSerial(), env: {} }, deps);
+  await client.start();
+
+  deps.clients[0].tools = [
+    { name: 'tap', inputSchema: { type: 'object', required: ['device'] } },
+  ];
+  await client.listTools();
+  await client.callTool('tap', { x: 1, y: 2 });
+
+  adb.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+  await client.callTool('tap', { x: 3, y: 4 });
+
+  assert.deepEqual(deps.clients[0].callToolCalls, [
+    { name: 'tap', arguments: { x: 1, y: 2, device: SERIAL } },
+    { name: 'tap', arguments: { x: 3, y: 4, device: '10.0.0.5:5555' } },
+  ]);
+  assert.equal(deps.transports[0].serverParams.env.DEFAULT_DEVICE, SERIAL);
 });
 
 test('ghost client: stop() closes the client and is safe to call repeatedly', async () => {
