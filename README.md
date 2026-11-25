@@ -74,6 +74,7 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 - **画面全屏**：画面左上角的图标按钮（悬浮提示「全屏 / 退出全屏」）可让手机画面铺满视口（隐藏工具栏），画面圆角、白色描边和间隔保持不变，按 `Esc` 也可退出。
 - **设置面板**：右侧工具栏的齿轮按钮可设置分辨率、帧率、码率、音频、语言、字体与导航条/状态条尺寸，改动立即生效并自动重启画面流。
 - **状态联动**：每 3 秒轮询手机锁屏/休眠状态并显示在状态栏，锁屏黑屏时给出明确提示。
+- **多手机选择**：状态栏显示当前手机型号与序列号末 4 位，点它可打开选择器。插入第二台后由你决定投哪台；选中的手机拔掉且只剩一台已授权设备时会自动接上；同一台手机拔插会自动重连，无需刷新页面。画面、按键和聊天始终指向同一台。
 - **多语言界面**：中文 / 英文，在设置面板切换，默认跟随浏览器语言，即时生效无需刷新；按钮文字、状态提示、锁屏/剪贴板提示、右侧工具栏的悬浮提示（tooltip），以及引擎直接绘制在画面上的画质统计文字都会一起翻译。
 - **分辨率自适应**：自动探测设备编码器能接受的尺寸，画面糊时自动降档，无需手动调参。
 - **对话控制手机**（新增）：右下角常驻对话按钮，点开聊天面板，用中英文自然语言让局域网上的 OpenAI 兼容大模型选工具，经白名单校验后由 ghost 执行点击、滑动、输入、启动应用等操作；执行步骤以 `工具 ✓/✗` 标签回显，失败给可读错误，聊天坏了不影响投屏和按钮。详见[聊天控制手机](#聊天控制手机chat-agent)。
@@ -88,6 +89,7 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 | 屏幕滚动 | 画面上的滚轮 | 引擎 `ScrollControlMessage`（触摸模式下的手指滑动） |
 | 返回 | 画面上鼠标右键 | 引擎映射 BACK，浏览器菜单已屏蔽 |
 | 截图 / 键盘 / 鼠标 / 统计 / 显示模式 / 刷新 / 剪贴板 | 右侧窄工具栏 | 引擎自带工具，带文字标签 |
+| 选择 / 更换手机 | 底部状态栏的手机名或「选择手机 (N)」 | `GET /api/devices` 列出设备，`POST /api/devices/select` 切换；选择只存浏览器 `localStorage` |
 | 设置 | 工具栏 `SET` 齿轮 | 自定义面板，见下节 |
 | 画面全屏 / 退出 | 画面左上角图标按钮（tooltip），或 `Esc` 退出 | CSS 铺满视口，全屏时隐藏工具栏，保留画面圆角与描边 |
 | 打开 / 收起聊天 | 右下角圆形对话按钮（tooltip「聊天助手」），或 `Esc` 收起 | 前端面板；按钮只在后端 `enabled` 为真时出现 |
@@ -160,8 +162,9 @@ uvx --from ghost-in-the-droid android-agent-mcp
   `engine/dependencies/adb`（引擎自带的那份）加到子进程 `PATH` 最前面，系统装了 adb 也不冲突；
   因此不需要自己软链或导出 `PATH`。这一条仍列在冒烟清单第 1 步，等待真机复核；
 - 首次运行 `uvx` 会从 PyPI 下载 `ghost-in-the-droid` 并建隔离环境，**需要联网**（或预先 `uv tool install ghost-in-the-droid` / 配置镜像）。
-- 手机仍按现有方式用 USB 连着并完成授权；ghost 用环境变量 `DEFAULT_DEVICE` 选设备，`scripts/start.mjs`
-  把固定序列号 `2FD0221C09004177` 传给 `server/ghost-client.mjs`，由它注入子进程环境。
+- 手机仍按现有方式用 USB 连着并完成授权。ghost 启动时用环境变量 `DEFAULT_DEVICE` 选设备，
+  之后页面在投屏页切换手机时，控制桥回调 `server/ghost-client.mjs` 的 `setSerial()`，
+  每次调用工具再把当前序列号注入 `device` 参数；所以聊天和投屏不会分叉到两台手机。
 
 `npm run setup` 会顺带探测 `uvx`/`uv`，缺失时只打印安装提示、**不阻断**引擎构建；
 `npm start` 时若 ghost 起不来（或 **25 秒**内没起来，例如 `uvx` 卡在下载），会打印
@@ -359,14 +362,46 @@ npm run build
 
 ## 配置
 
-- **设备序列号**：默认 `2FD0221C09004177`，可通过环境变量覆盖：`PHONE_SERIAL=<新序列号> npm start`。页面会从桥的 `/health` 自动读取该序列号连接新设备，聊天侧 `scripts/start.mjs` 也会把它作为 `DEFAULT_DEVICE` 注入 ghost 子进程，无需改代码。
+- **首选设备序列号**：默认 `2FD0221C09004177`，可用 `PHONE_SERIAL=<序列号> npm start` 或安装向导的「首选设备序列号」覆盖，留空表示自动选择。它只表示**优先**：在线时先用它；不在线时依次用浏览器记住的选择、唯一一台已授权设备；有多台且没有先前选择时，页面会让你选。选择结果只存在浏览器 `localStorage`，不需要重启服务，也不写后端状态文件。
 
 - **adb 路径**：默认依次使用 `PHONE_ADB`、`engine/dependencies/adb/adb`（引擎自带）、`PATH` 里的 `adb`；前两个由启动脚本和引擎自动维护，一般不用设置。
 - **设备必须支持 ADB**：本项目基于 ADB/scrcpy，只认 ADB 设备。华为 HDC 模式（`lsusb` 显示 `HDC Device`、USB ID `12d1:1101`）或纯血鸿蒙设备无法连接，需在手机开发者选项开启 **USB 调试（ADB）** 并切到传输文件（MTP）模式；纯鸿蒙 NEXT 无 ADB，不适用本方案。
-- **端口**：引擎 `8000`，控制桥 `8100`（`/keyevent`、`/chat`、`/api/chat-config` 共用），在 `scripts/start.mjs` 中配置。
+- **端口**：引擎 `8000`，控制桥 `8100`（`/health`、`/api/devices`、`/keyevent`、`/chat`、`/api/chat-config` 共用），在 `scripts/start.mjs` 中配置。
 - **USB 限制**：`scripts/start.mjs` 启动时及每 5 秒断开 Wi‑Fi ADB `192.168.3.123:5555`；无线连接不会被接受。
 - **聊天配置**：存在 `state/chat.json`（gitignore），由设置面板的「聊天」分组写；想直接改（例如删掉 `apiKey`）就编辑这个文件，字段见[聊天设置](#聊天设置6-项存在后端)。
 - **ghost 启动方式**：`uvx --from ghost-in-the-droid android-agent-mcp` 固定在 `server/ghost-client.mjs` 的 `DEFAULT_GHOST_COMMAND` / `DEFAULT_GHOST_ARGS`，不读环境变量；换启动方式（例如 `uv tool run` 或本地克隆的 `python3 -m gitd.mcp_server`）改这两个常量。
+
+## 多设备选择
+
+状态栏上的手机入口有三态：已选中时显示「型号 · 序列号末 4 位」，多台未选时显示「选择手机 (N)」，
+没有设备时显示「等待手机连接」。点开后每行给出型号、完整序列号和状态；未授权 / 离线的设备可见但不可选，
+未授权行会提示在手机上允许 USB 调试。聊天正在回复时禁止切换，避免一轮工具调用跨两台手机。
+
+选中规则由控制桥决定，每 2 秒随页面轮询重新计算：
+
+1. 当前选中设备仍在线 → 保持；
+2. 否则浏览器 `localStorage` 记住的设备在线 → 恢复它；
+3. 否则 `PHONE_SERIAL` / 安装器首选设备在线 → 用它；
+4. 否则只有一台已授权设备 → 自动选它；
+5. 否则 `selected: null`，等待用户选择，此时按键/聊天返回 409，不会打到任何手机。
+
+设备相关接口（只允许 `127.0.0.1:8000` / `localhost:8000` 的 Origin，其他来源的 POST 返回 403）：
+
+| 方法 | 路径 | 响应 |
+| --- | --- | --- |
+| `GET` | `/api/devices` | `{ devices, selected, preferred, adbMissing }`；`devices` 每项为 `{ serial, state, model, product, transport, selectable }` |
+| `POST` | `/api/devices/select` | `{ serial }` → `200 { ok, selected }`；`400 serial required`；`409 device not available` |
+| `GET` | `/health` | `{ ok, online, serial, devices, preferred }`；`serial` 是当前选中设备，未选时为 `null` |
+
+### 手动验收清单
+
+- 0 / 1 / 2 台已授权设备：分别显示等待、自动投屏、等待选择；
+- 插入第二台：状态栏出现「选择手机 (2)」，选中后 HOME 只打到新设备；
+- 未授权设备：列表里可见但按钮禁用，提示允许 USB 调试；
+- 选中的手机拔掉且只剩一台：自动切到剩下那台并重连；
+- 同一台手机拔插：自动重连，无需刷新页面；
+- 聊天回复进行中点设备入口：提示先等对话结束；
+- 刷新页面：恢复到上次选中的手机。
 
 ## 窗口与全屏
 
@@ -391,6 +426,8 @@ npm run build
 | 现象 | 处理 |
 | --- | --- |
 | 状态栏显示 `Engine unavailable` | 按「引擎安装」完成 `npm run setup`，再运行 `npm start` |
+| 插了两台手机但状态栏不让你选，或选中后按键打到旧手机 | `curl http://127.0.0.1:8100/api/devices` 看 `devices` / `selected`；`selected` 为 `null` 时按键与聊天都会返回 409，需要先在页面点状态栏选择 |
+| 选中的手机拔掉后画面停住 | 若还有一台已授权设备，桥会在 2 秒内自动切过去；若有多台则重新选择；若只有未授权设备，需在手机上允许 USB 调试 |
 | 启动直接退出，日志里是 `Error: spawn adb ENOENT` | 本机没有 adb，且引擎自带的 adb 还没下载完。当前版本会继续启动并等待引擎在后台装好 adb（日志会打印 `adb is not installed yet`）；若长时间仍无画面，装系统 adb（Arch/Omarchy：`sudo pacman -S android-tools`）后重启，或重新运行 `npm run setup` |
 | 启动报 `engine did not become ready` | 代理环境下 Node 的 `fetch` 不走系统代理，引擎可选依赖下载会超时；启动脚本检测到代理时已自动注入 `NODE_USE_ENV_PROXY=1` 与 `--use-system-ca`，可检查代理/NO_PROXY 设置后重试 |
 | 画面糊、状态栏显示 `248x512` | 在设置里选「自动」或 `1080`；日志中会出现编码器 `IllegalArgumentException` |

@@ -251,3 +251,10 @@ class DarwinGateTest(unittest.TestCase):
                                   capture_output=True, text=True, env=env, cwd=d)
             self.assertNotEqual(proc.returncode, 0)
             self.assertIn("arm64", proc.stdout + proc.stderr)
+
+
+class DeviceLabelTest(unittest.TestCase):
+    def test_wizard_describes_serial_as_preferred_and_optional(self):
+        html = (Path(__file__).resolve().parents[1] / "installer" / "web" / "index.html").read_text(encoding="utf-8")
+        self.assertIn("首选设备序列号", html)
+        self.assertIn("留空自动选择", html)
