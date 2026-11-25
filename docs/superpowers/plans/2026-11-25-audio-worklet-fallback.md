@@ -18,6 +18,7 @@
 - `setVolume()` and the successful `resume()` path are unchanged; a context closed during `resume()` is handled silently.
 - The worklet remains the preferred path; `ScriptProcessorNode` is only a fallback.
 - Existing engine patches (loopback, wheel, keyboard focus, audio volume, resize, darwin) must keep applying.
+- Tracked behavioral tests use Node's built-in `stripTypeScriptTypes` and therefore run on the project's Node 24+ toolchain.
 
 ## Review Focus
 
@@ -33,7 +34,8 @@
 
 **Files:**
 - Modify: `scripts/setup.mjs` (add `AUDIO_WORKLET_FALLBACK_PATCHES`; call it in `applyEnginePatches`)
-- Test: `tests/setup.test.mjs`
+- Behavioral test: `tests/audioPlayerFallback.test.mjs`
+- Fixture: `tests/fixtures/AudioPlayer.v0.5.13.ts`
 
 **Interfaces:**
 - Consumes: the existing patch object shape `{ file, from, to }` and `applyPatch(patch, description)` in `scripts/setup.mjs`.
@@ -82,6 +84,8 @@ test('audio fallback patches cover the startup race, timeout and ScriptProcessor
   }
 });
 ```
+
+Also add `tests/fixtures/AudioPlayer.v0.5.13.ts` (pristine pinned upstream source) and `tests/audioPlayerFallback.test.mjs`. The latter applies every audio patch to the fixture, strips erasable TypeScript with Node's built-in API, and executes the generated class against fake Web Audio objects. It must cover: worklet success, immediate rejection, hanging load/timeout, stop during load, overlapping stop/start, underrun silence, the 50-block queue cap, repeated stop, and the resume/stop race.
 
 - [ ] **Step 2: Run test to verify it fails**
 
@@ -342,7 +346,7 @@ Expected: all tests pass, including every setup patch assertion.
 - [ ] **Step 5: Commit**
 
 ```bash
-git add scripts/setup.mjs tests/setup.test.mjs
+git add scripts/setup.mjs tests/setup.test.mjs tests/audioPlayerFallback.test.mjs tests/fixtures/AudioPlayer.v0.5.13.ts package.json
 git commit -m "feat: patch engine audio to survive worklet failures"
 ```
 

@@ -40,6 +40,7 @@
 ## 验证
 
 - `npm test` 全绿；`tests/setup.test.mjs` 增加补丁锚点与关键构造（超时、`createScriptProcessor`、竞态检查）断言。
+- `tests/audioPlayerFallback.test.mjs` 把 7 个补丁应用到固定的 v0.5.13 源码 fixture，再用伪 Web Audio 执行真实 `AudioPlayer`：覆盖 worklet 成功、立即拒绝、1500ms 挂起、加载中 stop、重叠 stop/start、队列上限/静音补齐、resume 竞态与重复 stop；不依赖 gitignored 的 `engine/`。
 - 真实 Chrome 实测：首次 `248x512 → 522x1080` 降级重连后不再出现音频 error，状态为已连接。
 - 模拟 worklet 失败：页面内让 `addModule` 拒绝后重连，出现 fallback 警告、无未捕获错误、`AudioContext` 保持 running。
 - 模拟打开设置后立即 Apply：`resume()` 与 `stop()` 交错时不产生未捕获 rejection。
