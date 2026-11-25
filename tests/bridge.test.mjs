@@ -8,10 +8,57 @@ import { createBridge } from '../server/bridge.mjs';
 import { DEFAULT_USB_SERIAL } from '../server/adb.mjs';
 import { DEFAULT_CHAT_CONFIG, createChatConfigStore } from '../server/chat-config.mjs';
 
+const fakeDevice = {
+  serial: DEFAULT_USB_SERIAL,
+  state: 'device',
+  model: 'NOH AN01',
+  product: 'NOH-AN01',
+  transport: 'usb:1-5',
+  selectable: true,
+};
+
 const fakeAdb = {
+  listDevices: async () => [fakeDevice],
   isOnline: async () => true,
   keyEvent: async (key) => { fakeAdb.last = key; },
 };
+
+function usb(serial, state = 'device', model = 'Phone') {
+  return {
+    serial,
+    state,
+    model,
+    product: '',
+    transport: 'usb:1-1',
+    selectable: state === 'device',
+  };
+}
+
+// A device list that is independent of DEFAULT_USB_SERIAL, for selection tests.
+function deviceAdb(devices, overrides = {}) {
+  const adb = {
+    listDevices: async () => devices,
+    isOnline: async (serial) => devices.some((device) => device.serial === serial && device.selectable),
+    keyEvent: async (key, serial) => { adb.last = { key, serial }; },
+    wakeScreen: async (serial) => { adb.woke = serial; },
+    getScreenTimeout: async () => 30000,
+    setScreenTimeout: async (ms, serial) => { adb.lastSet = { ms, serial }; },
+    ...overrides,
+  };
+  return adb;
+}
+
+async function getDevices(address, extraHeaders = {}) {
+  return fetch(`${address}/api/devices`, { headers: extraHeaders });
+}
+
+async function selectDevice(address, body, extraHeaders = {}) {
+  return fetch(`${address}/api/devices/select`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', ...extraHeaders },
+    body: JSON.stringify(body),
+  });
+}
 
 async function withBridge(options, fn) {
   const bridge = createBridge({ adb: fakeAdb, port: 0, ...options });
@@ -38,14 +85,18 @@ test('health reports online', async () => {
   await withBridge({}, async (address) => {
     const res = await fetch(`${address}/health`);
     assert.equal(res.status, 200);
-    assert.deepEqual(await res.json(), { ok: true, online: true, serial: DEFAULT_USB_SERIAL });
+    assert.deepEqual(await res.json(), {
+      ok: true, online: true, serial: DEFAULT_USB_SERIAL, devices: 1, preferred: DEFAULT_USB_SERIAL,
+    });
   });
 });
 
 test('health reports offline from adb', async () => {
-  await withBridge({ adb: { isOnline: async () => false, keyEvent: fakeAdb.keyEvent } }, async (address) => {
+  await withBridge({ adb: { listDevices: async () => [fakeDevice], isOnline: async () => false, keyEvent: fakeAdb.keyEvent } }, async (address) => {
     const res = await fetch(`${address}/health`);
-    assert.deepEqual(await res.json(), { ok: true, online: false, serial: DEFAULT_USB_SERIAL });
+    assert.deepEqual(await res.json(), {
+      ok: true, online: false, serial: DEFAULT_USB_SERIAL, devices: 1, preferred: DEFAULT_USB_SERIAL,
+    });
   });
 });
 
@@ -83,7 +134,7 @@ test('keyevent rejects unknown key', async () => {
 
 test('keyevent returns 503 when device offline', async () => {
   fakeAdb.last = undefined;
-  const offlineAdb = { isOnline: async () => false, keyEvent: async (key) => { offlineAdb.last = key; } };
+  const offlineAdb = { listDevices: async () => [fakeDevice], isOnline: async () => false, keyEvent: async (key) => { offlineAdb.last = key; } };
   await withBridge({ adb: offlineAdb }, async (address) => {
     const res = await postKey(address, 'home');
     assert.equal(res.status, 503);
@@ -156,7 +207,9 @@ test('multi-chunk oversized body returns a single 413 without crashing the bridg
 
     // The service must still be alive and serving after the oversized POST.
     const res = await fetch(`${address}/health`);
-    assert.deepEqual(await res.json(), { ok: true, online: true, serial: DEFAULT_USB_SERIAL });
+    assert.deepEqual(await res.json(), {
+      ok: true, online: true, serial: DEFAULT_USB_SERIAL, devices: 1, preferred: DEFAULT_USB_SERIAL,
+    });
   });
 });
 
@@ -183,7 +236,7 @@ test('authorized origin receives ACAO on success and error responses', async () 
     assert.equal(oversized.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
   });
 
-  await withBridge({ adb: { isOnline: async () => false, keyEvent: async () => {} } }, async (address) => {
+  await withBridge({ adb: { listDevices: async () => [fakeDevice], isOnline: async () => false, keyEvent: async () => {} } }, async (address) => {
     const offline = await postKey(address, 'home', originHeaders);
     assert.equal(offline.status, 503);
     assert.equal(offline.headers.get('access-control-allow-origin'), ALLOWED_ORIGIN);
@@ -698,6 +751,7 @@ test('chat-command: rejects missing command and when chat unavailable', async ()
 
 test('chat-screen: wake saves timeout and sets 1h; restore writes original back', async () => {
   const fake = {
+    listDevices: async () => [fakeDevice],
     isOnline: async () => true,
     keyEvent: async () => {},
     wakeScreen: async () => { fake.woke = true; },
@@ -725,6 +779,7 @@ test('chat-screen: wake saves timeout and sets 1h; restore writes original back'
 
 test('chat-screen: rejects bad action and offline device', async () => {
   const fake = {
+    listDevices: async () => [fakeDevice],
     isOnline: async () => false,
     wakeScreen: async () => {},
     getScreenTimeout: async () => 30000,
@@ -741,5 +796,120 @@ test('chat-screen: rejects bad action and offline device', async () => {
       body: JSON.stringify({ action: 'wake' }),
     });
     assert.equal(wake.status, 503);
+  });
+});
+
+
+// --------------------------------------------------------------- device picking
+
+test('GET /api/devices lists USB devices and auto-selects the only one', async () => {
+  await withBridge({ adb: deviceAdb([usb('A', 'device', 'Pixel 7')]) }, async (address) => {
+    const res = await getDevices(address);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      devices: [usb('A', 'device', 'Pixel 7')],
+      selected: 'A',
+      preferred: DEFAULT_USB_SERIAL,
+      adbMissing: false,
+    });
+  });
+});
+
+test('GET /api/devices needs a choice when two devices are present', async () => {
+  await withBridge({ adb: deviceAdb([usb('A'), usb('B')]), preferredSerial: null }, async (address) => {
+    const res = await getDevices(address);
+    assert.equal(res.status, 200);
+    const payload = await res.json();
+    assert.deepEqual(payload.devices.map((device) => device.serial), ['A', 'B']);
+    assert.equal(payload.selected, null);
+
+    const key = await postKey(address, 'home');
+    assert.equal(key.status, 409);
+    assert.deepEqual(await key.json(), { error: 'device selection required' });
+  });
+});
+
+test('POST /api/devices/select switches the serial used by keyevent', async () => {
+  const adb = deviceAdb([usb('A'), usb('B')]);
+  await withBridge({ adb, preferredSerial: null }, async (address) => {
+    const res = await selectDevice(address, { serial: 'B' });
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { ok: true, selected: 'B' });
+    assert.equal((await postKey(address, 'home')).status, 200);
+    assert.deepEqual(adb.last, { key: 'home', serial: 'B' });
+  });
+});
+
+test('POST /api/devices/select rejects unknown or unauthorised devices', async () => {
+  await withBridge({ adb: deviceAdb([usb('A'), usb('B', 'unauthorized')]), preferredSerial: null }, async (address) => {
+    for (const serial of ['Z', 'B']) {
+      const res = await selectDevice(address, { serial });
+      assert.equal(res.status, 409);
+      assert.deepEqual(await res.json(), { error: 'device not available' });
+    }
+  });
+});
+
+test('POST /api/devices/select rejects a non-string serial', async () => {
+  await withBridge({ adb: deviceAdb([usb('A')]), preferredSerial: null }, async (address) => {
+    const res = await selectDevice(address, { serial: 42 });
+    assert.equal(res.status, 400);
+    assert.deepEqual(await res.json(), { error: 'serial required' });
+  });
+});
+
+test('POST /api/devices/select rejects a disallowed origin', async () => {
+  await withBridge({ adb: deviceAdb([usb('A')]), preferredSerial: null }, async (address) => {
+    const res = await selectDevice(address, { serial: 'A' }, { origin: 'http://evil.example' });
+    assert.equal(res.status, 403);
+  });
+});
+
+test('health reports the selected serial and its online state', async () => {
+  await withBridge({
+    adb: deviceAdb([usb('A'), usb('B')]),
+    preferredSerial: null,
+  }, async (address) => {
+    let res = await fetch(`${address}/health`);
+    assert.deepEqual(await res.json(), { ok: true, online: false, serial: null, devices: 2, preferred: null });
+    await selectDevice(address, { serial: 'B' });
+    res = await fetch(`${address}/health`);
+    assert.deepEqual(await res.json(), { ok: true, online: true, serial: 'B', devices: 2, preferred: null });
+  });
+});
+
+test('onSelectionChange fires once per actual change', async () => {
+  const changes = [];
+  const adb = deviceAdb([usb('A')]);
+  await withBridge({ adb, onSelectionChange: (serial) => changes.push(serial) }, async (address) => {
+    await getDevices(address);
+    await getDevices(address);
+    assert.deepEqual(changes, ['A']);
+  });
+});
+
+test('GET /api/devices reports adbMissing while adb is still installing', async () => {
+  const adb = deviceAdb([]);
+  adb.listDevices = async () => {
+    throw Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' });
+  };
+  await withBridge({ adb }, async (address) => {
+    const res = await getDevices(address);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), { devices: [], selected: null, preferred: DEFAULT_USB_SERIAL, adbMissing: true });
+  });
+});
+
+test('chat-screen targets the selected serial', async () => {
+  const adb = deviceAdb([usb('A'), usb('B')]);
+  await withBridge({ adb, preferredSerial: null }, async (address) => {
+    await selectDevice(address, { serial: 'B' });
+    const res = await fetch(`${address}/api/chat-screen`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ action: 'wake' }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal(adb.woke, 'B');
+    assert.deepEqual(adb.lastSet, { ms: 3600000, serial: 'B' });
   });
 });

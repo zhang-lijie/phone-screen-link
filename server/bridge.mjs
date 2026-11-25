@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { KEY_CODES } from '../shared/keys.mjs';
-import { DEFAULT_USB_SERIAL } from './adb.mjs';
+import { chooseDevice } from '../shared/device-selection.mjs';
+import { DEFAULT_USB_SERIAL, isMissingAdbError } from './adb.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
@@ -9,6 +10,8 @@ const TOO_LARGE = Symbol('too-large');
 const INVALID_JSON = Symbol('invalid-json');
 const PREFLIGHT_METHODS = {
   '/health': 'GET, OPTIONS',
+  '/api/devices': 'GET, OPTIONS',
+  '/api/devices/select': 'POST, OPTIONS',
   '/keyevent': 'POST, OPTIONS',
   '/chat': 'POST, OPTIONS',
   '/api/chat-screen': 'POST, OPTIONS',
@@ -60,11 +63,57 @@ function readJsonBody(req, res) {
 // around the agent loop; `config` is the store snapshot the /chat gate already
 // loaded. `chatConfig` is the backend store: it gates /chat and backs the
 // /api/chat-config routes.
-export function createBridge({ adb, host, port, chatConfig, chat }) {
+export function createBridge({
+  adb,
+  host,
+  port,
+  chatConfig,
+  chat,
+  preferredSerial = DEFAULT_USB_SERIAL,
+  onSelectionChange,
+}) {
   const bindHost = host ?? DEFAULT_HOST;
   let server;
   let boundAddress;
   let savedScreenTimeout = null; // original timeout while chat keeps screen awake
+  let selected = null; // the one serial every device action targets
+
+  // The callback retargets chat (ghost tools and lock checks). A chat failure
+  // must never turn a device-list read into a 500.
+  function announce(next) {
+    if (!onSelectionChange) return;
+    Promise.resolve().then(() => onSelectionChange(next)).catch(() => {});
+  }
+
+  // Called before any device action: the list is the source of truth, so a
+  // phone that was unplugged stops receiving keys on the next request.
+  async function snapshot() {
+    let devices = [];
+    let adbMissing = false;
+    try {
+      devices = await adb.listDevices();
+    } catch (err) {
+      if (!isMissingAdbError(err)) throw err;
+      adbMissing = true;
+    }
+    const next = chooseDevice({ devices, selected, preferred: preferredSerial });
+    if (next !== selected) {
+      selected = next;
+      // A saved timeout belongs to the phone that was awake, not the new one.
+      savedScreenTimeout = null;
+      announce(next);
+    }
+    return { devices, adbMissing, selected };
+  }
+
+  async function requireSelected(res) {
+    const { selected: serial } = await snapshot();
+    if (!serial) {
+      sendJson(res, 409, { error: 'device selection required' });
+      return null;
+    }
+    return serial;
+  }
 
   async function handleRequest(req, res) {
     try {
@@ -95,7 +144,39 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
       }
 
       if (req.method === 'GET' && pathname === '/health') {
-        sendJson(res, 200, { ok: true, online: await adb.isOnline(), serial: DEFAULT_USB_SERIAL });
+        const { devices, selected: serial } = await snapshot();
+        const online = serial ? await adb.isOnline(serial) : false;
+        sendJson(res, 200, {
+          ok: true, online, serial, devices: devices.length, preferred: preferredSerial,
+        });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/devices') {
+        sendJson(res, 200, { ...(await snapshot()), preferred: preferredSerial });
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/devices/select') {
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        const serial = body?.serial;
+        if (typeof serial !== 'string' || serial === '') {
+          sendJson(res, 400, { error: 'serial required' });
+          return;
+        }
+        const { devices } = await snapshot();
+        if (!devices.some((device) => device.serial === serial && device.selectable)) {
+          sendJson(res, 409, { error: 'device not available' });
+          return;
+        }
+        selected = serial;
+        announce(serial);
+        sendJson(res, 200, { ok: true, selected });
         return;
       }
 
@@ -111,11 +192,13 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
           sendJson(res, 400, { error: 'unknown key' });
           return;
         }
-        if (!(await adb.isOnline())) {
+        const serial = await requireSelected(res);
+        if (!serial) return;
+        if (!(await adb.isOnline(serial))) {
           sendJson(res, 503, { error: 'device offline' });
           return;
         }
-        await adb.keyEvent(key);
+        await adb.keyEvent(key, serial);
         sendJson(res, 200, { ok: true });
         return;
       }
@@ -149,6 +232,7 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
           sendJson(res, 503, { error: 'chat disabled' });
           return;
         }
+        if (!(await requireSelected(res))) return;
         // Model/tool failures carry readable messages (model-client, agent
         // timeout): surface them as 502 so the frontend can show them in a
         // bubble. The config loaded for the gate is handed to the agent so
@@ -177,21 +261,23 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
           sendJson(res, 400, { error: 'invalid action' });
           return;
         }
-        if (!(await adb.isOnline())) {
+        const serial = await requireSelected(res);
+        if (!serial) return;
+        if (!(await adb.isOnline(serial))) {
           sendJson(res, 503, { error: 'device offline' });
           return;
         }
         try {
           if (action === 'wake') {
             if (savedScreenTimeout === null) {
-              const current = await adb.getScreenTimeout();
+              const current = await adb.getScreenTimeout(serial);
               if (current !== null) savedScreenTimeout = current;
             }
-            await adb.wakeScreen();
-            await adb.setScreenTimeout(60 * 60 * 1000); // keep awake for 1h while chatting
+            await adb.wakeScreen(serial);
+            await adb.setScreenTimeout(60 * 60 * 1000, serial); // keep awake for 1h while chatting
           } else {
             if (savedScreenTimeout !== null) {
-              await adb.setScreenTimeout(savedScreenTimeout);
+              await adb.setScreenTimeout(savedScreenTimeout, serial);
               savedScreenTimeout = null;
             }
           }
@@ -219,6 +305,7 @@ export function createBridge({ adb, host, port, chatConfig, chat }) {
           sendJson(res, 503, { error: 'chat unavailable' });
           return;
         }
+        if (!(await requireSelected(res))) return;
         try {
           const result = await chat.runCommand(body.command, lang);
           sendJson(res, 200, { reply: result.reply, ok: result.ok, steps: result.steps });
