@@ -372,6 +372,31 @@ export const AUDIO_WORKLET_FALLBACK_PATCHES = [
         this.gainNode = undefined;
         this.outputQueue = [];`,
   },
+  {
+    file: 'src/app/audio/AudioPlayer.ts',
+    from: `    async resume(): Promise<void> {
+        if (this.audioContext?.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+    }`,
+    to: `    async resume(): Promise<void> {
+        const context = this.audioContext;
+        if (context?.state !== 'suspended') return;
+        await context.resume().catch((error: unknown) => {
+            // stop() can close the context while resume() is pending. That is
+            // expected during stream replacement and must stay silent.
+            if (
+                !this.started ||
+                this.audioContext !== context ||
+                (error instanceof DOMException && error.name === 'InvalidStateError')
+            ) {
+                return;
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn('[AudioPlayer] Failed to resume audio:', message);
+        });
+    }`,
+  },
 ];
 
 // UHID input is an alternative keyboard path enabled from the engine toolbox.

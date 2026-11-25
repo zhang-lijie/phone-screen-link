@@ -39,7 +39,7 @@ test('keyboard-focus patch guards KeyInputHandler for editable targets', () => {
 
 test('audio fallback patches cover the startup race, timeout and ScriptProcessor path', () => {
   assert.ok(Array.isArray(AUDIO_WORKLET_FALLBACK_PATCHES));
-  assert.equal(AUDIO_WORKLET_FALLBACK_PATCHES.length, 6);
+  assert.equal(AUDIO_WORKLET_FALLBACK_PATCHES.length, 7);
 
   for (const patch of AUDIO_WORKLET_FALLBACK_PATCHES) {
     assert.equal(patch.file, 'src/app/audio/AudioPlayer.ts');
@@ -68,6 +68,8 @@ test('audio fallback patches cover the startup race, timeout and ScriptProcessor
     'this.enqueue(channels, numFrames)',
     'this.enqueue(channels, framesPerChannel)',
     'this.scriptNode.onaudioprocess = null',
+    'await context.resume().catch',
+    'this.audioContext !== context',
   ]) {
     assert.ok(output.includes(needle), `patch must include ${needle}`);
   }

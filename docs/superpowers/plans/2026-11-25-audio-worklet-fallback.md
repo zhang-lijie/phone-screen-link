@@ -4,7 +4,7 @@
 
 **Goal:** Stop the spurious "Failed to start audio" error when a stream is stopped during worklet startup, and keep phone audio working in browsers whose `audioWorklet.addModule()` fails or hangs.
 
-**Architecture:** Two source patches on the vendored engine's `AudioPlayer`: (1) `start()` re-checks `started`/context identity after the `addModule()` await and returns silently if `stop()` already ran; (2) `loadWorklet()` races `addModule()` against a 1500 ms timeout and falls back to a `ScriptProcessorNode` that drains a bounded queue. Both live in `scripts/setup.mjs` as `AUDIO_WORKLET_FALLBACK_PATCHES`, applied by `applyEnginePatches()`.
+**Architecture:** Source patches on the vendored engine's `AudioPlayer`: (1) `start()` re-checks `started`/context identity after the `addModule()` await and returns silently if `stop()` already ran; (2) `loadWorklet()` races `addModule()` against a 1500 ms timeout and falls back to a `ScriptProcessorNode` that drains a bounded queue; (3) `resume()` handles a context closed while its promise is pending. All live in `scripts/setup.mjs` as `AUDIO_WORKLET_FALLBACK_PATCHES`, applied by `applyEnginePatches()`.
 
 **Tech Stack:** Node ESM, `node:test`, the vendored `ws-scrcpy-web` v0.5.13 engine (TypeScript, `AudioContext`/`AudioWorklet`/`ScriptProcessorNode`, built with webpack into `engine/dist/`).
 
@@ -15,7 +15,7 @@
 - Engine is an external, gitignored dependency; every engine change must be reproducible from `scripts/setup.mjs` patches.
 - Do not change the wire protocol, `AudioDecoder` configuration, `PcmWorklet` mixing, page UI, or chat behavior.
 - `stop()` stays idempotent; a second call must not throw or close the context twice.
-- `setVolume()` and `resume()` semantics are unchanged.
+- `setVolume()` and the successful `resume()` path are unchanged; a context closed during `resume()` is handled silently.
 - The worklet remains the preferred path; `ScriptProcessorNode` is only a fallback.
 - Existing engine patches (loopback, wheel, keyboard focus, audio volume, resize, darwin) must keep applying.
 
@@ -37,7 +37,7 @@
 
 **Interfaces:**
 - Consumes: the existing patch object shape `{ file, from, to }` and `applyPatch(patch, description)` in `scripts/setup.mjs`.
-- Produces: exported `AUDIO_WORKLET_FALLBACK_PATCHES` — an array of six patches, all with `file = 'src/app/audio/AudioPlayer.ts'`; `applyEnginePatches()` applies each in order.
+- Produces: exported `AUDIO_WORKLET_FALLBACK_PATCHES` — an array of seven patches, all with `file = 'src/app/audio/AudioPlayer.ts'`; `applyEnginePatches()` applies each in order.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -46,7 +46,7 @@ In `tests/setup.test.mjs`, add `AUDIO_WORKLET_FALLBACK_PATCHES` to the import li
 ```js
 test('audio fallback patches cover the startup race, timeout and ScriptProcessor path', () => {
   assert.ok(Array.isArray(AUDIO_WORKLET_FALLBACK_PATCHES));
-  assert.equal(AUDIO_WORKLET_FALLBACK_PATCHES.length, 6);
+  assert.equal(AUDIO_WORKLET_FALLBACK_PATCHES.length, 7);
 
   for (const patch of AUDIO_WORKLET_FALLBACK_PATCHES) {
     assert.equal(patch.file, 'src/app/audio/AudioPlayer.ts');
@@ -75,6 +75,8 @@ test('audio fallback patches cover the startup race, timeout and ScriptProcessor
     'this.enqueue(channels, numFrames)',
     'this.enqueue(channels, framesPerChannel)',
     'this.scriptNode.onaudioprocess = null',
+    'await context.resume().catch',
+    'this.audioContext !== context',
   ]) {
     assert.ok(output.includes(needle), `patch must include ${needle}`);
   }
@@ -298,6 +300,31 @@ export const AUDIO_WORKLET_FALLBACK_PATCHES = [
         this.gainNode = undefined;
         this.outputQueue = [];`,
   },
+  {
+    file: 'src/app/audio/AudioPlayer.ts',
+    from: `    async resume(): Promise<void> {
+        if (this.audioContext?.state === 'suspended') {
+            await this.audioContext.resume();
+        }
+    }`,
+    to: `    async resume(): Promise<void> {
+        const context = this.audioContext;
+        if (context?.state !== 'suspended') return;
+        await context.resume().catch((error: unknown) => {
+            // stop() can close the context while resume() is pending. That is
+            // expected during stream replacement and must stay silent.
+            if (
+                !this.started ||
+                this.audioContext !== context ||
+                (error instanceof DOMException && error.name === 'InvalidStateError')
+            ) {
+                return;
+            }
+            const message = error instanceof Error ? error.message : String(error);
+            console.warn('[AudioPlayer] Failed to resume audio:', message);
+        });
+    }`,
+  },
 ];
 ```
 
@@ -310,7 +337,7 @@ In `applyEnginePatches()`, after the keyboard/UHID lines and before `AUDIO_VOLUM
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test`
-Expected: all tests pass, including the six existing setup patch tests.
+Expected: all tests pass, including every setup patch assertion.
 
 - [ ] **Step 5: Commit**
 
@@ -350,7 +377,7 @@ for (const patch of AUDIO_WORKLET_FALLBACK_PATCHES) {
 "
 ```
 
-Expected: six `patched src/app/audio/AudioPlayer.ts` lines, or fewer if some patches were already applied.
+Expected: seven `patched src/app/audio/AudioPlayer.ts` lines, or fewer if some patches were already applied.
 
 - [ ] **Step 2: Verify the source now contains the fallback**
 
