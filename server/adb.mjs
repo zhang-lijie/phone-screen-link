@@ -56,13 +56,66 @@ export function parseDevices(text) {
     .map((fields) => fields[0]);
 }
 
+// `adb devices -l` states that are worth showing in the picker. A phone that
+// has not authorised this host is still listed, so the user sees why it cannot
+// be selected instead of wondering where the phone went.
+const USB_STATES = new Set([
+  'device', 'unauthorized', 'offline', 'bootloader', 'recovery', 'sideload',
+  'connecting', 'authorizing',
+]);
+
+// Network transports (host:port) are out of scope: the bridge disconnects the
+// known wifi address and mirrors USB only.
+export function parseDeviceList(text) {
+  return String(text).split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split(/\s+/))
+    .filter((fields) => fields.length >= 2
+      && USB_STATES.has(fields[1])
+      && !fields[0].includes(':'))
+    .map((fields) => {
+      const info = {};
+      for (const field of fields.slice(2)) {
+        const at = field.indexOf(':');
+        if (at <= 0) continue;
+        const key = field.slice(0, at);
+        if (key === 'usb') info.transport = field;
+        else if (key === 'model' || key === 'product') {
+          // adb turns spaces in model names into underscores.
+          info[key] = field.slice(at + 1).replace(/_/g, ' ');
+        }
+      }
+      return {
+        serial: fields[0],
+        state: fields[1],
+        model: info.model ?? '',
+        product: info.product ?? '',
+        transport: info.transport ?? '',
+        selectable: fields[1] === 'device',
+      };
+    });
+}
+
 export function createAdb(runner = defaultRunner) {
   async function list() {
     return parseDevices(await runner(['devices']));
   }
 
+  async function listDevices() {
+    try {
+      return parseDeviceList(await runner(['devices', '-l']));
+    } catch (err) {
+      // A fresh install has no adb until the engine's download completes;
+      // that is "no devices yet", not a bridge error.
+      if (isMissingAdbError(err)) return [];
+      throw err;
+    }
+  }
+
   return {
     list,
+    listDevices,
 
     async ensureUsbOnly() {
       if ((await list()).includes(WIFI_ADDRESS)) {
@@ -70,39 +123,39 @@ export function createAdb(runner = defaultRunner) {
       }
     },
 
-    async keyEvent(key) {
+    async keyEvent(key, serial = DEFAULT_USB_SERIAL) {
       if (!Object.hasOwn(KEY_CODES, key)) {
         throw new Error('unknown key');
       }
-      await runner(['-s', DEFAULT_USB_SERIAL, 'shell', 'input', 'keyevent', String(KEY_CODES[key])]);
+      await runner(['-s', serial, 'shell', 'input', 'keyevent', String(KEY_CODES[key])]);
     },
 
-    async isOnline() {
-      return (await list()).includes(DEFAULT_USB_SERIAL);
+    async isOnline(serial = DEFAULT_USB_SERIAL) {
+      return (await list()).includes(serial);
     },
 
     // Wake the screen without unlocking (KEYCODE_WAKEUP = 224). Never bypasses
     // the keyguard; the chat lock gate still rejects locked devices.
-    async wakeScreen() {
-      await runner(['-s', DEFAULT_USB_SERIAL, 'shell', 'input', 'keyevent', '224']);
+    async wakeScreen(serial = DEFAULT_USB_SERIAL) {
+      await runner(['-s', serial, 'shell', 'input', 'keyevent', '224']);
     },
 
-    async getScreenTimeout() {
-      const out = await runner(['-s', DEFAULT_USB_SERIAL, 'shell', 'settings', 'get', 'system', 'screen_off_timeout']);
+    async getScreenTimeout(serial = DEFAULT_USB_SERIAL) {
+      const out = await runner(['-s', serial, 'shell', 'settings', 'get', 'system', 'screen_off_timeout']);
       const ms = Number.parseInt(String(out).trim(), 10);
       return Number.isFinite(ms) ? ms : null;
     },
 
-    async setScreenTimeout(ms) {
-      await runner(['-s', DEFAULT_USB_SERIAL, 'shell', 'settings', 'put', 'system', 'screen_off_timeout', String(ms)]);
+    async setScreenTimeout(ms, serial = DEFAULT_USB_SERIAL) {
+      await runner(['-s', serial, 'shell', 'settings', 'put', 'system', 'screen_off_timeout', String(ms)]);
     },
 
     // Real lock/sleep state from ADB. ghost's get_phone_state returns the
     // current app/activity only (no lock info), so the chat gate uses this
     // instead. Unreadable state fails closed: a possibly locked device must
     // never reach the model or action tools.
-    async isLocked() {
-      const serialArgs = ['-s', DEFAULT_USB_SERIAL, 'shell'];
+    async isLocked(serial = DEFAULT_USB_SERIAL) {
+      const serialArgs = ['-s', serial, 'shell'];
       const power = await runner([...serialArgs, 'dumpsys', 'power']);
       const wake = /mWakefulness=(\w+)/.exec(power)?.[1];
       if (wake !== 'Awake') return true; // asleep or unreadable

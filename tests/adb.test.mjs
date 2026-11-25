@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { join } from 'node:path';
 import {
   parseDevices,
+  parseDeviceList,
   createAdb,
   WIFI_ADDRESS,
   DEFAULT_USB_SERIAL,
@@ -48,6 +49,81 @@ test('isMissingAdbError only matches execFile ENOENT', () => {
   assert.equal(isMissingAdbError(Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' })), true);
   assert.equal(isMissingAdbError(new Error('exit 1')), false);
   assert.equal(isMissingAdbError(undefined), false);
+});
+
+const listedText = `List of devices attached
+2FD0221C09004177       device usb:1-5 product:NOH-AN01 model:NOH_AN01 device:HWNOA transport_id:1
+192.168.3.123:5555     device product:NOH-AN01 model:NOH_AN01 transport_id:2
+R58M12345              unauthorized usb:1-2 transport_id:3
+emulator-5554          offline transport_id:4
+`;
+
+test('parseDeviceList keeps USB devices with state and model', () => {
+  assert.deepEqual(parseDeviceList(listedText), [
+    {
+      serial: '2FD0221C09004177',
+      state: 'device',
+      model: 'NOH AN01',
+      product: 'NOH-AN01',
+      transport: 'usb:1-5',
+      selectable: true,
+    },
+    {
+      serial: 'R58M12345',
+      state: 'unauthorized',
+      model: '',
+      product: '',
+      transport: 'usb:1-2',
+      selectable: false,
+    },
+    {
+      serial: 'emulator-5554',
+      state: 'offline',
+      model: '',
+      product: '',
+      transport: '',
+      selectable: false,
+    },
+  ]);
+});
+
+test('parseDeviceList tolerates the header-only output', () => {
+  assert.deepEqual(parseDeviceList('List of devices attached\n'), []);
+});
+
+test('listDevices returns an empty list when adb is missing', async () => {
+  const adb = createAdb(async () => {
+    throw Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' });
+  });
+  assert.deepEqual(await adb.listDevices(), []);
+});
+
+test('listDevices asks adb for the long format', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return listedText; });
+  await adb.listDevices();
+  assert.deepEqual(calls[0], ['devices', '-l']);
+});
+
+test('per-call serial overrides the default device', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === 'devices') return 'List of devices attached\nSERIAL-B\tdevice\n';
+    if (args.includes('get')) return '30000\n';
+    if (args.includes('power')) return '  mWakefulness=Awake\n';
+    return '  deviceLocked=0\n';
+  });
+  await adb.keyEvent('home', 'SERIAL-B');
+  await adb.wakeScreen('SERIAL-B');
+  await adb.getScreenTimeout('SERIAL-B');
+  await adb.setScreenTimeout(60000, 'SERIAL-B');
+  assert.equal(await adb.isOnline('SERIAL-B'), true);
+  assert.equal(await adb.isOnline('SERIAL-A'), false);
+  assert.equal(await adb.isLocked('SERIAL-B'), false);
+  for (const call of calls.filter((args) => args[0] === '-s')) {
+    assert.equal(call[1], 'SERIAL-B');
+  }
 });
 
 test('ensureUsbOnly disconnects the wifi transport', async () => {
