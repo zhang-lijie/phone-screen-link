@@ -1,8 +1,9 @@
 import http from 'node:http';
-import { KEY_CODES } from '../shared/keys.mjs';
+import { KEY_CODES, WIRELESS_AUTO_WARNING_CODES } from '../shared/keys.mjs';
 import { DEFAULT_USB_SERIAL } from './adb.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
+const WIRELESS_WARNING_CODES = new Set(Object.values(WIRELESS_AUTO_WARNING_CODES));
 const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
 const MAX_BODY_BYTES = 64 * 1024;
 const TOO_LARGE = Symbol('too-large');
@@ -130,7 +131,7 @@ function wirelessDiscoveryPayload(result) {
     connectHost: result?.connectHost ?? null,
     connectPort: result?.connectPort ?? null,
     warnings: Array.isArray(result?.warnings)
-      ? result.warnings.filter((warning) => typeof warning === 'string')
+      ? [...new Set(result.warnings.filter((warning) => WIRELESS_WARNING_CODES.has(warning)))]
       : [],
   };
 }

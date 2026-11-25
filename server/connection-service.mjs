@@ -1,4 +1,6 @@
+import { performance } from 'node:perf_hooks';
 import { isMissingAdbError } from './adb.mjs';
+import { WIRELESS_AUTO_WARNING_CODES } from '../shared/keys.mjs';
 
 const MDNS_POLL_INTERVAL_MS = 500;
 const MDNS_POLL_TIMEOUT_MS = 8_000;
@@ -6,7 +8,10 @@ const PAIRING_SERVICE = '_adb-tls-pairing._tcp';
 const CONNECT_SERVICE = '_adb-tls-connect._tcp';
 
 function defaultSleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+  let timer;
+  const promise = new Promise((resolve) => { timer = setTimeout(resolve, ms); });
+  promise.cancel = () => clearTimeout(timer);
+  return promise;
 }
 
 function usbOfflineError() {
@@ -23,7 +28,7 @@ function adbFailureText(err) {
 
 function isExplicitUsbOfflineError(err) {
   const output = adbFailureText(err);
-  return /(?:^|\n)[ \t]*(?:error:[ \t]*)?device(?:[ \t]+(?:'[^']+'|"[^"]+"))?(?:[ \t]+is)?[ \t]+(?:not[ \t]+found|offline)\b/i.test(output);
+  return /(?:^|\n)[ \t]*(?:adb:[ \t]*)?(?:error:[ \t]*)?device(?:[ \t]+(?:'[^']+'|"[^"]+"))?(?:[ \t]+is)?[ \t]+(?:not[ \t]+found|offline)\b/i.test(output);
 }
 
 function matchingPort(services, service, host) {
@@ -66,7 +71,7 @@ function redactedError(err, pairingCode) {
   return new Error(redacted || 'wireless connection failed');
 }
 
-export function createConnectionService({ adb, store, usbSerial, sleep = defaultSleep, now = Date.now }) {
+export function createConnectionService({ adb, store, usbSerial, sleep = defaultSleep, deadlineWait = defaultSleep, now = () => performance.now() }) {
   let mutationTail = Promise.resolve();
 
   function serializeMutation(work) {
@@ -157,6 +162,39 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
     });
   }
 
+  // A runner may ignore cancellation, so the deadline is enforced by a race as
+  // well as AbortSignal. The signal terminates the real execFile child; the race
+  // guarantees that a stuck injected/custom runner cannot hold the request open.
+  async function mdnsBeforeDeadline(deadline) {
+    const remaining = deadline - now();
+    if (remaining <= 0) return [];
+
+    const controller = new AbortController();
+    const invocation = (async () => {
+      try {
+        const services = await adb.mdnsServices({ signal: controller.signal });
+        if (controller.signal.aborted || now() >= deadline) {
+          controller.abort();
+          return [];
+        }
+        return services;
+      } catch {
+        return [];
+      }
+    })();
+
+    const delay = deadlineWait(remaining);
+    const expiry = delay.then(() => {
+      controller.abort();
+      return [];
+    });
+    try {
+      return await Promise.race([invocation, expiry]);
+    } finally {
+      delay.cancel?.();
+    }
+  }
+
   // Read-only discovery is deliberately outside the mutation queue: it always
   // targets the configured USB serial and never activates or persists what it
   // finds. Missing endpoints are partial success, not a failed transaction.
@@ -188,7 +226,7 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
       while (now() < deadline) {
         let services = [];
         try {
-          services = await adb.mdnsServices();
+          services = await mdnsBeforeDeadline(deadline);
         } catch {
           // mDNS can be unavailable or still starting. Preserve the USB data
           // and keep polling rather than discarding a useful partial result.
@@ -205,12 +243,12 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
     }
 
     const warnings = [];
-    if (!host) warnings.push('Could not read the phone Wi-Fi IP address.');
+    if (!host) warnings.push(WIRELESS_AUTO_WARNING_CODES.WIFI_IP_UNAVAILABLE);
     if (connectPort === null) {
-      warnings.push('Wireless connect port is unavailable; make sure Wireless debugging is enabled.');
+      warnings.push(WIRELESS_AUTO_WARNING_CODES.CONNECT_PORT_UNAVAILABLE);
     }
     if (pairPort === null) {
-      warnings.push('Wireless pairing port is unavailable; open the Android pairing dialog and try again.');
+      warnings.push(WIRELESS_AUTO_WARNING_CODES.PAIRING_PORT_UNAVAILABLE);
     }
 
     return {

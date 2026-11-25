@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import * as keys from '../shared/keys.mjs';
+import { deferred, loadWirelessApp, response } from './ui-app-harness.mjs';
 
 const html = readFileSync(new URL('../web/index.html', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../web/app.js', import.meta.url), 'utf8');
@@ -385,14 +386,14 @@ test('wireless auto result parser preserves useful partial data and warnings', (
     pairPort: null,
     connectHost: '192.168.3.10',
     connectPort: null,
-    warnings: ['Pairing port unavailable.', 'Connect port unavailable.'],
+    warnings: ['PAIRING_PORT_UNAVAILABLE', 'CONNECT_PORT_UNAVAILABLE'],
   }), {
     usbSerial: 'USB123456',
     updates: {
       pairHost: '192.168.3.10',
       connectHost: '192.168.3.10',
     },
-    warnings: ['Pairing port unavailable.', 'Connect port unavailable.'],
+    warnings: ['PAIRING_PORT_UNAVAILABLE', 'CONNECT_PORT_UNAVAILABLE'],
     complete: false,
   });
 });
@@ -413,56 +414,240 @@ test('wireless auto result parser rejects malformed envelopes and unsafe field v
     pairPort: 0,
     connectHost: '192.168.3.10',
     connectPort: '39541',
-    warnings: ['Partial result.', '', 42, 'Partial result.'],
+    warnings: ['PAIRING_PORT_UNAVAILABLE', 'Untranslated English warning', '', 42, 'PAIRING_PORT_UNAVAILABLE'],
   }), {
     usbSerial: 'USB123456',
     updates: { connectHost: '192.168.3.10' },
-    warnings: ['Partial result.'],
+    warnings: ['PAIRING_PORT_UNAVAILABLE'],
     complete: false,
   });
 });
 
-test('wireless auto availability follows usbOnline and the shared busy state', () => {
-  assert.match(app, /let wirelessState = \{ mode: 'unknown', serial: '—', online: false, usbOnline: false \};/);
-  assert.match(app, /wirelessState = \{ mode: payload\.mode, serial: payload\.serial, online: payload\.online, usbOnline: payload\.usbOnline === true \};/);
-  assert.match(app, /function renderWirelessAutoButton\(\) \{[\s\S]*?wirelessAuto\.disabled = wirelessBusy \|\| wirelessAutoBusy \|\| wirelessState\.usbOnline !== true;[\s\S]*?wirelessAuto\.textContent = t\(wirelessAutoBusy \? 'wireless\.auto\.loading' : 'wireless\.auto'\);[\s\S]*?wirelessAuto\.classList\.toggle\('is-loading', wirelessAutoBusy\);[\s\S]*?wirelessAuto\.setAttribute\('aria-busy', String\(wirelessAutoBusy\)\);/);
-  assert.match(app, /function applyWirelessStatus\(payload\)\s*\{[\s\S]*?renderWirelessAutoButton\(\);/);
-  assert.match(app, /function setWirelessBusy\(busy\)\s*\{[\s\S]*?renderWirelessAutoButton\(\);/);
-  assert.match(app, /renderWirelessStatus\(\);\s*renderWirelessAutoButton\(\);/);
+test('wireless auto warning codes map to bilingual messages instead of verbatim backend English', () => {
+  assert.equal(typeof keys.wirelessAutoWarningKey, 'function');
+  assert.equal(keys.wirelessAutoWarningKey('WIFI_IP_UNAVAILABLE'), 'wireless.warning.wifiIpUnavailable');
+  assert.equal(keys.wirelessAutoWarningKey('CONNECT_PORT_UNAVAILABLE'), 'wireless.warning.connectPortUnavailable');
+  assert.equal(keys.wirelessAutoWarningKey('PAIRING_PORT_UNAVAILABLE'), 'wireless.warning.pairingPortUnavailable');
+  assert.equal(keys.wirelessAutoWarningKey('UNKNOWN'), null);
+  assert.equal(
+    keys.translate('en', keys.wirelessAutoWarningKey('WIFI_IP_UNAVAILABLE')),
+    'Could not read the phone Wi-Fi IP address.',
+  );
+  assert.match(keys.translate('zh', keys.wirelessAutoWarningKey('CONNECT_PORT_UNAVAILABLE')), /连接端口/);
+  assert.match(keys.translate('zh', keys.wirelessAutoWarningKey('PAIRING_PORT_UNAVAILABLE')), /配对端口/);
 });
 
-test('wireless auto-fetch calls only the read-only API, merges fields, saves and focuses the pairing code', () => {
-  assert.match(app, /const WIRELESS_AUTO_URL = `\$\{BRIDGE_BASE\}\/api\/wireless\/auto`;/);
-  const autoBody = app.match(/async function autoFetchWireless\(\) \{([\s\S]*?)\n\}/)?.[1];
-  assert.ok(autoBody, 'auto-fetch handler exists');
-  assert.match(autoBody, /if \(wirelessBusy \|\| wirelessAutoBusy \|\| wirelessState\.usbOnline !== true\) return;/);
-  assert.match(autoBody, /wirelessRequests\.mutate\(/);
-  assert.match(autoBody, /fetch\(WIRELESS_AUTO_URL,\s*\{[\s\S]*?method: 'POST',[\s\S]*?body: '\{\}'/);
-  assert.match(autoBody, /const parsed = parseWirelessAutoResult\(payload\);/);
-  assert.match(autoBody, /if \(!parsed\)\s*\{[\s\S]*?setWirelessFeedback\('wireless\.error\.invalidResponse'/);
-  assert.match(autoBody, /fillWirelessForm\(\{ \.\.\.readWirelessForm\(\), \.\.\.parsed\.updates \}\);/);
-  assert.match(autoBody, /saveWirelessFormFromDom\(\);/);
-  assert.match(autoBody, /wirelessFields\.pairCode\.focus\(\);/);
-  assert.match(autoBody, /wirelessAutoBusy = false;[\s\S]*?setWirelessBusy\(false\);/);
-  assert.doesNotMatch(autoBody, /pairWireless|WIRELESS_PAIR_URL|activateDevice|restartStream/);
-  assert.match(app, /wirelessAuto\.addEventListener\('click', autoFetchWireless\);/);
+function wirelessHarnessStorage(form = {}, language = 'en') {
+  const storage = memoryStorage();
+  storage.setItem(keys.SETTINGS_STORAGE_KEY, JSON.stringify({ language }));
+  storage.setItem(keys.WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({
+    pairHost: '', pairPort: '', pairCode: '', connectHost: '', connectPort: '', ...form,
+  }));
+  return storage;
+}
+
+const AUTO_FULL_RESULT = Object.freeze({
+  usbSerial: 'USB123456',
+  pairHost: '192.168.3.10',
+  pairPort: 43127,
+  connectHost: '192.168.3.10',
+  connectPort: 39541,
+  warnings: [],
+  pairCode: '999999',
 });
 
-test('wireless auto-fetch reports partial results as warnings without pairing', () => {
-  const autoBody = app.match(/async function autoFetchWireless\(\) \{([\s\S]*?)\n\}/)?.[1];
-  assert.ok(autoBody, 'auto-fetch handler exists');
-  assert.match(autoBody, /if \(!parsed\.complete \|\| parsed\.warnings\.length > 0\)\s*\{[\s\S]*?setWirelessFeedback\('wireless\.auto\.partial',[\s\S]*?false,\s*true\);/);
-  assert.match(autoBody, /setWirelessFeedback\('wireless\.auto\.fetched'\);/);
-  assert.match(app, /function renderWirelessFeedback\(\)\s*\{[\s\S]*?classList\.toggle\('is-warning', wirelessFeedbackIsWarning\);/);
-  assert.match(css, /\.wireless-feedback\.is-warning\s*\{[^}]*color:\s*#d8bd83;/);
-  assert.match(keys.MESSAGES.en['wireless.auto.partial'], /partial/i);
-  assert.match(keys.MESSAGES.zh['wireless.auto.partial'], /部分/);
+test('wireless auto-fetch behavior: full result merges, persists, focuses the code and restores controls', async () => {
+  const savedForm = {
+    pairHost: 'old.local', pairPort: '11111', pairCode: '654321', connectHost: 'old.local', connectPort: '22222',
+  };
+  const storage = wirelessHarnessStorage(savedForm);
+  const pendingAuto = deferred();
+  const app = await loadWirelessApp({ storage, autoResponse: () => pendingAuto.promise });
+
+  assert.equal(app.api.buttons.auto.disabled, true, 'auto-fetch starts disabled until USB status is known');
+  await app.api.refreshWirelessStatus();
+  assert.equal(app.api.buttons.auto.disabled, false);
+  assert.deepEqual(app.api.readWirelessForm(), savedForm, 'the saved form is restored before opening');
+
+  app.api.fields.pairHost.focus();
+  app.api.openWireless();
+  await app.ready();
+  assert.equal(app.document.activeElement, app.api.fields.pairHost, 'opening focuses the first pairing field');
+
+  const clicking = app.api.buttons.auto.click();
+  await app.ready();
+  assert.equal(app.api.buttons.auto.disabled, true);
+  assert.equal(app.api.buttons.auto.classList.contains('is-loading'), true);
+  assert.equal(app.api.buttons.auto.getAttribute('aria-busy'), 'true');
+  assert.equal(app.api.buttons.submit.disabled, true);
+  assert.equal(app.api.buttons.usb.disabled, true);
+  assert.equal(app.api.buttons.clear.disabled, true);
+  assert.equal(app.api.feedback.textContent, keys.MESSAGES.en['wireless.auto.loading']);
+
+  const autoRequest = app.requests.find((request) => request.url.endsWith('/api/wireless/auto'));
+  assert.equal(autoRequest.options.method, 'POST');
+  assert.equal(autoRequest.options.body, '{}');
+  assert.equal(app.requests.some((request) => request.url.endsWith('/api/wireless/pair')), false);
+
+  pendingAuto.resolve(response(200, AUTO_FULL_RESULT));
+  await clicking;
+
+  assert.deepEqual(app.api.readWirelessForm(), {
+    pairHost: '192.168.3.10', pairPort: '43127', pairCode: '654321', connectHost: '192.168.3.10', connectPort: '39541',
+  });
+  assert.deepEqual(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)), app.api.readWirelessForm());
+  assert.equal(app.api.feedback.textContent, keys.MESSAGES.en['wireless.auto.fetched']);
+  assert.equal(app.api.feedback.classList.contains('is-success'), true);
+  assert.equal(app.document.activeElement, app.api.fields.pairCode);
+  assert.equal(app.api.buttons.auto.disabled, false);
+  assert.equal(app.api.buttons.auto.classList.contains('is-loading'), false);
+  assert.equal(app.api.buttons.auto.getAttribute('aria-busy'), 'false');
+  assert.equal(app.api.buttons.submit.disabled, false);
+
+  app.api.closeWireless();
+  assert.equal(app.document.activeElement, app.api.fields.pairHost, 'closing restores the opening control');
+
+  const reloaded = await loadWirelessApp({ storage });
+  assert.deepEqual(reloaded.api.readWirelessForm(), app.api.readWirelessForm(), 'fetched fields survive reload');
 });
 
-test('wireless auto-fetch surfaces USB-offline responses and disables further fetches', () => {
-  const autoBody = app.match(/async function autoFetchWireless\(\) \{([\s\S]*?)\n\}/)?.[1];
-  assert.ok(autoBody, 'auto-fetch handler exists');
-  assert.match(autoBody, /if \(res\.status === 409\)\s*\{[\s\S]*?wirelessState\.usbOnline = false;[\s\S]*?renderWirelessAutoButton\(\);[\s\S]*?setWirelessFeedback\('wireless\.error\.usbOffline', \{\}, true\);/);
-  assert.match(keys.MESSAGES.en['wireless.error.usbOffline'], /USB.*offline/i);
-  assert.match(keys.MESSAGES.zh['wireless.error.usbOffline'], /USB.*离线/);
+test('wireless auto-fetch behavior: partial result keeps useful and existing fields and shows translated warnings', async () => {
+  const storage = wirelessHarnessStorage({
+    pairHost: 'old.local', pairPort: '11111', pairCode: '654321', connectHost: 'old.local', connectPort: '22222',
+  });
+  const app = await loadWirelessApp({
+    storage,
+    autoResponse: response(200, {
+      usbSerial: 'USB123456',
+      pairHost: '192.168.3.10',
+      pairPort: null,
+      connectHost: '192.168.3.10',
+      connectPort: null,
+      warnings: ['PAIRING_PORT_UNAVAILABLE', 'CONNECT_PORT_UNAVAILABLE'],
+    }),
+  });
+  await app.api.refreshWirelessStatus();
+
+  await app.api.autoFetchWireless();
+
+  assert.deepEqual(app.api.readWirelessForm(), {
+    pairHost: '192.168.3.10', pairPort: '11111', pairCode: '654321', connectHost: '192.168.3.10', connectPort: '22222',
+  });
+  const expectedWarnings = [
+    keys.MESSAGES.en['wireless.warning.pairingPortUnavailable'],
+    keys.MESSAGES.en['wireless.warning.connectPortUnavailable'],
+  ].join(' ');
+  assert.equal(
+    app.api.feedback.textContent,
+    keys.translate('en', 'wireless.auto.partial', { warnings: ` ${expectedWarnings}` }),
+  );
+  assert.equal(app.api.feedback.classList.contains('is-warning'), true);
+  assert.equal(app.document.activeElement, app.api.fields.pairCode);
+  assert.equal(app.requests.some((request) => request.url.endsWith('/api/wireless/pair')), false);
+});
+
+test('wireless auto-fetch behavior: warning codes are localized in Chinese', async () => {
+  const app = await loadWirelessApp({
+    storage: wirelessHarnessStorage({}, 'zh'),
+    autoResponse: response(200, {
+      usbSerial: 'USB123456',
+      pairHost: '192.168.3.10',
+      pairPort: null,
+      connectHost: '192.168.3.10',
+      connectPort: 39541,
+      warnings: ['PAIRING_PORT_UNAVAILABLE'],
+    }),
+  });
+  await app.api.refreshWirelessStatus();
+
+  await app.api.autoFetchWireless();
+
+  assert.match(app.api.feedback.textContent, /仅获取到部分无线调试信息/);
+  assert.match(app.api.feedback.textContent, /配对端口/);
+  assert.doesNotMatch(app.api.feedback.textContent, /PAIRING_PORT_UNAVAILABLE|unavailable/);
+});
+
+test('wireless auto-fetch behavior: a 409 preserves the form, reports offline and disables further fetches', async () => {
+  const savedForm = {
+    pairHost: 'old.local', pairPort: '11111', pairCode: '654321', connectHost: 'old.local', connectPort: '22222',
+  };
+  const storage = wirelessHarnessStorage(savedForm);
+  const app = await loadWirelessApp({ storage, autoResponse: response(409, { error: 'USB device is offline' }) });
+  await app.api.refreshWirelessStatus();
+  app.api.fields.pairHost.focus();
+
+  await app.api.autoFetchWireless();
+
+  assert.deepEqual(app.api.readWirelessForm(), savedForm);
+  assert.equal(app.api.feedback.textContent, keys.MESSAGES.en['wireless.error.usbOffline']);
+  assert.equal(app.api.feedback.classList.contains('is-error'), true);
+  assert.equal(app.api.buttons.auto.disabled, true);
+  assert.equal(app.api.buttons.auto.getAttribute('aria-busy'), 'false');
+  assert.equal(app.document.activeElement, app.api.fields.pairHost);
+
+  const requestsBefore = app.requests.length;
+  await app.api.buttons.auto.click();
+  await app.api.autoFetchWireless();
+  assert.equal(app.requests.length, requestsBefore, 'a disabled/offline control cannot issue another request');
+});
+
+test('wireless auto-fetch behavior: disabled state follows USB availability and form input persists', async () => {
+  const storage = wirelessHarnessStorage();
+  const app = await loadWirelessApp({ storage, usbOnline: false });
+
+  assert.equal(app.api.buttons.auto.disabled, true);
+  const requestsBefore = app.requests.length;
+  await app.api.autoFetchWireless();
+  assert.equal(app.requests.length, requestsBefore);
+
+  app.api.applyWirelessStatus({ mode: 'usb', serial: 'USB123456', online: true, usbOnline: false });
+  assert.equal(app.api.buttons.auto.disabled, true);
+  app.api.applyWirelessStatus({ mode: 'usb', serial: 'USB123456', online: true, usbOnline: true });
+  assert.equal(app.api.buttons.auto.disabled, false);
+
+  app.api.fields.pairPort.value = '37123';
+  await app.api.form.dispatch('input');
+  assert.equal(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)).pairPort, '37123');
+  assert.equal(app.api.warning.hidden, false, 'a successful save shows the plaintext-storage warning');
+
+  const reloaded = await loadWirelessApp({ storage });
+  assert.equal(reloaded.api.fields.pairPort.value, '37123');
+});
+
+function winningWirelessAutoCursor(loading) {
+  let winner = { specificity: [-1, -1, -1], cursor: null };
+  for (const rule of css.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    const cursor = /cursor:\s*([^;]+);/.exec(rule[2])?.[1];
+    if (!cursor) continue;
+    for (const rawSelector of rule[1].split(',')) {
+      const selector = rawSelector.trim();
+      if (selector.includes(':hover')) continue;
+      if (selector.includes('.is-loading') && !loading) continue;
+      if (!selector.includes('.wireless-auto') && selector !== '.wireless-panel button:disabled') continue;
+      const specificity = [
+        (selector.match(/#[\w-]+/g) ?? []).length,
+        (selector.match(/\.[\w-]+|:[\w-]+/g) ?? []).length,
+        (selector.match(/(?:^|[\s>+~])([a-z][\w-]*)/gi) ?? []).length,
+      ];
+      const wins = specificity[0] > winner.specificity[0]
+        || (specificity[0] === winner.specificity[0] && specificity[1] > winner.specificity[1])
+        || (specificity[0] === winner.specificity[0] && specificity[1] === winner.specificity[1]
+          && specificity[2] >= winner.specificity[2]);
+      if (wins) winner = { specificity, cursor };
+    }
+  }
+  return winner.cursor;
+}
+
+test('disabled wireless auto-fetch styling is muted and not-allowed while loading keeps a progress cursor', () => {
+  const disabledRule = css.match(/\.wireless-auto:disabled\s*\{([^}]*)\}/)?.[1];
+  assert.ok(disabledRule, 'auto-fetch has an explicit disabled style');
+  assert.match(disabledRule, /cursor:\s*not-allowed;/);
+  assert.match(disabledRule, /opacity:\s*0?\.\d+;/);
+  assert.match(disabledRule, /background:\s*#1b2a3d;/);
+  const loadingRule = css.match(/\.wireless-panel \.wireless-auto\.is-loading:disabled\s*\{([^}]*)\}/)?.[1];
+  assert.ok(loadingRule, 'loading has a separate cursor');
+  assert.match(loadingRule, /cursor:\s*progress;/);
+  assert.equal(winningWirelessAutoCursor(false), 'not-allowed', 'the generic disabled-button rule must not override the cursor');
+  assert.equal(winningWirelessAutoCursor(true), 'progress');
 });

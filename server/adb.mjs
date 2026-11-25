@@ -50,8 +50,8 @@ export function isMissingAdbError(err) {
   return err?.code === 'ENOENT';
 }
 
-async function defaultRunner(args) {
-  const { stdout } = await execFileAsync(resolveAdbCommand(), args);
+async function defaultRunner(args, { signal } = {}) {
+  const { stdout } = await execFileAsync(resolveAdbCommand(), args, { signal });
   return stdout;
 }
 
@@ -134,7 +134,7 @@ export function createAdb(runner = defaultRunner, {
     }
     const address = parseWifiIp(addresses);
     if (address) return address;
-    const routes = await runner([...serialArgs, 'ip', 'route', 'show', 'dev', 'wlan0']);
+    const routes = await runner([...serialArgs, 'ip', 'route', 'show', 'dev', 'wlan0']).catch(() => '');
     return parseWifiIp(routes);
   }
 
@@ -145,8 +145,8 @@ export function createAdb(runner = defaultRunner, {
     return parsePort(output);
   }
 
-  async function mdnsServices() {
-    return parseMdnsServices(await runner(['mdns', 'services']));
+  async function mdnsServices({ signal } = {}) {
+    return parseMdnsServices(await runner(['mdns', 'services'], { signal }));
   }
 
   async function wirelessIsOnline(address) {

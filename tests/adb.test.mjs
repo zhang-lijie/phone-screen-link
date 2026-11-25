@@ -448,6 +448,20 @@ test('getWifiIp returns null when neither query contains an IPv4 address', async
   ]);
 });
 
+test('getWifiIp returns null when both wlan0 queries fail', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    throw new Error('wlan0 query failed');
+  });
+
+  assert.equal(await adb.getWifiIp('USB-SERIAL'), null);
+  assert.deepEqual(calls, [
+    ['-s', 'USB-SERIAL', 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+    ['-s', 'USB-SERIAL', 'shell', 'ip', 'route', 'show', 'dev', 'wlan0'],
+  ]);
+});
+
 for (const { label, output, expected } of [
   { label: 'accepts a numeric TLS port', output: '5555\n', expected: 5555 },
   { label: 'trims whitespace and leading zeroes', output: ' 00080\n', expected: 80 },

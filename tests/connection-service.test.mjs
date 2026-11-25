@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { performance } from 'node:perf_hooks';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createAdb } from '../server/adb.mjs';
@@ -14,6 +15,9 @@ const PAIR_PORT = 37123;
 const CONNECT_PORT = 42123;
 const PAIR_SERVICE = '_adb-tls-pairing._tcp';
 const CONNECT_SERVICE = '_adb-tls-connect._tcp';
+const WIFI_IP_WARNING = 'WIFI_IP_UNAVAILABLE';
+const CONNECT_PORT_WARNING = 'CONNECT_PORT_UNAVAILABLE';
+const PAIRING_PORT_WARNING = 'PAIRING_PORT_UNAVAILABLE';
 const PAIR_INPUT = Object.freeze({
   pairHost: '192.168.1.20',
   pairPort: '37123',
@@ -22,7 +26,7 @@ const PAIR_INPUT = Object.freeze({
   connectPort: '5555',
 });
 
-function setup(t, { runner, initial, stored, sleep, now } = {}) {
+function setup(t, { runner, initial, stored, sleep, deadlineWait, now } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'connection-service-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const file = join(dir, 'connection.json');
@@ -40,7 +44,7 @@ function setup(t, { runner, initial, stored, sleep, now } = {}) {
       await injectSleep(ms);
     };
   }
-  const service = createConnectionService({ adb, store, usbSerial: USB_SERIAL, sleep: testSleep, now: testNow });
+  const service = createConnectionService({ adb, store, usbSerial: USB_SERIAL, sleep: testSleep, deadlineWait, now: testNow });
   return { adb, store, service, file };
 }
 
@@ -375,9 +379,33 @@ test('connection service: discovery rejects explicit offline or device-not-found
       }),
     },
     {
+      label: 'adb-prefixed not-found stdout',
+      failure: Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
+        stdout: `adb: error: device '${USB_SERIAL}' not found\n`,
+      }),
+    },
+    {
+      label: 'adb-prefixed not-found stderr',
+      failure: Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
+        stderr: `adb: error: device '${USB_SERIAL}' not found\n`,
+      }),
+    },
+    {
       label: 'offline stderr',
       failure: Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
         stderr: `error: device '${USB_SERIAL}' offline\n`,
+      }),
+    },
+    {
+      label: 'adb-prefixed offline stdout',
+      failure: Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
+        stdout: `adb: error: device '${USB_SERIAL}' offline\n`,
+      }),
+    },
+    {
+      label: 'adb-prefixed offline stderr',
+      failure: Object.assign(new Error('Command failed: adb -s USB-DEFAULT get-state'), {
+        stderr: `adb: error: device '${USB_SERIAL}' offline\n`,
       }),
     },
   ];
@@ -479,8 +507,8 @@ test('connection service: discovery returns an IP-only partial result when wirel
     connectHost: PHONE_IP,
     connectPort: null,
     warnings: [
-      'Wireless connect port is unavailable; make sure Wireless debugging is enabled.',
-      'Wireless pairing port is unavailable; open the Android pairing dialog and try again.',
+      CONNECT_PORT_WARNING,
+      PAIRING_PORT_WARNING,
     ],
   });
   assert.deepEqual(calls, [
@@ -619,7 +647,7 @@ test('connection service: pairing poll timeout returns connect data with an acti
     pairPort: null,
     connectHost: PHONE_IP,
     connectPort: CONNECT_PORT,
-    warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
+    warnings: [PAIRING_PORT_WARNING],
   });
   assert.equal(calls.filter((args) => args[0] === 'mdns').length, 16);
   assert.deepEqual(sleeps, Array(16).fill(500));
@@ -648,7 +676,7 @@ test('connection service: mDNS execution time counts toward the absolute polling
     pairPort: null,
     connectHost: PHONE_IP,
     connectPort: CONNECT_PORT,
-    warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
+    warnings: [PAIRING_PORT_WARNING],
   });
   assert.equal(calls.filter((args) => args[0] === 'mdns').length, 1);
   assert.deepEqual(sleeps, [200]);
@@ -676,13 +704,13 @@ test('connection service: mDNS command failures preserve connect data and return
     pairPort: null,
     connectHost: PHONE_IP,
     connectPort: CONNECT_PORT,
-    warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
+    warnings: [PAIRING_PORT_WARNING],
   });
   assert.equal(calls.filter((args) => args[0] === 'mdns').length, 16);
   assert.deepEqual(sleeps, Array(16).fill(500));
 });
 
-test('connection service: discovery surfaces a Wi-Fi IP command failure without polling mDNS', async (t) => {
+test('connection service: both Wi-Fi IP command failures return null fields and warnings instead of throwing', async (t) => {
   const calls = [];
   const { service } = setup(t, {
     runner: async (args) => {
@@ -692,10 +720,188 @@ test('connection service: discovery surfaces a Wi-Fi IP command failure without 
     },
   });
 
-  await assert.rejects(service.discoverWirelessConfig(), /wlan0 query failed/);
+  assert.deepEqual(await service.discoverWirelessConfig(), {
+    usbSerial: USB_SERIAL,
+    pairHost: null,
+    pairPort: null,
+    connectHost: null,
+    connectPort: null,
+    warnings: [WIFI_IP_WARNING, CONNECT_PORT_WARNING, PAIRING_PORT_WARNING],
+  });
   assert.deepEqual(calls, [
     ['-s', USB_SERIAL, 'get-state'],
     ['-s', USB_SERIAL, 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
     ['-s', USB_SERIAL, 'shell', 'ip', 'route', 'show', 'dev', 'wlan0'],
+    ['-s', USB_SERIAL, 'shell', 'getprop', 'service.adb.tls.port'],
   ]);
+});
+
+test('connection service: a never-resolving mDNS command cannot defeat the deadline and late data is discarded', { timeout: 500 }, async (t) => {
+  const calls = [];
+  let elapsed = 0;
+  let mdnsSignal;
+  let releaseMdns;
+  const runner = discoveryRunner({ calls, services: [] });
+  const { service } = setup(t, {
+    runner: async (args, options = {}) => {
+      if (args[0] === 'mdns') {
+        calls.push(args);
+        mdnsSignal = options.signal;
+        return new Promise((resolve) => { releaseMdns = resolve; });
+      }
+      return runner(args);
+    },
+    now: () => elapsed,
+    deadlineWait: async (ms) => { elapsed += ms; },
+    sleep: async (ms) => { elapsed += ms; },
+  });
+
+  const result = await service.discoverWirelessConfig();
+
+  assert.deepEqual(result, {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: null,
+    connectHost: PHONE_IP,
+    connectPort: CONNECT_PORT,
+    warnings: [PAIRING_PORT_WARNING],
+  });
+  assert.equal(calls.filter((args) => args[0] === 'mdns').length, 1);
+  assert.equal(elapsed, 8_000);
+  assert.equal(mdnsSignal.aborted, true);
+
+  releaseMdns(mdnsOutput([{ service: PAIR_SERVICE, port: PAIR_PORT }]));
+  await Promise.resolve();
+  assert.equal(result.pairPort, null, 'a result received after cancellation must not change the response');
+});
+
+test('connection service: mDNS data arriving after its remaining budget is discarded while earlier partial data survives', async (t) => {
+  const calls = [];
+  const sleeps = [];
+  let elapsed = 0;
+  let mdnsCalls = 0;
+  let secondSignal;
+  const runner = discoveryRunner({
+    calls,
+    connectOutput: '\n',
+    services: [{ service: CONNECT_SERVICE, port: CONNECT_PORT }],
+  });
+  const { service } = setup(t, {
+    runner: async (args, options = {}) => {
+      if (args[0] === 'mdns') {
+        calls.push(args);
+        mdnsCalls += 1;
+        if (mdnsCalls === 1) {
+          elapsed += 7_000;
+          return runner(args);
+        }
+        secondSignal = options.signal;
+        elapsed += 600;
+        return mdnsOutput([{ service: PAIR_SERVICE, port: PAIR_PORT }]);
+      }
+      return runner(args);
+    },
+    now: () => elapsed,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      elapsed += ms;
+    },
+  });
+
+  assert.deepEqual(await service.discoverWirelessConfig(), {
+    usbSerial: USB_SERIAL,
+    pairHost: PHONE_IP,
+    pairPort: null,
+    connectHost: PHONE_IP,
+    connectPort: CONNECT_PORT,
+    warnings: [PAIRING_PORT_WARNING],
+  });
+  assert.equal(mdnsCalls, 2);
+  assert.deepEqual(sleeps, [500]);
+  assert.equal(elapsed, 8_100);
+  assert.equal(secondSignal.aborted, true);
+});
+
+test('connection service: discovery uses a monotonic clock rather than Date.now', async (t) => {
+  t.mock.method(Date, 'now', () => { throw new Error('wall clock must not govern discovery'); });
+  const store = { save() { throw new Error('discovery must not save'); } };
+  const adb = createAdb(discoveryRunner({ services: [{ service: PAIR_SERVICE, port: PAIR_PORT }] }));
+  const service = createConnectionService({
+    adb,
+    store,
+    usbSerial: USB_SERIAL,
+    sleep: async () => {},
+  });
+
+  const result = await service.discoverWirelessConfig();
+  assert.equal(result.pairPort, PAIR_PORT);
+  assert.deepEqual(result.warnings, []);
+});
+
+test('connection service: expiry terminates the real mDNS subprocess', { timeout: 3_000 }, async (t) => {
+  const dir = mkdtempSync(join(tmpdir(), 'connection-service-mdns-process-'));
+  const pidFile = join(dir, 'mdns.pid');
+  t.after(() => {
+    if (!existsSync(pidFile)) return;
+    try {
+      process.kill(Number(readFileSync(pidFile, 'utf8')), 'SIGKILL');
+    } catch (err) {
+      if (err.code !== 'ESRCH') throw err;
+    }
+  });
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const fakeAdb = join(dir, 'fake-adb.mjs');
+  writeFileSync(fakeAdb, `#!${process.execPath}
+import { writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+if (args[0] === '-s' && args[2] === 'get-state') {
+  console.log('device');
+} else if (args[0] === '-s' && args.includes('addr')) {
+  console.log('    inet ${PHONE_IP}/24 scope global wlan0');
+} else if (args[0] === '-s' && args.includes('getprop')) {
+  console.log('${CONNECT_PORT}');
+} else if (args[0] === 'mdns') {
+  writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));
+  setInterval(() => {}, 1000);
+} else {
+  throw new Error('unexpected adb command');
+}
+`);
+  chmodSync(fakeAdb, 0o755);
+  const previousAdb = process.env.PHONE_ADB;
+  process.env.PHONE_ADB = fakeAdb;
+  t.after(() => {
+    if (previousAdb === undefined) delete process.env.PHONE_ADB;
+    else process.env.PHONE_ADB = previousAdb;
+  });
+
+  const store = createConnectionConfigStore({ file: join(dir, 'connection.json') });
+  const started = performance.now();
+  let clockReads = 0;
+  const service = createConnectionService({
+    adb: createAdb(),
+    store,
+    usbSerial: USB_SERIAL,
+    now: () => (clockReads++ === 0 ? 0 : 7_250 + performance.now() - started),
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  });
+
+  const result = await service.discoverWirelessConfig();
+  assert.equal(performance.now() - started < 2_000, true, 'discovery must return before the full poll window');
+  assert.equal(result.connectPort, CONNECT_PORT);
+  assert.equal(result.pairPort, null);
+  assert.deepEqual(result.warnings, [PAIRING_PORT_WARNING]);
+  assert.equal(existsSync(pidFile), true, 'the fake adb mDNS process must have started');
+
+  const pid = Number(readFileSync(pidFile, 'utf8'));
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    try {
+      process.kill(pid, 0);
+    } catch (err) {
+      if (err.code === 'ESRCH') break;
+      throw err;
+    }
+    if (attempt === 99) assert.fail(`mDNS subprocess ${pid} survived cancellation`);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 });

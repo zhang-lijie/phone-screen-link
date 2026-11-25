@@ -35,6 +35,7 @@ import {
   sizeLadder,
   translate,
   translateStatLine,
+  wirelessAutoWarningKey,
 } from './keys.js';
 import { PRESET_COMMANDS, findCommands } from './chat-commands.js';
 
@@ -729,7 +730,10 @@ async function autoFetchWireless() {
     fillWirelessForm({ ...readWirelessForm(), ...parsed.updates });
     saveWirelessFormFromDom();
     if (!parsed.complete || parsed.warnings.length > 0) {
-      const warnings = parsed.warnings.length > 0 ? ` ${parsed.warnings.join(' ')}` : '';
+      const warningText = parsed.warnings
+        .map((code) => t(wirelessAutoWarningKey(code)))
+        .join(' ');
+      const warnings = warningText ? ` ${warningText}` : '';
       setWirelessFeedback('wireless.auto.partial', { warnings }, false, true);
     } else {
       setWirelessFeedback('wireless.auto.fetched');

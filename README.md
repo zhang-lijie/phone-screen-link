@@ -138,7 +138,7 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 2. 手机打开「设置 → 开发者选项 → 无线调试」。不同厂商菜单名称可能略有差异。
 3. 进入「无线调试」主页面，再点「使用配对码配对设备」，记下弹窗里的 **IP 地址、端口和 6 位配对码**，并保持弹窗打开。这是**配对端口**，不是固定 `5555`；配对码会过期。
 4. 浏览器点右侧工具栏齿轮旁的 `WIFI / 无线`。USB 在线时「USB 自动获取」可用；点击后应用通过 USB 读取手机 Wi‑Fi IP 和连接端口，并最多等待 8 秒从 mDNS 获取配对端口，自动填回对应表单。**自动获取不会读取配对码，也不会发起配对。**
-5. 6 位配对码仍须手动输入。若只获取到部分信息，面板会保留已获取字段并显示警告；可检查手机无线调试主页，手动补齐缺失的连接 IP/端口后再继续。
+5. 6 位配对码仍须手动输入。若只获取到部分信息，面板会保留已获取字段并显示警告；可检查手机无线调试主页，手动补齐缺失的配对 IP/端口或连接 IP/端口后再继续。
 6. 点「配对并连接」。应用依次执行 `adb pair <配对 IP:端口> <配对码>`、`adb connect <连接 IP:端口>`，确认设备状态为 `device` 后才保存无线地址、切换活动设备并自动重启投屏。任一步失败都不会切换当前设备或保存新地址；并发切换请求会串行处理。
 7. 状态显示 `Wireless · <连接 IP:端口> · online` 后，可以拔掉 USB；镜像、触摸、右侧按键、锁屏检测和 ghost 聊天应继续工作。
 
@@ -174,7 +174,7 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 | --- | --- | --- |
 | `GET` | `/health` | 当前 `{ ok, online, serial, mode }` |
 | `GET` | `/api/wireless` | 当前 `{ ok, mode, serial, online, usbOnline }`，面板打开时读取 |
-| `POST` | `/api/wireless/auto` | USB 辅助只读获取 `{ usbSerial, pairHost, pairPort, connectHost, connectPort, warnings }`；缺失端点为 `null`，USB 离线返回 `409` |
+| `POST` | `/api/wireless/auto` | USB 辅助只读获取 `{ usbSerial, pairHost, pairPort, connectHost, connectPort, warnings }`；缺失端点为 `null`，USB 离线返回 `409`；`warnings` 使用稳定代码（`WIFI_IP_UNAVAILABLE` / `CONNECT_PORT_UNAVAILABLE` / `PAIRING_PORT_UNAVAILABLE`），界面按中英文映射为可读提示 |
 | `POST` | `/api/wireless/pair` | 提交 `{ pairHost, pairPort, pairCode, connectHost, connectPort }`，成功后返回无线状态 |
 | `POST` | `/api/wireless/usb` | 切回 USB 并返回状态 |
 
@@ -465,7 +465,7 @@ npm run build
 | 引擎首次运行弹出安装范围对话框 | 选 “no, me only”；自定义页面通常会替换掉该首页 |
 | `npm run setup` 出现 `velopack` 的 `EBADENGINE` 警告 | 可忽略，不影响安装和运行 |
 | **无线配对失败 / 配对码过期** | 重新打开手机「无线调试 → 使用配对码配对设备」，用新弹窗里的配对 IP、端口和 6 位码；配对端口通常与连接端口不同。浏览器会回填旧表单，不要误用已过期的配对码 |
-| **USB 自动获取不可用 / 只拿到部分信息** | 确认 USB 已连接并授权调试、手机无线调试已开启且配对码弹窗保持打开；按钮只在后端报告 `usbOnline: true` 时可用。部分结果会保留并显示警告，可手动补齐缺失字段 |
+| **USB 自动获取不可用 / 只拿到部分信息** | 确认 USB 已连接并授权调试、手机无线调试已开启且配对码弹窗保持打开；按钮只在后端报告 `usbOnline: true` 时可用。部分结果会保留并显示警告，可手动补齐缺失的配对 IP/端口和连接 IP/端口 |
 | **配对成功但连接失败 / 连接离线** | 确认填的是无线调试主页面的连接 IP/端口，不是配对弹窗端口；手机与电脑需在同一局域网且无线调试仍开启。端口可能在手机重启或切换网络后变化 |
 | **无线掉线后没有恢复** | 面板状态变为 offline 时，服务每 5 秒只重连后端保存的地址；若地址已变化，重新输入当前连接 IP/端口并配对/连接。无线模式不会自动切回 USB |
 | **切回 USB 后仍离线** | 插回 USB 并授权调试。若默认序列号不正确，先用 `PHONE_USB_SERIAL=<实际 USB 序列号>` 重启服务，再点「切回 USB」；该按钮只切换到启动时配置的 USB 序列号，不会自动发现设备 |

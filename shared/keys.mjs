@@ -138,6 +138,9 @@ export const MESSAGES = {
     'wireless.auto.loading': 'Fetching wireless details…',
     'wireless.auto.fetched': 'Wireless details fetched — enter the pairing code.',
     'wireless.auto.partial': 'Only partial wireless details were fetched. Check the fields before pairing.{warnings}',
+    'wireless.warning.wifiIpUnavailable': 'Could not read the phone Wi-Fi IP address.',
+    'wireless.warning.connectPortUnavailable': 'Wireless connect port is unavailable; make sure Wireless debugging is enabled.',
+    'wireless.warning.pairingPortUnavailable': 'Wireless pairing port is unavailable; open the Android pairing dialog and try again.',
     'wireless.pairHost': 'Pair IP',
     'wireless.pairPort': 'Pair port',
     'wireless.pairCode': '6-digit pairing code',
@@ -342,6 +345,9 @@ export const MESSAGES = {
     'wireless.auto.loading': '正在获取无线调试信息…',
     'wireless.auto.fetched': '已获取无线调试信息 — 请输入配对码。',
     'wireless.auto.partial': '仅获取到部分无线调试信息，请检查表单后再配对。{warnings}',
+    'wireless.warning.wifiIpUnavailable': '无法读取手机 Wi-Fi IP 地址。',
+    'wireless.warning.connectPortUnavailable': '无法获取无线连接端口；请确认已开启无线调试。',
+    'wireless.warning.pairingPortUnavailable': '无法获取无线配对端口；请打开 Android 配对弹窗后重试。',
     'wireless.pairHost': '配对 IP',
     'wireless.pairPort': '配对端口',
     'wireless.pairCode': '6 位配对码',
@@ -531,6 +537,11 @@ export const DEFAULT_SETTINGS = {
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
 
+export const WIRELESS_AUTO_WARNING_CODES = Object.freeze({
+  WIFI_IP_UNAVAILABLE: 'WIFI_IP_UNAVAILABLE',
+  CONNECT_PORT_UNAVAILABLE: 'CONNECT_PORT_UNAVAILABLE',
+  PAIRING_PORT_UNAVAILABLE: 'PAIRING_PORT_UNAVAILABLE',
+});
 // The user explicitly requested that the complete wireless pairing form,
 // including its short-lived pairing code, survive browser reloads. Keep this
 // separate from backend connection config: the backend never stores the code.
@@ -618,6 +629,16 @@ function normalizeWirelessAutoPort(value) {
   return Number.isInteger(value) && value >= 1 && value <= 65535 ? String(value) : '';
 }
 
+export function wirelessAutoWarningKey(code) {
+  return Object.hasOwn(WIRELESS_AUTO_WARNING_CODES, code)
+    ? `wireless.warning.${{
+      WIFI_IP_UNAVAILABLE: 'wifiIpUnavailable',
+      CONNECT_PORT_UNAVAILABLE: 'connectPortUnavailable',
+      PAIRING_PORT_UNAVAILABLE: 'pairingPortUnavailable',
+    }[code]}`
+    : null;
+}
+
 // The auto endpoint is read-only and may return partial data. Validate its
 // envelope, keep only usable address fields, and never accept a pairing code
 // from it: the user must always enter that short-lived credential manually.
@@ -639,7 +660,7 @@ export function parseWirelessAutoResult(payload) {
   if (connectPort) updates.connectPort = connectPort;
 
   const warnings = [...new Set(payload.warnings
-    .map((warning) => typeof warning === 'string' ? warning.trim() : '')
+    .map((warning) => (wirelessAutoWarningKey(warning) ? warning : ''))
     .filter(Boolean))];
 
   return {

@@ -441,7 +441,16 @@ body.nav-text-only #stream .control-button[data-label]::after {
   background: #2e5f9e;
 }
 
+.wireless-panel .wireless-auto:disabled {
+  border-color: #2c465f;
+  background: #1b2a3d;
+  color: #8190a3;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .wireless-panel .wireless-auto.is-loading:disabled {
+  opacity: 0.75;
   cursor: progress;
 }
 

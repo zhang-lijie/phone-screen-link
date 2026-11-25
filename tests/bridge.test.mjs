@@ -1004,7 +1004,7 @@ test('wireless: POST auto returns partial discovery data and warnings without pa
     pairPort: null,
     connectHost: '192.168.1.42',
     connectPort: 42123,
-    warnings: ['Wireless pairing port is unavailable; open the Android pairing dialog and try again.'],
+    warnings: ['PAIRING_PORT_UNAVAILABLE'],
   };
   const connectionService = fakeConnectionService({ discovery });
   await withBridge({ connectionService }, async (address) => {
@@ -1014,6 +1014,23 @@ test('wireless: POST auto returns partial discovery data and warnings without pa
     assert.equal(connectionService.discoverCalls, 1);
     assert.equal(connectionService.pairCalls.length, 0);
     assert.equal(connectionService.usbCalls, 0);
+  });
+});
+
+test('wireless: POST auto exposes only stable warning codes', async () => {
+  const discovery = {
+    ...WIRELESS_DISCOVERY,
+    pairPort: null,
+    warnings: ['PAIRING_PORT_UNAVAILABLE', 'English warning from an untrusted service', 42, 'PAIRING_PORT_UNAVAILABLE'],
+  };
+  const connectionService = fakeConnectionService({ discovery });
+  await withBridge({ connectionService }, async (address) => {
+    const res = await postWirelessAuto(address);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      ...discovery,
+      warnings: ['PAIRING_PORT_UNAVAILABLE'],
+    });
   });
 });
 
@@ -1060,6 +1077,14 @@ test('wireless: POST auto distinguishes explicit USB absence from host-side get-
       label: 'device not found',
       failure: Object.assign(new Error('Command failed: adb get-state'), {
         stderr: `error: device '${DEFAULT_USB_SERIAL}' not found\n`,
+      }),
+      status: 409,
+      error: 'USB device is offline',
+    },
+    {
+      label: 'adb-prefixed offline stdout',
+      failure: Object.assign(new Error('Command failed: adb get-state'), {
+        stdout: `adb: error: device '${DEFAULT_USB_SERIAL}' offline\n`,
       }),
       status: 409,
       error: 'USB device is offline',
