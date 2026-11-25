@@ -866,7 +866,7 @@ test('wireless: POST pair rejects malformed input with 400 before calling the se
   await withBridge({ connectionService }, async (address) => {
     for (const [body, field] of invalidInputs) {
       const res = await postWirelessPair(address, body);
-      assert.equal(res.status, 400, `${field}: ${JSON.stringify(body)}`);
+      assert.equal(res.status, 400, `${field}: expected status 400, got ${res.status}`);
       const payload = await res.json();
       assert.match(payload.error, new RegExp(field));
       if (body && typeof body === 'object' && typeof body.pairCode === 'string') {
