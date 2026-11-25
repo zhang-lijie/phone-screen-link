@@ -59,6 +59,7 @@ export const MESSAGES = {
     'tool.copy': 'COPY',
     'tool.paste': 'PASTE',
     'tool.settings': 'SET',
+    'tool.wireless': 'WIFI',
     'settings.title': 'Stream settings',
     'settings.close': 'Close settings',
     'settings.resolution': 'Resolution',
@@ -119,6 +120,38 @@ export const MESSAGES = {
     'settings.note': 'Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.',
     'settings.reset': 'Reset',
     'settings.apply': 'Apply & restart',
+    // Wireless ADB pairing. The backend owns connection state; the browser
+    // only mirrors it and persists the user-entered pairing form.
+    'wireless.title': 'Wireless debugging',
+    'wireless.close': 'Close wireless debugging',
+    'wireless.current': 'Mode: {mode} · Address: {address} · {online}',
+    'wireless.mode.usb': 'USB',
+    'wireless.mode.wifi': 'Wireless',
+    'wireless.mode.unknown': 'Unknown',
+    'wireless.online.online': 'online',
+    'wireless.online.offline': 'offline',
+    'wireless.loading': 'Loading wireless status…',
+    'wireless.groupPair': 'Pair (Android 11+)',
+    'wireless.pairHint': 'Open Developer options → Wireless debugging → Pair device with pairing code.',
+    'wireless.pairHost': 'Pair IP',
+    'wireless.pairPort': 'Pair port',
+    'wireless.pairCode': '6-digit pairing code',
+    'wireless.groupConnect': 'Connect',
+    'wireless.connectHint': 'Use the IP address and port on the main Wireless debugging screen.',
+    'wireless.connectHost': 'Connect IP',
+    'wireless.connectPort': 'Connect port',
+    'wireless.submit': 'Pair & connect',
+    'wireless.usb': 'Switch to USB',
+    'wireless.clear': 'Clear saved pairing information',
+    'wireless.cleared': 'Saved pairing information cleared',
+    'wireless.pairing': 'Pairing and connecting…',
+    'wireless.switchingUsb': 'Switching to USB…',
+    'wireless.connected': 'Wireless connected — restarting stream…',
+    'wireless.usbConnected': 'USB selected — restarting stream…',
+    'wireless.error.request': 'Wireless request failed ({status}) — {error}',
+    'wireless.error.network': 'Cannot reach the control bridge — {error}',
+    'wireless.error.invalidResponse': 'The control bridge returned an invalid wireless response',
+    'wireless.warning': 'Warning: the full form, including the pairing code, is saved in plain text in this browser\'s localStorage. Anyone with access to this browser profile can read it. Pairing codes expire; if pairing fails, get the current code from the phone. Use “Clear saved pairing information” to remove it.',
     // Chat feature: floating button, panel and the settings group. The
     // config itself lives on the backend; these are display strings only.
     'chat.button': 'Chat assistant',
@@ -223,6 +256,7 @@ export const MESSAGES = {
     'tool.copy': '复制',
     'tool.paste': '粘贴',
     'tool.settings': '设置',
+    'tool.wireless': '无线',
     'settings.title': '视频设置',
     'settings.close': '关闭设置',
     'settings.resolution': '分辨率',
@@ -283,6 +317,36 @@ export const MESSAGES = {
     'settings.note': '自动模式先尝试 1280，被手机拒绝时会自动降档。应用设置会重启画面。',
     'settings.reset': '恢复默认',
     'settings.apply': '应用并重启',
+    'wireless.title': '无线调试',
+    'wireless.close': '关闭无线调试',
+    'wireless.current': '模式：{mode} · 地址：{address} · {online}',
+    'wireless.mode.usb': 'USB',
+    'wireless.mode.wifi': '无线',
+    'wireless.mode.unknown': '未知',
+    'wireless.online.online': '在线',
+    'wireless.online.offline': '离线',
+    'wireless.loading': '正在读取无线状态…',
+    'wireless.groupPair': '配对（Android 11+）',
+    'wireless.pairHint': '打开开发者选项 → 无线调试 → 使用配对码配对设备。',
+    'wireless.pairHost': '配对 IP',
+    'wireless.pairPort': '配对端口',
+    'wireless.pairCode': '6 位配对码',
+    'wireless.groupConnect': '连接',
+    'wireless.connectHint': '请使用无线调试主界面显示的 IP 地址和端口。',
+    'wireless.connectHost': '连接 IP',
+    'wireless.connectPort': '连接端口',
+    'wireless.submit': '配对并连接',
+    'wireless.usb': '切回 USB',
+    'wireless.clear': '清除已保存配对信息',
+    'wireless.cleared': '已清除保存的配对信息',
+    'wireless.pairing': '正在配对并连接…',
+    'wireless.switchingUsb': '正在切回 USB…',
+    'wireless.connected': '无线连接成功 — 正在重启画面…',
+    'wireless.usbConnected': '已选择 USB — 正在重启画面…',
+    'wireless.error.request': '无线请求失败（{status}）— {error}',
+    'wireless.error.network': '无法连接控制桥 — {error}',
+    'wireless.error.invalidResponse': '控制桥返回了无效的无线状态',
+    'wireless.warning': '警告：完整表单（含配对码）会以明文保存到此浏览器的 localStorage。能够访问此浏览器配置文件的任何人都可读取。配对码会过期；如果配对失败，请从手机获取最新配对码。使用“清除已保存配对信息”可删除。',
     'chat.button': '聊天助手',
     'chat.title': '聊天助手',
     'chat.close': '关闭聊天',
@@ -448,6 +512,59 @@ export const DEFAULT_SETTINGS = {
   autoResizeWindow: true,
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
+
+// The user explicitly requested that the complete wireless pairing form,
+// including its short-lived pairing code, survive browser reloads. Keep this
+// separate from backend connection config: the backend never stores the code.
+export const WIRELESS_PAIRING_STORAGE_KEY = 'phone-link-wireless-pairing';
+export const WIRELESS_PAIRING_FIELDS = Object.freeze([
+  'pairHost',
+  'pairPort',
+  'pairCode',
+  'connectHost',
+  'connectPort',
+]);
+export const DEFAULT_WIRELESS_PAIRING = Object.freeze({
+  pairHost: '',
+  pairPort: '',
+  pairCode: '',
+  connectHost: '',
+  connectPort: '',
+});
+
+function normalizeWirelessPairing(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return Object.fromEntries(WIRELESS_PAIRING_FIELDS.map((field) => [
+    field,
+    typeof source[field] === 'string' ? source[field] : DEFAULT_WIRELESS_PAIRING[field],
+  ]));
+}
+
+export function loadWirelessPairing(storage) {
+  try {
+    return normalizeWirelessPairing(JSON.parse(storage?.getItem(WIRELESS_PAIRING_STORAGE_KEY)));
+  } catch {
+    return { ...DEFAULT_WIRELESS_PAIRING };
+  }
+}
+
+export function saveWirelessPairing(storage, values) {
+  const normalized = normalizeWirelessPairing(values);
+  try {
+    storage?.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify(normalized));
+  } catch {
+    // Private browsing or a full quota: the current session still has the form.
+  }
+  return normalized;
+}
+
+export function clearWirelessPairing(storage) {
+  try {
+    storage?.removeItem(WIRELESS_PAIRING_STORAGE_KEY);
+  } catch {
+    // Storage disabled: there is nothing this page can do about it.
+  }
+}
 
 // Wheel-scroll amplification: how many engine scroll steps the phone is
 // scrolled per browser wheel event. The engine converts one browser wheel

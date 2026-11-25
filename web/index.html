@@ -239,6 +239,57 @@
       </footer>
     </section>
   </div>
+  <div id="wireless-overlay" class="wireless-overlay" hidden>
+    <section class="wireless-panel" role="dialog" aria-modal="true" aria-labelledby="wireless-title">
+      <header class="settings-head">
+        <h2 id="wireless-title" data-i18n="wireless.title">Wireless debugging</h2>
+        <button type="button" id="wireless-close" data-i18n-aria="wireless.close" aria-label="Close wireless debugging">&times;</button>
+      </header>
+
+      <p id="wireless-status" class="wireless-status" role="status" aria-live="polite" data-i18n="wireless.loading">Loading wireless status…</p>
+      <p id="wireless-feedback" class="wireless-feedback" role="status" aria-live="polite"></p>
+
+      <form id="wireless-form" class="wireless-form">
+        <fieldset>
+          <legend data-i18n="wireless.groupPair">Pair (Android 11+)</legend>
+          <p class="wireless-hint" data-i18n="wireless.pairHint">Open Developer options → Wireless debugging → Pair device with pairing code.</p>
+          <label class="wireless-field">
+            <span data-i18n="wireless.pairHost">Pair IP</span>
+            <input type="text" id="wireless-pair-host" name="pairHost" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="wireless-field">
+            <span data-i18n="wireless.pairPort">Pair port</span>
+            <input type="number" id="wireless-pair-port" name="pairPort" min="1" max="65535" step="1" inputmode="numeric" autocomplete="off">
+          </label>
+          <label class="wireless-field">
+            <span data-i18n="wireless.pairCode">6-digit pairing code</span>
+            <input type="text" id="wireless-pair-code" name="pairCode" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" autocomplete="off" spellcheck="false">
+          </label>
+        </fieldset>
+
+        <fieldset>
+          <legend data-i18n="wireless.groupConnect">Connect</legend>
+          <p class="wireless-hint" data-i18n="wireless.connectHint">Use the IP address and port on the main Wireless debugging screen.</p>
+          <label class="wireless-field">
+            <span data-i18n="wireless.connectHost">Connect IP</span>
+            <input type="text" id="wireless-connect-host" name="connectHost" autocomplete="off" spellcheck="false">
+          </label>
+          <label class="wireless-field">
+            <span data-i18n="wireless.connectPort">Connect port</span>
+            <input type="number" id="wireless-connect-port" name="connectPort" min="1" max="65535" step="1" inputmode="numeric" autocomplete="off">
+          </label>
+        </fieldset>
+
+        <button type="submit" id="wireless-submit" class="wireless-primary" data-i18n="wireless.submit">Pair &amp; connect</button>
+      </form>
+
+      <div class="wireless-actions">
+        <button type="button" id="wireless-usb" data-i18n="wireless.usb">Switch to USB</button>
+        <button type="button" id="wireless-clear" data-i18n="wireless.clear">Clear saved pairing information</button>
+      </div>
+      <p id="wireless-warning" class="wireless-warning" data-i18n="wireless.warning">Warning: the full form, including the pairing code, is saved in plain text in this browser's localStorage. Anyone with access to this browser profile can read it. Pairing codes expire; if pairing fails, get the current code from the phone. Use “Clear saved pairing information” to remove it.</p>
+    </section>
+  </div>
   <script type="module" src="/app.js"></script>
 </body>
 </html>
