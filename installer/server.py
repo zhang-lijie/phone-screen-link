@@ -59,6 +59,32 @@ def _tool(path, name):
     return {"status": "ok" if found else "error", "path": found}
 
 
+def _adb_tool(path, project_root):
+    """System adb wins; otherwise report the engine's bundled copy.
+
+    The engine downloads that copy into engine/dependencies/adb in the
+    background on first start, so its absence before the first run is a
+    warning (with instructions), not an error.
+    """
+    system = _tool(path, "adb")
+    if system["status"] == "ok":
+        system["source"] = "system"
+        return system
+    bundled = Path(project_root) / "engine" / "dependencies" / "adb" / "adb"
+    if bundled.is_file() and os.access(str(bundled), os.X_OK):
+        return {"status": "ok", "path": str(bundled), "source": "engine"}
+    return {
+        "status": "warning",
+        "path": None,
+        "source": "missing",
+        "hint": (
+            "未找到 adb：首次启动时引擎会自动下载自带的版本；"
+            "若下载失败或长时间不可用，请安装系统 adb"
+            "（Arch/Omarchy: sudo pacman -S android-tools）"
+        ),
+    }
+
+
 def detect_environment(path, platform_name, project_root, machine=None, probe_ports=(8000, 8100)):
     """Report tool availability and platform support without running tools."""
     if machine is None:
@@ -68,9 +94,7 @@ def detect_environment(path, platform_name, project_root, machine=None, probe_po
     arm64 = machine == "arm64"
     supported = (platform_name == "linux" and x64) or (platform_name == "darwin" and arm64)
     tools = {name: _tool(path, name) for name in ("git", "npm", "node", "python3", "uvx", "uv")}
-    adb = _tool(path, "adb")
-    if adb["status"] != "ok":
-        adb = {"status": "warning", "path": None, "hint": "系统未找到 adb，安装时会使用引擎自带的版本"}
+    adb = _adb_tool(path, project_root)
     engine_adb = str(Path(project_root) / "engine" / "dependencies" / "adb")
     ports = {}
     for port in probe_ports:

@@ -1,6 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { parseDevices, createAdb, WIFI_ADDRESS, DEFAULT_USB_SERIAL } from '../server/adb.mjs';
+import { join } from 'node:path';
+import {
+  parseDevices,
+  createAdb,
+  WIFI_ADDRESS,
+  DEFAULT_USB_SERIAL,
+  bundledAdbPath,
+  isMissingAdbError,
+  resolveAdbCommand,
+} from '../server/adb.mjs';
 
 const devicesText = `List of devices attached
 2FD0221C09004177       device usb:1-5 product:NOH-AN01
@@ -9,6 +18,36 @@ const devicesText = `List of devices attached
 
 test('parseDevices returns both transports', () => {
   assert.deepEqual(parseDevices(devicesText), [DEFAULT_USB_SERIAL, WIFI_ADDRESS]);
+});
+
+// A fresh install has no system adb; the engine downloads its copy into
+// engine/dependencies/adb after it starts serving. The bridge must find that
+// copy on every call, so resolution cannot be cached at import time.
+test('resolveAdbCommand prefers the engine-bundled adb when it exists', () => {
+  const root = '/x';
+  const bundled = join(root, 'engine', 'dependencies', 'adb', 'adb');
+  assert.equal(bundledAdbPath(root), bundled);
+  assert.equal(
+    resolveAdbCommand({ root, env: {}, exists: (p) => p === bundled }),
+    bundled,
+  );
+});
+
+test('resolveAdbCommand falls back to PATH adb when the bundled copy is absent', () => {
+  assert.equal(resolveAdbCommand({ root: '/x', env: {}, exists: () => false }), 'adb');
+});
+
+test('resolveAdbCommand lets PHONE_ADB override both defaults', () => {
+  assert.equal(
+    resolveAdbCommand({ root: '/x', env: { PHONE_ADB: '/custom/adb' }, exists: () => true }),
+    '/custom/adb',
+  );
+});
+
+test('isMissingAdbError only matches execFile ENOENT', () => {
+  assert.equal(isMissingAdbError(Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' })), true);
+  assert.equal(isMissingAdbError(new Error('exit 1')), false);
+  assert.equal(isMissingAdbError(undefined), false);
 });
 
 test('ensureUsbOnly disconnects the wifi transport', async () => {

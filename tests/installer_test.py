@@ -26,7 +26,22 @@ class DetectTest(unittest.TestCase):
             result = srv.detect_environment(path=d, platform_name="linux", project_root=d)
         self.assertEqual(result["git"]["status"], "error")
         self.assertEqual(result["adb"]["status"], "warning")
+        self.assertEqual(result["adb"]["source"], "missing")
+        self.assertIn("android-tools", result["adb"]["hint"])
         self.assertTrue(result["engine_adb"].endswith("engine/dependencies/adb"))
+
+    def test_detect_reports_engine_bundled_adb_as_ok(self):
+        # After the engine's first-run download (or a setup prefetch) the
+        # wizard must stop warning: the app's own adb is what start.sh uses.
+        with tempfile.TemporaryDirectory() as d:
+            adb = Path(d) / "engine" / "dependencies" / "adb" / "adb"
+            adb.parent.mkdir(parents=True)
+            adb.write_text("")
+            adb.chmod(0o755)
+            result = srv.detect_environment(path=d, platform_name="linux", project_root=d)
+        self.assertEqual(result["adb"]["status"], "ok")
+        self.assertEqual(result["adb"]["source"], "engine")
+        self.assertEqual(result["adb"]["path"], str(adb))
 
     def test_detect_rejects_unsupported_platform(self):
         result = srv.detect_environment(path="/usr/bin", platform_name="darwin", project_root="/x")

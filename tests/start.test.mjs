@@ -2,9 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { delimiter, join } from 'node:path';
 import { DEFAULT_USB_SERIAL } from '../server/adb.mjs';
-import { buildPlan, copyWeb, engineEnv, main } from '../scripts/start.mjs';
+import { ADB_MISSING_HINT, buildPlan, copyWeb, engineEnv, main } from '../scripts/start.mjs';
 
 test('plan enforces usb before copying and starting the engine', () => {
   const plan = buildPlan({ engineDir: '/x/engine', webDir: '/x/web' });
@@ -175,6 +175,64 @@ test('main installs signal handlers before spawning and cleans up when readiness
   assert.equal(calls.kill, 1);
   assert.equal(calls.setTimer, 0);
   assert.equal(handlers.size, 0);
+});
+
+function missingAdb() {
+  const err = Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' });
+  return {
+    ensureUsbOnly: async () => { throw err; },
+    isLocked: async () => true,
+  };
+}
+
+test('a missing adb at startup logs a hint and still starts the bridge and engine', async () => {
+  const logs = [];
+  const { deps, calls, handlers } = fakeRuntime({
+    adb: missingAdb(),
+    log: (line) => logs.push(line),
+  });
+
+  await main(deps);
+
+  assert.ok(logs.includes(ADB_MISSING_HINT), 'the first-run adb download is explained');
+  assert.equal(calls.spawn.length, 1);
+  assert.equal(calls.bridgeStart, 1);
+  assert.equal(calls.setTimer, 1);
+
+  await handlers.get('SIGINT')();
+  assert.equal(calls.kill, 1);
+});
+
+test('the periodic USB check stays quiet while adb is still being installed', async () => {
+  const errors = [];
+  let tick;
+  const interval = Symbol('usb-interval');
+  const { deps, handlers } = fakeRuntime({
+    adb: missingAdb(),
+    setTimer: (fn) => { tick = fn; return interval; },
+    clearTimer: () => {},
+    error: (...args) => errors.push(args),
+  });
+
+  await main(deps);
+  tick();
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(errors, []);
+
+  await handlers.get('SIGINT')();
+});
+
+test('the chat ghost gets the engine adb folder prepended to PATH', async () => {
+  const { deps, calls, handlers } = fakeRuntime();
+
+  await main(deps);
+
+  const entries = calls.ghostOptions.env.PATH.split(delimiter);
+  assert.equal(entries[0], join('/x', 'engine', 'dependencies', 'adb'));
+  assert.ok(entries.length > 1, 'the inherited PATH is preserved after the bundled folder');
+
+  await handlers.get('SIGINT')();
 });
 
 test('main cleans up the spawned engine and bridge when bridge.start rejects', async () => {

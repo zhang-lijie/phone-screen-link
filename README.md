@@ -156,9 +156,9 @@ uvx --from ghost-in-the-droid android-agent-mcp
 
 - **Python 3.10+**（ghost 的 `requires-python`）；
 - **`uv` / `uvx`** 在 `PATH` 中。没有就装：`curl -LsSf https://astral.sh/uv/install.sh | sh`；
-- **`adb` 在 `PATH` 中**（**这一条尚未真机验证**，列在冒烟清单第 1 步）：ghost 通过 ADB 操作设备，而本项目自带的那份 adb 在
-  `engine/dependencies/` 下、不在系统 `PATH` 里，若 ghost 找不到 adb 就需要自己软链或导出 `PATH`
-  （投屏和按钮用的是引擎自带的 adb，所以这一步只有聊天可能用到）；
+- **`adb` 可用**：ghost 通过 ADB 操作设备。`scripts/start.mjs` 启动 ghost 时会把
+  `engine/dependencies/adb`（引擎自带的那份）加到子进程 `PATH` 最前面，系统装了 adb 也不冲突；
+  因此不需要自己软链或导出 `PATH`。这一条仍列在冒烟清单第 1 步，等待真机复核；
 - 首次运行 `uvx` 会从 PyPI 下载 `ghost-in-the-droid` 并建隔离环境，**需要联网**（或预先 `uv tool install ghost-in-the-droid` / 配置镜像）。
 - 手机仍按现有方式用 USB 连着并完成授权；ghost 用环境变量 `DEFAULT_DEVICE` 选设备，`scripts/start.mjs`
   把固定序列号 `2FD0221C09004177` 传给 `server/ghost-client.mjs`，由它注入子进程环境。
@@ -290,9 +290,10 @@ CORS 只拦「读响应」，恶意网页仍能发出免预检的简单请求（
 ### 环境
 
 - Node.js（开发验证于 v26）与 npm
-- 可用的 `adb`（引擎会自带一份）
+- `adb`：可以装系统版，也可以不装——首次启动时引擎会在后台把自带的一份下载到
+  `engine/dependencies/adb`（约 15 MB，下载期间投屏与按键要等它就绪）
 - 通过 USB 连接、已授权 USB 调试的华为 Mate 40 Pro
-- **仅聊天功能还需要**：Python 3.10+、`uv`/`uvx`、`PATH` 里可直接调用的 `adb`，以及一个局域网内支持
+- **仅聊天功能还需要**：Python 3.10+、`uv`/`uvx`、`adb`（引擎自带或系统均可，启动脚本会把引擎目录加到 ghost 的 PATH），以及一个局域网内支持
   function/tool calling 的 OpenAI 兼容模型端点。缺这些只是聊天不可用，投屏与按钮照常（详见[前置条件](#前置条件ghost-工具层)）。
 
 ### 安装与运行
@@ -322,7 +323,7 @@ npm run setup
 2. 在 `engine/` 中运行 `npm install` 安装依赖；
 3. 打上 loopback 补丁：把 `src/server/services/HttpServer.ts` 中的 `server.listen(port, () => {`
    改为 `server.listen(port, '127.0.0.1', () => {`，保证 HTTP 只监听本机；若上游代码结构变化导致匹配不到，脚本会直接报错而不是静默跳过；
-4. 运行 `npm run stage-seed`，把运行期需要的 `adb`、`scrcpy-server`、node-pty 等依赖落到 `engine/dependencies/`；
+4. 运行 `npm run stage-seed`，把 `scrcpy-server`、node-pty 等预置依赖落到 `engine/` 下；`adb` 不在此步，由引擎首次启动时自动下载到 `engine/dependencies/adb/`（启动脚本会等待它出现，不再因此直接退出）；
 5. 运行 `npm run build` 生成 `engine/dist/index.js`。
 
 该命令是**幂等**的：检测到 `engine/dist/index.js` 已存在就跳过，不会重复克隆或覆盖已有构建。
@@ -359,6 +360,8 @@ npm run build
 ## 配置
 
 - **设备序列号**：默认 `2FD0221C09004177`，可通过环境变量覆盖：`PHONE_SERIAL=<新序列号> npm start`。页面会从桥的 `/health` 自动读取该序列号连接新设备，聊天侧 `scripts/start.mjs` 也会把它作为 `DEFAULT_DEVICE` 注入 ghost 子进程，无需改代码。
+
+- **adb 路径**：默认依次使用 `PHONE_ADB`、`engine/dependencies/adb/adb`（引擎自带）、`PATH` 里的 `adb`；前两个由启动脚本和引擎自动维护，一般不用设置。
 - **设备必须支持 ADB**：本项目基于 ADB/scrcpy，只认 ADB 设备。华为 HDC 模式（`lsusb` 显示 `HDC Device`、USB ID `12d1:1101`）或纯血鸿蒙设备无法连接，需在手机开发者选项开启 **USB 调试（ADB）** 并切到传输文件（MTP）模式；纯鸿蒙 NEXT 无 ADB，不适用本方案。
 - **端口**：引擎 `8000`，控制桥 `8100`（`/keyevent`、`/chat`、`/api/chat-config` 共用），在 `scripts/start.mjs` 中配置。
 - **USB 限制**：`scripts/start.mjs` 启动时及每 5 秒断开 Wi‑Fi ADB `192.168.3.123:5555`；无线连接不会被接受。
@@ -388,6 +391,7 @@ npm run build
 | 现象 | 处理 |
 | --- | --- |
 | 状态栏显示 `Engine unavailable` | 按「引擎安装」完成 `npm run setup`，再运行 `npm start` |
+| 启动直接退出，日志里是 `Error: spawn adb ENOENT` | 本机没有 adb，且引擎自带的 adb 还没下载完。当前版本会继续启动并等待引擎在后台装好 adb（日志会打印 `adb is not installed yet`）；若长时间仍无画面，装系统 adb（Arch/Omarchy：`sudo pacman -S android-tools`）后重启，或重新运行 `npm run setup` |
 | 启动报 `engine did not become ready` | 代理环境下 Node 的 `fetch` 不走系统代理，引擎可选依赖下载会超时；启动脚本检测到代理时已自动注入 `NODE_USE_ENV_PROXY=1` 与 `--use-system-ca`，可检查代理/NO_PROXY 设置后重试 |
 | 画面糊、状态栏显示 `248x512` | 在设置里选「自动」或 `1080`；日志中会出现编码器 `IllegalArgumentException` |
 | 画面全黑但显示已连接 | 手机处于锁屏状态，解锁后恢复；不绕过锁屏 |

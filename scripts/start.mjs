@@ -1,8 +1,8 @@
 import { spawn } from 'node:child_process';
 import { copyFileSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { adb, DEFAULT_USB_SERIAL } from '../server/adb.mjs';
+import { adb, bundledAdbDir, DEFAULT_USB_SERIAL, isMissingAdbError } from '../server/adb.mjs';
 import { runAgentTurn, runPresetCommand } from '../server/chat-agent.mjs';
 import { createChatConfigStore } from '../server/chat-config.mjs';
 import { createBridge } from '../server/bridge.mjs';
@@ -16,6 +16,20 @@ const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 250;
 const GHOST_START_TIMEOUT_MS = 25_000;
 const ABORTED = Symbol('startup-aborted');
+
+export const ADB_MISSING_HINT =
+  'adb is not installed yet; the engine downloads its bundled copy on first start ' +
+  '(about 15 MB). Mirroring and key controls start working once it is ready. ' +
+  'To skip that download, install a system adb (Arch/Omarchy: sudo pacman -S android-tools).';
+
+// ghost drives the phone through adb, and the SDK merges this env over its
+// inherited defaults. Prepending the engine's folder makes chat work on a
+// machine with no system adb, both now and after the background download.
+export function ghostEnv(env = process.env, root) {
+  return {
+    PATH: [bundledAdbDir(root), env.PATH].filter(Boolean).join(delimiter),
+  };
+}
 
 export function buildPlan({ engineDir, webDir }) {
   return [
@@ -115,7 +129,15 @@ export async function main(deps = {}) {
     webDir: join(projectDir, 'web'),
   });
 
-  await adbClient.ensureUsbOnly();
+  // A missing adb must not abort startup: on a fresh install the engine's
+  // bundled copy only appears after the engine boots and its background
+  // dependency install finishes. The USB-only rule is re-checked every 5s.
+  try {
+    await adbClient.ensureUsbOnly();
+  } catch (err) {
+    if (!isMissingAdbError(err)) throw err;
+    log(ADB_MISSING_HINT);
+  }
 
   copyFiles(copyStep, join(spawnStep.cwd, 'dist', 'public'));
 
@@ -213,7 +235,7 @@ export async function main(deps = {}) {
     // absent and the bridge reports it as unavailable.
     const chatConfig = makeChatConfig({ file: join(projectDir, 'state', 'chat.json') });
     try {
-      ghost = makeGhost({ serial: DEFAULT_USB_SERIAL });
+      ghost = makeGhost({ serial: DEFAULT_USB_SERIAL, env: ghostEnv(process.env, projectDir) });
       // A hanging ghost.start() (e.g. uvx stuck downloading) must not block
       // the bridge: bound it and fall into the chat-disabled catch below.
       ghostStart = withTimeout(ghost.start(), ghostStartTimeoutMs, 'ghost MCP server start');
@@ -266,7 +288,12 @@ export async function main(deps = {}) {
     if (ready === ABORTED || aborted) throw new Error('startup aborted');
 
     usbInterval = setTimer(() => {
-      adbClient.ensureUsbOnly().catch((err) => error('USB re-check failed:', err));
+      adbClient.ensureUsbOnly().catch((err) => {
+        // The engine may still be installing adb in the background; that is
+        // not a USB failure and must not spam the log every 5 seconds.
+        if (isMissingAdbError(err)) return;
+        error('USB re-check failed:', err);
+      });
     }, USB_RECHECK_MS);
     running = true;
   } catch (err) {
