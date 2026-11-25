@@ -662,6 +662,20 @@ body.chat-open .chat-fab {
   color: var(--ui-text-color);
 }
 
+/* The dock button doubles as a mode indicator: near-white while the panel
+   floats, the project's success green once it is docked beside the picture. */
+#chat-dock {
+  color: var(--ui-text-color);
+}
+
+body.chat-docked #chat-dock {
+  color: #5fd39b;
+}
+
+body.chat-docked #chat-dock:hover {
+  color: #5fd39b;
+}
+
 .chat-messages {
   flex: 1;
   min-height: 0;
