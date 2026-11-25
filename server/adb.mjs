@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { isIP } from 'node:net';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
@@ -61,6 +62,53 @@ export function parseDevices(text) {
     .map((fields) => fields[0]);
 }
 
+const ADB_TLS_SERVICES = new Set([
+  '_adb-tls-pairing._tcp',
+  '_adb-tls-connect._tcp',
+]);
+
+function parseIpv4(value) {
+  const address = String(value ?? '').trim();
+  return isIP(address) === 4 ? address : null;
+}
+
+function parsePort(value) {
+  const text = String(value ?? '').trim();
+  if (!/^\d+$/.test(text)) return null;
+  const port = Number(text);
+  return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
+}
+
+export function parseWifiIp(text) {
+  const output = String(text ?? '');
+  for (const match of output.matchAll(/\binet\s+(\S+)/g)) {
+    const address = parseIpv4(match[1].split('/')[0]);
+    if (address) return address;
+  }
+  const source = /\bsrc\s+(\S+)/.exec(output)?.[1];
+  return source ? parseIpv4(source) : null;
+}
+
+function parseMdnsEndpoint(value) {
+  const match = /^(?:\[([^\]]+)\]|([^:]+)):(\d+)$/.exec(String(value ?? '').trim());
+  if (!match) return null;
+  const host = match[1] ?? match[2];
+  const port = parsePort(match[3]);
+  if (isIP(host) === 0 || port === null) return null;
+  return { host, port };
+}
+
+export function parseMdnsServices(text) {
+  const entries = [];
+  for (const line of String(text ?? '').split('\n')) {
+    const [service, endpoint] = line.trim().split(/\s+/);
+    if (!ADB_TLS_SERVICES.has(service) || !endpoint) continue;
+    const parsed = parseMdnsEndpoint(endpoint);
+    if (parsed) entries.push({ service, ...parsed });
+  }
+  return entries;
+}
+
 export function createAdb(runner = defaultRunner, {
   serial = DEFAULT_USB_SERIAL,
   mode = 'usb',
@@ -74,6 +122,31 @@ export function createAdb(runner = defaultRunner, {
 
   async function getState(deviceSerial = activeSerial) {
     return runner(['-s', deviceSerial, 'get-state']);
+  }
+
+  async function getWifiIp(deviceSerial = activeSerial) {
+    const serialArgs = ['-s', deviceSerial, 'shell'];
+    let addresses;
+    try {
+      addresses = await runner([...serialArgs, 'ip', '-f', 'inet', 'addr', 'show', 'wlan0']);
+    } catch {
+      addresses = '';
+    }
+    const address = parseWifiIp(addresses);
+    if (address) return address;
+    const routes = await runner([...serialArgs, 'ip', 'route', 'show', 'dev', 'wlan0']);
+    return parseWifiIp(routes);
+  }
+
+  async function getWirelessConnectPort(deviceSerial = activeSerial) {
+    const output = await runner([
+      '-s', deviceSerial, 'shell', 'getprop', 'service.adb.tls.port',
+    ]);
+    return parsePort(output);
+  }
+
+  async function mdnsServices() {
+    return parseMdnsServices(await runner(['mdns', 'services']));
   }
 
   async function wirelessIsOnline(address) {
@@ -109,6 +182,9 @@ export function createAdb(runner = defaultRunner, {
     },
 
     getState,
+    getWifiIp,
+    getWirelessConnectPort,
+    mdnsServices,
 
     async ensureWirelessConnected(address) {
       if (await wirelessIsOnline(address)) return true;

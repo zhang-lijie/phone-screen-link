@@ -4,7 +4,9 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createConnectionConfigStore } from '../server/connection-config.mjs';
-import {
+import * as adbModule from '../server/adb.mjs';
+
+const {
   parseDevices,
   createAdb,
   WIFI_ADDRESS,
@@ -12,7 +14,7 @@ import {
   bundledAdbPath,
   isMissingAdbError,
   resolveAdbCommand,
-} from '../server/adb.mjs';
+} = adbModule;
 
 const devicesText = `List of devices attached
 2FD0221C09004177       device usb:1-5 product:NOH-AN01
@@ -24,6 +26,12 @@ function tempConnectionStore(t) {
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const file = join(dir, 'connection.json');
   return { file, store: createConnectionConfigStore({ file }) };
+}
+
+function discoveryExport(name) {
+  const value = adbModule[name];
+  assert.equal(typeof value, 'function', `${name} must be exported`);
+  return value;
 }
 
 test('parseDevices returns both transports', () => {
@@ -349,4 +357,167 @@ test('ensureWirelessConnected returns false if the address remains offline', asy
     ['connect', '10.0.0.5:5555'],
     ['-s', '10.0.0.5:5555', 'get-state'],
   ]);
+});
+
+test('parseWifiIp reads the IPv4 address from ip addr output', () => {
+  const parseWifiIp = discoveryExport('parseWifiIp');
+  const text = `3: wlan0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 state UP
+    inet 192.168.1.42/24 brd 192.168.1.255 scope global wlan0
+    inet6 fe80::1234:5678:9abc:def0/64 scope link
+`;
+  assert.equal(parseWifiIp(text), '192.168.1.42');
+});
+
+test('parseWifiIp reads the source address from ip route output', () => {
+  const parseWifiIp = discoveryExport('parseWifiIp');
+  const text = `default via 192.168.1.1 dev wlan0 proto dhcp src 192.168.1.42 metric 600
+192.168.1.0/24 dev wlan0 proto kernel scope link src 192.168.1.42 metric 600
+`;
+  assert.equal(parseWifiIp(text), '192.168.1.42');
+});
+
+test('parseWifiIp rejects missing and malformed IPv4 addresses', () => {
+  const parseWifiIp = discoveryExport('parseWifiIp');
+  const cases = [
+    '',
+    '3: wlan0: <BROADCAST,MULTICAST> mtu 1500 state DOWN\n',
+    '    inet 999.168.1.42/24 scope global wlan0\n',
+    '192.168.1.0/24 dev wlan0 src 192.168.1.999 metric 600\n',
+    '    inet6 fe80::1234:5678:9abc:def0/64 scope link\n',
+  ];
+  for (const text of cases) assert.equal(parseWifiIp(text), null, JSON.stringify(text));
+});
+
+test('getWifiIp targets the explicit USB serial without changing active state', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    return '    inet 192.168.1.42/24 scope global wlan0\n';
+  }, { mode: 'wifi', serial: 'ACTIVE-WIFI' });
+
+  assert.equal(await adb.getWifiIp('USB-SERIAL'), '192.168.1.42');
+  assert.deepEqual(calls, [
+    ['-s', 'USB-SERIAL', 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+  ]);
+  assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getSerial(), 'ACTIVE-WIFI');
+});
+
+test('getWifiIp falls back to ip route when wlan0 has no inet address', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    return args.includes('addr')
+      ? '3: wlan0: <BROADCAST,MULTICAST> mtu 1500 state DOWN\n'
+      : '192.168.1.0/24 dev wlan0 src 192.168.1.42 metric 600\n';
+  });
+
+  assert.equal(await adb.getWifiIp('USB-SERIAL'), '192.168.1.42');
+  assert.deepEqual(calls, [
+    ['-s', 'USB-SERIAL', 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+    ['-s', 'USB-SERIAL', 'shell', 'ip', 'route', 'show', 'dev', 'wlan0'],
+  ]);
+});
+
+test('getWifiIp falls back to ip route when the address query fails', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args.includes('addr')) throw new Error('wlan0 address query failed');
+    return '192.168.1.0/24 dev wlan0 src 192.168.1.42 metric 600\n';
+  });
+
+  assert.equal(await adb.getWifiIp('USB-SERIAL'), '192.168.1.42');
+  assert.deepEqual(calls, [
+    ['-s', 'USB-SERIAL', 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+    ['-s', 'USB-SERIAL', 'shell', 'ip', 'route', 'show', 'dev', 'wlan0'],
+  ]);
+});
+
+test('getWifiIp returns null when neither query contains an IPv4 address', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    return '';
+  });
+
+  assert.equal(await adb.getWifiIp('USB-SERIAL'), null);
+  assert.deepEqual(calls, [
+    ['-s', 'USB-SERIAL', 'shell', 'ip', '-f', 'inet', 'addr', 'show', 'wlan0'],
+    ['-s', 'USB-SERIAL', 'shell', 'ip', 'route', 'show', 'dev', 'wlan0'],
+  ]);
+});
+
+for (const { label, output, expected } of [
+  { label: 'accepts a numeric TLS port', output: '5555\n', expected: 5555 },
+  { label: 'trims whitespace and leading zeroes', output: ' 00080\n', expected: 80 },
+  { label: 'rejects an empty property', output: '\n', expected: null },
+  { label: 'rejects zero', output: '0\n', expected: null },
+  { label: 'rejects a port above 65535', output: '65536\n', expected: null },
+  { label: 'rejects a negative port', output: '-1\n', expected: null },
+  { label: 'rejects a fractional port', output: '5555.5\n', expected: null },
+  { label: 'rejects trailing junk', output: '5555oops\n', expected: null },
+]) {
+  test(`getWirelessConnectPort ${label}`, async () => {
+    const calls = [];
+    const adb = createAdb(async (args) => { calls.push(args); return output; }, {
+      mode: 'wifi',
+      serial: 'ACTIVE-WIFI',
+    });
+
+    assert.equal(await adb.getWirelessConnectPort('USB-SERIAL'), expected);
+    assert.deepEqual(calls, [
+      ['-s', 'USB-SERIAL', 'shell', 'getprop', 'service.adb.tls.port'],
+    ]);
+    assert.equal(adb.getMode(), 'wifi');
+    assert.equal(adb.getSerial(), 'ACTIVE-WIFI');
+  });
+}
+
+test('parseMdnsServices extracts TLS pairing and connect endpoints', () => {
+  const parseMdnsServices = discoveryExport('parseMdnsServices');
+  const text = `List of discovered mdns services
+_adb-tls-pairing._tcp\t192.168.1.42:37123
+_adb-tls-connect._tcp\t192.168.1.42:42123
+`;
+  assert.deepEqual(parseMdnsServices(text), [
+    { service: '_adb-tls-pairing._tcp', host: '192.168.1.42', port: 37123 },
+    { service: '_adb-tls-connect._tcp', host: '192.168.1.42', port: 42123 },
+  ]);
+});
+
+test('parseMdnsServices ignores unrelated and malformed TLS endpoints', () => {
+  const parseMdnsServices = discoveryExport('parseMdnsServices');
+  const text = `List of discovered mdns services
+_some-other._tcp\t192.168.1.42:12345
+_adb-tls-pairing._tcp\t192.168.1.42:0
+_adb-tls-pairing._tcp\t192.168.1.42:65536
+_adb-tls-pairing._tcp\t192.168.1.42:37x
+_adb-tls-connect._tcp\t999.168.1.42:42123
+_adb-tls-connect._tcp\t[fe80::1234:5678:9abc:def0]:42123
+`;
+  assert.deepEqual(parseMdnsServices(text), [
+    { service: '_adb-tls-connect._tcp', host: 'fe80::1234:5678:9abc:def0', port: 42123 },
+  ]);
+});
+
+test('parseMdnsServices returns no entries for empty or header-only output', () => {
+  const parseMdnsServices = discoveryExport('parseMdnsServices');
+  assert.deepEqual(parseMdnsServices(''), []);
+  assert.deepEqual(parseMdnsServices('List of discovered mdns services\n'), []);
+});
+
+test('mdnsServices runs the host command and returns parsed entries without changing active state', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    return 'List of discovered mdns services\n_adb-tls-pairing._tcp\t192.168.1.42:37123\n';
+  }, { mode: 'wifi', serial: 'ACTIVE-WIFI' });
+
+  assert.deepEqual(await adb.mdnsServices(), [
+    { service: '_adb-tls-pairing._tcp', host: '192.168.1.42', port: 37123 },
+  ]);
+  assert.deepEqual(calls, [['mdns', 'services']]);
+  assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getSerial(), 'ACTIVE-WIFI');
 });
