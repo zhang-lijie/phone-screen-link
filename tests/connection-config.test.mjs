@@ -12,7 +12,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createConnectionConfigStore, resolveInitialConnection } from '../server/connection-config.mjs';
+import { createConnectionConfigStore, isWirelessSerial, resolveInitialConnection } from '../server/connection-config.mjs';
 
 const DEFAULT_CONFIG = { mode: 'usb', address: '' };
 
@@ -86,6 +86,12 @@ test('resolveInitialConnection recognizes a hostname endpoint and trims it', () 
     resolveInitialConnection({ env: { PHONE_SERIAL: ' phone.local:5555 ' }, stored: {}, usbSerial: 'USB' }),
     { mode: 'wifi', serial: 'phone.local:5555' },
   );
+});
+
+test('isWirelessSerial explicitly rejects emulator USB serials', () => {
+  for (const serial of ['emulator-5554', 'emulator-5555', 'emulator-12345']) {
+    assert.equal(isWirelessSerial(serial), false, serial);
+  }
 });
 
 test('resolveInitialConnection uses a stored wireless address without an environment override', () => {

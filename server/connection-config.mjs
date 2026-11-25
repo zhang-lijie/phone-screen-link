@@ -9,7 +9,9 @@ export const DEFAULT_CONNECTION_CONFIG = Object.freeze({ mode: 'usb', address: '
 // for a wireless address. Full pairing-input validation belongs to the API.
 export function isWirelessSerial(value) {
   if (typeof value !== 'string') return false;
-  const match = /^(?:[A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\]):(\d+)$/.exec(value.trim());
+  const serial = value.trim();
+  if (/^emulator-\d+$/.test(serial)) return false;
+  const match = /^(?:[A-Za-z0-9._-]+|\[[0-9A-Fa-f:.]+\]):(\d+)$/.exec(serial);
   if (!match) return false;
   const port = Number(match[1]);
   return port >= 1 && port <= 65535;

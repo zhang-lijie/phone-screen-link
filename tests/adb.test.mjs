@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createConnectionConfigStore } from '../server/connection-config.mjs';
 import {
   parseDevices,
   createAdb,
@@ -15,6 +18,13 @@ const devicesText = `List of devices attached
 2FD0221C09004177       device usb:1-5 product:NOH-AN01
 192.168.3.123:5555     device product:NOH-AN01
 `;
+
+function tempConnectionStore(t) {
+  const dir = mkdtempSync(join(tmpdir(), 'adb-connection-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = join(dir, 'connection.json');
+  return { file, store: createConnectionConfigStore({ file }) };
+}
 
 test('parseDevices returns both transports', () => {
   assert.deepEqual(parseDevices(devicesText), [DEFAULT_USB_SERIAL, WIFI_ADDRESS]);
@@ -138,6 +148,47 @@ test('connect runs adb connect with the supplied address', async () => {
   const adb = createAdb(async (args) => { calls.push(args); return ''; });
   await adb.connect('192.168.1.20:5555');
   assert.deepEqual(calls, [['connect', '192.168.1.20:5555']]);
+});
+
+test('pair rejection preserves the active connection and persisted config bytes', async (t) => {
+  const { file, store } = tempConnectionStore(t);
+  const original = { mode: 'usb', address: '' };
+  store.save(original);
+  const before = readFileSync(file);
+  const adb = createAdb(async () => { throw new Error('pair rejected'); }, {
+    mode: 'usb',
+    serial: 'USB-ORIGINAL',
+  });
+
+  await assert.rejects(
+    adb.pair({ host: '192.168.1.20', port: 37123, code: '123456' }),
+    /pair rejected/,
+  );
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+  assert.deepEqual(readFileSync(file), before);
+  assert.deepEqual(store.load(), original);
+});
+
+test('connect rejection after pairing preserves the active connection and persisted config bytes', async (t) => {
+  const { file, store } = tempConnectionStore(t);
+  const original = { mode: 'usb', address: '' };
+  store.save(original);
+  const before = readFileSync(file);
+  const adb = createAdb(async (args) => {
+    if (args[0] === 'connect') throw new Error('connect rejected');
+    return '';
+  }, {
+    mode: 'usb',
+    serial: 'USB-ORIGINAL',
+  });
+
+  await adb.pair({ host: '192.168.1.20', port: 37123, code: '123456' });
+  await assert.rejects(adb.connect('192.168.1.20:5555'), /connect rejected/);
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+  assert.deepEqual(readFileSync(file), before);
+  assert.deepEqual(store.load(), original);
 });
 
 test('getState checks the explicit serial rather than the active serial', async () => {
