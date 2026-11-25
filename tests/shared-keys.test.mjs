@@ -362,3 +362,16 @@ test('chat input mode targets: chat open unchecks all, close restores defaults',
     touch: 'input_input_mode_',
   });
 });
+
+test('device picker strings are translated and interpolate the count', () => {
+  assert.equal(translate('en', 'device.multiple', { count: 2 }), 'Choose phone (2)');
+  assert.equal(translate('zh', 'device.multiple', { count: 2 }), '选择手机（2）');
+  for (const key of [
+    'device.title', 'device.none', 'device.switch', 'device.selected',
+    'device.unauthorized', 'device.offline', 'device.close', 'device.busy',
+    'device.selectFailed',
+  ]) {
+    assert.notEqual(translate('en', key), key, `${key} has an English value`);
+    assert.notEqual(translate('zh', key), key, `${key} has a Chinese value`);
+  }
+});

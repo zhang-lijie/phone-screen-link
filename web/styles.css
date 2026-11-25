@@ -469,6 +469,81 @@ body.nav-text-only #stream .control-button[data-label]::after {
   background: #3a73bb;
 }
 
+.status-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.device-button {
+  margin-top: calc(2px * var(--status-scale));
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--ui-text-muted);
+  font-family: inherit;
+  font-size: calc(12px * var(--status-scale));
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+.device-button[hidden] {
+  display: none;
+}
+
+.device-button:hover {
+  color: var(--ui-text-color);
+}
+
+.device-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.device-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid #343a44;
+  border-radius: 8px;
+  background: #1c2027;
+  color: var(--ui-text-color);
+  font-size: calc(12px * var(--ui-font-scale));
+  text-align: left;
+  cursor: pointer;
+}
+
+.device-item:hover:not(:disabled) {
+  border-color: #3a73bb;
+}
+
+.device-item:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.device-item small {
+  color: var(--ui-text-muted);
+  font-size: 0.9em;
+}
+
+.device-empty {
+  padding: 8px 0;
+  color: var(--ui-text-muted);
+  font-size: calc(12px * var(--ui-font-scale));
+}
+
 #status {
   margin-top: calc(2px * var(--status-scale));
   padding-left: 4px;

@@ -30,10 +30,14 @@ import {
 } from './keys.js';
 import { PRESET_COMMANDS, findCommands } from './chat-commands.js';
 
-// Loaded from the backend /health endpoint at startup so swapping phones
-// needs only the PHONE_SERIAL env var, no code edit here.
-let DEVICE_ID = window.__PHONE_SERIAL || '2FD0221C09004177';
+// The bridge owns the active serial; this page follows it. A second phone or
+// a replug can change it without a page reload.
+let DEVICE_ID = null;
 const BRIDGE_BASE = 'http://127.0.0.1:8100';
+const DEVICES_URL = `${BRIDGE_BASE}/api/devices`;
+const DEVICE_SELECT_URL = `${DEVICES_URL}/select`;
+const DEVICE_POLL_MS = 2000;
+const REMEMBERED_DEVICE_KEY = 'phoneLinkDevice';
 const BRIDGE_URL = `${BRIDGE_BASE}/keyevent`;
 const CHAT_CONFIG_URL = `${BRIDGE_BASE}/api/chat-config`;
 const CHAT_URL = `${BRIDGE_BASE}/chat`;
@@ -43,6 +47,9 @@ const SCREEN_STATE_POLL_MS = 3000;
 
 const streamEl = document.getElementById('stream');
 const statusEl = document.getElementById('status');
+const deviceButton = document.getElementById('device-button');
+const deviceOverlay = document.getElementById('device-overlay');
+const deviceListEl = document.getElementById('device-list');
 
 // The browser menu must never pop up over the mirrored phone: the engine uses
 // right-click as the phone's Back button, and a native menu would swallow the
@@ -85,6 +92,10 @@ applyWheelScale();
 let ladder = sizeLadder(settings);
 let lang = effectiveLanguage(settings, navigator.language);
 let screenState = {};
+let deviceList = [];
+let switching = false;
+let restoreTried = false;
+let reconnectTimer;
 let lockMessage = '';
 let statusKey = 'status.connecting';
 let statusVars = {};
@@ -323,6 +334,8 @@ function applyLanguage() {
     el.setAttribute('placeholder', t(el.dataset.i18nPlaceholder));
   }
   lockMessage = lockHint(screenState, lang);
+  renderDeviceButton();
+  renderDevicePicker();
   renderStatus();
   setFullscreen(document.body.classList.contains('screen-fullscreen'));
   updateBrowserFullscreenLabel();
@@ -344,6 +357,211 @@ function setStatus(key, vars) {
   statusKey = key;
   statusVars = vars ?? {};
   renderStatus();
+}
+
+// ------------------------------------------------------------------ devices
+
+function shortSerial(serial) {
+  return typeof serial === 'string' ? serial.slice(-4) : '';
+}
+
+function deviceLabel(device) {
+  const name = device.model || device.product || 'Phone';
+  return `${name} · ${shortSerial(device.serial)}`;
+}
+
+function deviceStateText(device) {
+  if (device.serial === DEVICE_ID) return t('device.selected');
+  if (device.state === 'unauthorized') return t('device.unauthorized');
+  if (device.state !== 'device') return t('device.offline');
+  return '';
+}
+
+function renderDeviceButton() {
+  if (!deviceButton) return;
+  if (DEVICE_ID) {
+    const current = deviceList.find((device) => device.serial === DEVICE_ID);
+    deviceButton.textContent = current ? deviceLabel(current) : shortSerial(DEVICE_ID);
+    deviceButton.title = t('device.switch');
+  } else if (deviceList.length) {
+    deviceButton.textContent = t('device.multiple', { count: deviceList.length });
+    deviceButton.title = t('device.title');
+  } else {
+    deviceButton.textContent = t('device.none');
+    deviceButton.title = t('device.title');
+  }
+  deviceButton.hidden = !DEVICE_ID && deviceList.length === 0;
+}
+
+function renderDevicePicker() {
+  if (!deviceListEl) return;
+  deviceListEl.replaceChildren();
+  if (!deviceList.length) {
+    const empty = document.createElement('li');
+    empty.className = 'device-empty';
+    empty.textContent = t('device.none');
+    deviceListEl.append(empty);
+    return;
+  }
+  for (const device of deviceList) {
+    const item = document.createElement('li');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'device-item';
+    button.dataset.serial = device.serial;
+    button.disabled = !device.selectable || switching || chatRunning;
+    const name = document.createElement('span');
+    name.textContent = deviceLabel(device);
+    button.append(name);
+    const state = deviceStateText(device);
+    if (state) {
+      const detail = document.createElement('small');
+      detail.textContent = state;
+      button.append(detail);
+    }
+    button.addEventListener('click', () => selectDevice(device.serial));
+    item.append(button);
+    deviceListEl.append(item);
+  }
+}
+
+function openDevicePicker() {
+  if (chatRunning) {
+    setStatus('device.busy');
+    return;
+  }
+  renderDevicePicker();
+  deviceOverlay.hidden = false;
+}
+
+function closeDevicePicker() {
+  deviceOverlay.hidden = true;
+}
+
+function rememberedDevice() {
+  try {
+    const value = localStorage.getItem(REMEMBERED_DEVICE_KEY);
+    return typeof value === 'string' && value ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+function stopCurrentStream() {
+  generation += 1;
+  clearTimeout(reconnectTimer);
+  try {
+    window.phoneLinkHandle?.stop();
+  } catch {
+    // The session may already be gone; the next stream is what matters.
+  }
+  window.phoneLinkHandle = null;
+}
+
+function switchDevice(serial) {
+  if (serial === DEVICE_ID && window.phoneLinkHandle) return;
+  stopCurrentStream();
+  DEVICE_ID = serial || null;
+  window.__PHONE_SERIAL = DEVICE_ID;
+  attempts = 0;
+  renderDeviceButton();
+  renderDevicePicker();
+  if (!deviceList.length) {
+    // /health fallback for an older bridge: no picker data, trust the serial.
+    if (DEVICE_ID) {
+      try { localStorage.setItem(REMEMBERED_DEVICE_KEY, DEVICE_ID); } catch {}
+      setStatus('status.connectPhone');
+      setTimeout(startStream, 250);
+    }
+    return;
+  }
+  if (!DEVICE_ID) {
+    setStatus(deviceList.length > 1 ? 'device.multiple' : 'device.none', { count: deviceList.length });
+    return;
+  }
+  try { localStorage.setItem(REMEMBERED_DEVICE_KEY, DEVICE_ID); } catch {}
+  if (!isUsableContext(location.protocol, location.hostname) || !window.WsScrcpy) {
+    setStatus('status.engineDown');
+    return;
+  }
+  setStatus('status.connectPhone');
+  // The engine releases its "active stream" flag asynchronously on stop.
+  setTimeout(startStream, 250);
+}
+
+async function selectDevice(serial) {
+  if (chatRunning) {
+    closeDevicePicker();
+    setStatus('device.busy');
+    return;
+  }
+  switching = true;
+  renderDevicePicker();
+  try {
+    const res = await fetch(DEVICE_SELECT_URL, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ serial }),
+    });
+    if (!res.ok) {
+      setStatus('device.selectFailed');
+      await refreshDevices();
+      return;
+    }
+    const info = await res.json().catch(() => ({}));
+    closeDevicePicker();
+    switchDevice(info.selected);
+  } catch (err) {
+    setStatus('status.bridgeDown', { error: messageOf(err) });
+  } finally {
+    switching = false;
+    renderDevicePicker();
+  }
+}
+
+async function refreshDevices() {
+  let payload;
+  try {
+    const res = await fetch(DEVICES_URL);
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    payload = await res.json();
+  } catch {
+    // Older bridges only have /health. Keep the page usable in that case.
+    try {
+      const res = await fetch(`${BRIDGE_BASE}/health`);
+      if (!res.ok) return;
+      const health = await res.json();
+      if (typeof health.serial === 'string' && health.serial) switchDevice(health.serial);
+    } catch {
+      // Bridge not up yet; the next poll will try again.
+    }
+    return;
+  }
+  deviceList = Array.isArray(payload.devices) ? payload.devices : [];
+  const selected = typeof payload.selected === 'string' && payload.selected ? payload.selected : null;
+
+  // Restore the browser's last choice once, if that phone is present.
+  if (!restoreTried) {
+    restoreTried = true;
+    const remembered = rememberedDevice();
+    if (remembered && remembered !== selected
+        && deviceList.some((device) => device.serial === remembered && device.selectable)) {
+      selectDevice(remembered);
+      return;
+    }
+  }
+
+  renderDeviceButton();
+  renderDevicePicker();
+  if (selected && selected !== DEVICE_ID) {
+    switchDevice(selected);
+  } else if (!selected && DEVICE_ID) {
+    // The chosen phone was unplugged. switchDevice(null) stops the old stream
+    // so keys can no longer reach a device that is no longer selected.
+    switchDevice(null);
+  } else if (!DEVICE_ID) {
+    setStatus(deviceList.length > 1 ? 'device.multiple' : 'device.none', { count: deviceList.length });
+  }
 }
 
 // The toolbox is created by the engine once the player attaches, so it can
@@ -501,6 +719,7 @@ const toolboxObserver = new MutationObserver(() => {
 toolboxObserver.observe(streamEl, { childList: true, subtree: true });
 
 async function pollScreenState() {
+  if (!DEVICE_ID) return;
   try {
     // Same origin as the page (port 8000), so no CORS or bridge is involved.
     const res = await fetch(`/api/devices/screen-state?udid=${encodeURIComponent(DEVICE_ID)}`);
@@ -535,6 +754,10 @@ for (const button of document.querySelectorAll('[data-key]')) {
       });
       if (res.status === 503) {
         setStatus('status.offline');
+        return;
+      }
+      if (res.status === 409) {
+        setStatus(deviceList.length > 1 ? 'device.multiple' : 'device.none', { count: deviceList.length });
         return;
       }
       if (!res.ok) {
@@ -1170,6 +1393,13 @@ function startStream() {
   options.onDisconnect = (reason) => {
     if (gen !== generation) return;
     setStatus('status.disconnected', { reason: reason ? ` — ${reason}` : '' });
+    // A replug of the same phone (or an auto-switch to the only remaining
+    // one) should reconnect without a manual page reload.
+    if (!DEVICE_ID) return;
+    clearTimeout(reconnectTimer);
+    reconnectTimer = setTimeout(() => {
+      if (gen === generation && DEVICE_ID) startStream();
+    }, Math.min(attempts, 3) * 1000);
   };
   options.onError = (err) => {
     if (gen !== generation) return;
@@ -1189,13 +1419,8 @@ function applySettings() {
   ladder = sizeLadder(settings);
   applyLanguage();
   closeSettings();
-  generation += 1; // ignore the old stream's late callbacks
   attempts = 0;
-  try {
-    window.phoneLinkHandle?.stop();
-  } catch {
-    // It may already be gone; the new session is what matters.
-  }
+  stopCurrentStream(); // ignore the old stream's late callbacks
   if (!isUsableContext(location.protocol, location.hostname) || !window.WsScrcpy) {
     setStatus('status.engineDown');
     return;
@@ -1203,6 +1428,12 @@ function applySettings() {
   setStatus('status.applying');
   setTimeout(startStream, 250);
 }
+
+deviceButton?.addEventListener('click', openDevicePicker);
+document.getElementById('device-close')?.addEventListener('click', closeDevicePicker);
+deviceOverlay?.addEventListener('click', (event) => {
+  if (event.target === deviceOverlay) closeDevicePicker();
+});
 
 applyLanguage();
 
@@ -1215,26 +1446,8 @@ async function boot() {
     setStatus('status.engineDown');
     return;
   }
-  // Ask the local bridge which device serial is configured, so changing
-  // phones is a backend env-var change only.
-  try {
-    const res = await fetch(`${BRIDGE_BASE}/health`);
-    if (res.ok) {
-      const info = await res.json();
-      if (typeof info.serial === 'string' && info.serial) {
-        DEVICE_ID = info.serial;
-        window.__PHONE_SERIAL = info.serial;
-      }
-    }
-  } catch {
-    // Bridge not up yet: keep the fallback serial.
-  }
-  setStatus('status.connectPhone');
-  try {
-    startStream();
-  } catch (err) {
-    setStatus('status.engineDownError', { error: messageOf(err) });
-  }
+  await refreshDevices();
+  setInterval(refreshDevices, DEVICE_POLL_MS);
 }
 
 // If the tab closes while chat is open, restore the phone's screen timeout.
