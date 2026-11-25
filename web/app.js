@@ -11,7 +11,8 @@ import {
   chatInputModeTargets,
   clampDockStreamWidth,
   clampPanelPosition,
-  clearWirelessPairing,
+  clearWirelessPairingResult,
+  createWirelessRequestGuard,
   loadWirelessPairing,
   readChatDock,
   readChatPosition,
@@ -553,6 +554,7 @@ let wirelessState = { mode: 'unknown', serial: '—', online: false };
 let wirelessFeedbackKey = '';
 let wirelessFeedbackVars = {};
 let wirelessFeedbackIsError = false;
+const wirelessRequests = createWirelessRequestGuard();
 
 function fillWirelessForm(values = DEFAULT_WIRELESS_PAIRING) {
   for (const field of WIRELESS_PAIRING_FIELDS) {
@@ -569,7 +571,7 @@ function readWirelessForm() {
 }
 
 function saveWirelessFormFromDom() {
-  saveWirelessPairing(localStorage, readWirelessForm());
+  saveWirelessPairing(() => localStorage, readWirelessForm());
 }
 
 function setWirelessFeedback(key, vars = {}, isError = false) {
@@ -626,25 +628,30 @@ function wirelessRequestError(res, payload) {
 }
 
 async function refreshWirelessStatus() {
-  try {
+  const result = await wirelessRequests.refresh(async () => {
     const res = await fetch(WIRELESS_STATUS_URL);
     const payload = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setWirelessFeedback('wireless.error.request', wirelessRequestError(res, payload), true);
-      return;
-    }
-    if (!applyWirelessStatus(payload)) {
-      setWirelessFeedback('wireless.error.invalidResponse', {}, true);
-    }
-  } catch (err) {
-    setWirelessFeedback('wireless.error.network', { error: messageOf(err) }, true);
+    return { res, payload };
+  });
+  if (result.stale) return;
+  if (result.error) {
+    setWirelessFeedback('wireless.error.network', { error: messageOf(result.error) }, true);
+    return;
+  }
+  const { res, payload } = result.value;
+  if (!res.ok) {
+    setWirelessFeedback('wireless.error.request', wirelessRequestError(res, payload), true);
+    return;
+  }
+  if (!applyWirelessStatus(payload)) {
+    setWirelessFeedback('wireless.error.invalidResponse', {}, true);
   }
 }
 
 function openWireless() {
   if (!wirelessOverlay.hidden) return;
   wirelessTrigger = document.activeElement;
-  fillWirelessForm(loadWirelessPairing(localStorage));
+  fillWirelessForm(loadWirelessPairing(() => localStorage));
   setWirelessFeedback('');
   wirelessOverlay.hidden = false;
   wirelessFields.pairHost.focus();
@@ -666,7 +673,7 @@ function activateDevice(serial) {
 async function pairWireless() {
   if (wirelessBusy) return;
   const values = readWirelessForm();
-  saveWirelessPairing(localStorage, values);
+  saveWirelessPairing(() => localStorage, values);
   const body = {
     pairHost: values.pairHost.trim(),
     pairPort: Number(values.pairPort),
@@ -677,12 +684,21 @@ async function pairWireless() {
   setWirelessBusy(true);
   setWirelessFeedback('wireless.pairing');
   try {
-    const res = await fetch(WIRELESS_PAIR_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify(body),
+    const result = await wirelessRequests.mutate(async () => {
+      const res = await fetch(WIRELESS_PAIR_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await res.json().catch(() => ({}));
+      return { res, payload };
     });
-    const payload = await res.json().catch(() => ({}));
+    if (result.stale) return;
+    if (result.error) {
+      setWirelessFeedback('wireless.error.network', { error: messageOf(result.error) }, true);
+      return;
+    }
+    const { res, payload } = result.value;
     if (!res.ok) {
       setWirelessFeedback('wireless.error.request', wirelessRequestError(res, payload), true);
       return;
@@ -697,8 +713,6 @@ async function pairWireless() {
     }
     setWirelessFeedback('wireless.connected');
     restartStream('status.applying');
-  } catch (err) {
-    setWirelessFeedback('wireless.error.network', { error: messageOf(err) }, true);
   } finally {
     setWirelessBusy(false);
   }
@@ -709,12 +723,21 @@ async function switchToUsb() {
   setWirelessBusy(true);
   setWirelessFeedback('wireless.switchingUsb');
   try {
-    const res = await fetch(WIRELESS_USB_URL, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
+    const result = await wirelessRequests.mutate(async () => {
+      const res = await fetch(WIRELESS_USB_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      });
+      const payload = await res.json().catch(() => ({}));
+      return { res, payload };
     });
-    const payload = await res.json().catch(() => ({}));
+    if (result.stale) return;
+    if (result.error) {
+      setWirelessFeedback('wireless.error.network', { error: messageOf(result.error) }, true);
+      return;
+    }
+    const { res, payload } = result.value;
     if (!res.ok) {
       setWirelessFeedback('wireless.error.request', wirelessRequestError(res, payload), true);
       return;
@@ -729,8 +752,6 @@ async function switchToUsb() {
     }
     setWirelessFeedback('wireless.usbConnected');
     restartStream('status.applying');
-  } catch (err) {
-    setWirelessFeedback('wireless.error.network', { error: messageOf(err) }, true);
   } finally {
     setWirelessBusy(false);
   }
@@ -743,16 +764,20 @@ wirelessForm.addEventListener('submit', (event) => {
 });
 wirelessUsb.addEventListener('click', switchToUsb);
 wirelessClear.addEventListener('click', () => {
-  clearWirelessPairing(localStorage);
+  const result = clearWirelessPairingResult(() => localStorage);
+  if (!result.cleared) {
+    setWirelessFeedback(result.feedbackKey, {}, result.isError);
+    return;
+  }
   fillWirelessForm(DEFAULT_WIRELESS_PAIRING);
-  setWirelessFeedback('wireless.cleared');
+  setWirelessFeedback(result.feedbackKey, {}, result.isError);
   wirelessFields.pairHost.focus();
 });
 document.getElementById('wireless-close').addEventListener('click', closeWireless);
 wirelessOverlay.addEventListener('click', (event) => {
   if (event.target === wirelessOverlay) closeWireless();
 });
-fillWirelessForm(loadWirelessPairing(localStorage));
+fillWirelessForm(loadWirelessPairing(() => localStorage));
 
 const toolboxObserver = new MutationObserver(() => {
   labelToolbox();

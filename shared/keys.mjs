@@ -151,6 +151,7 @@ export const MESSAGES = {
     'wireless.error.request': 'Wireless request failed ({status}) — {error}',
     'wireless.error.network': 'Cannot reach the control bridge — {error}',
     'wireless.error.invalidResponse': 'The control bridge returned an invalid wireless response',
+    'wireless.error.storage': 'Cannot access browser storage — saved pairing information was not removed',
     'wireless.warning': 'Warning: the full form, including the pairing code, is saved in plain text in this browser\'s localStorage. Anyone with access to this browser profile can read it. Pairing codes expire; if pairing fails, get the current code from the phone. Use “Clear saved pairing information” to remove it.',
     // Chat feature: floating button, panel and the settings group. The
     // config itself lives on the backend; these are display strings only.
@@ -346,6 +347,7 @@ export const MESSAGES = {
     'wireless.error.request': '无线请求失败（{status}）— {error}',
     'wireless.error.network': '无法连接控制桥 — {error}',
     'wireless.error.invalidResponse': '控制桥返回了无效的无线状态',
+    'wireless.error.storage': '无法访问浏览器存储 — 未删除已保存的配对信息',
     'wireless.warning': '警告：完整表单（含配对码）会以明文保存到此浏览器的 localStorage。能够访问此浏览器配置文件的任何人都可读取。配对码会过期；如果配对失败，请从手机获取最新配对码。使用“清除已保存配对信息”可删除。',
     'chat.button': '聊天助手',
     'chat.title': '聊天助手',
@@ -540,17 +542,23 @@ function normalizeWirelessPairing(raw) {
   ]));
 }
 
-export function loadWirelessPairing(storage) {
+function resolveWirelessStorage(storageOrProvider) {
+  return typeof storageOrProvider === 'function' ? storageOrProvider() : storageOrProvider;
+}
+
+export function loadWirelessPairing(storageOrProvider) {
   try {
+    const storage = resolveWirelessStorage(storageOrProvider);
     return normalizeWirelessPairing(JSON.parse(storage?.getItem(WIRELESS_PAIRING_STORAGE_KEY)));
   } catch {
     return { ...DEFAULT_WIRELESS_PAIRING };
   }
 }
 
-export function saveWirelessPairing(storage, values) {
+export function saveWirelessPairing(storageOrProvider, values) {
   const normalized = normalizeWirelessPairing(values);
   try {
+    const storage = resolveWirelessStorage(storageOrProvider);
     storage?.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify(normalized));
   } catch {
     // Private browsing or a full quota: the current session still has the form.
@@ -558,12 +566,61 @@ export function saveWirelessPairing(storage, values) {
   return normalized;
 }
 
-export function clearWirelessPairing(storage) {
+export function clearWirelessPairing(storageOrProvider) {
   try {
-    storage?.removeItem(WIRELESS_PAIRING_STORAGE_KEY);
+    const storage = resolveWirelessStorage(storageOrProvider);
+    if (!storage || typeof storage.removeItem !== 'function') return false;
+    storage.removeItem(WIRELESS_PAIRING_STORAGE_KEY);
+    return true;
   } catch {
-    // Storage disabled: there is nothing this page can do about it.
+    // The caller must not claim removal succeeded when storage is inaccessible.
+    return false;
   }
+}
+
+export function clearWirelessPairingResult(storageOrProvider) {
+  const cleared = clearWirelessPairing(storageOrProvider);
+  return {
+    cleared,
+    feedbackKey: cleared ? 'wireless.cleared' : 'wireless.error.storage',
+    isError: !cleared,
+  };
+}
+
+// A modal-open status refresh can overlap a pair/USB mutation. Only the newest
+// refresh may update the display, and mutations invalidate refreshes both when
+// they start and when they settle. Refreshes started during a mutation never run.
+export function createWirelessRequestGuard() {
+  let version = 0;
+  let mutationActive = false;
+
+  async function settle(request, token) {
+    try {
+      const value = await request();
+      return token === version ? { stale: false, value } : { stale: true };
+    } catch (error) {
+      return token === version ? { stale: false, error } : { stale: true };
+    }
+  }
+
+  return {
+    refresh(request) {
+      if (mutationActive) return Promise.resolve({ stale: true });
+      const token = ++version;
+      return settle(request, token);
+    },
+    async mutate(request) {
+      mutationActive = true;
+      version += 1;
+      const token = version;
+      try {
+        return await settle(request, token);
+      } finally {
+        version += 1;
+        mutationActive = false;
+      }
+    },
+  };
 }
 
 // Wheel-scroll amplification: how many engine scroll steps the phone is
