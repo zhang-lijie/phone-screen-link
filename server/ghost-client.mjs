@@ -78,9 +78,9 @@ export function createGhostClient(
     return tools;
   }
 
-  async function callTool(name, toolArgs = {}) {
+  async function callTool(name, toolArgs = {}, targetSerial = currentSerial()) {
     const args = { ...toolArgs };
-    const deviceSerial = currentSerial();
+    const deviceSerial = targetSerial;
     // ghost tools are device-scoped. Inject/override the serial so neither
     // internal calls nor model-generated calls can target the wrong device.
     if (deviceSerial && (deviceRequiredTools === null || deviceRequiredTools.has(name))) {
@@ -89,5 +89,5 @@ export function createGhostClient(
     return requireClient().callTool({ name, arguments: args });
   }
 
-  return { start, stop, listTools, callTool };
+  return { start, stop, listTools, callTool, getSerial: currentSerial };
 }

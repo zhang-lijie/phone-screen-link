@@ -74,10 +74,13 @@ export async function runPresetCommand({ commandId, lang, deps = {} }) {
   if (!command) {
     return { ok: false, reply: strings(lang).noContent, steps: [] };
   }
+  // Authorization and execution must describe the same device even if a
+  // wireless/USB switch lands while this command is in flight.
+  const turnSerial = deps.getSerial?.() ?? deps.serial ?? deps.ghost?.getSerial?.();
   let locked = true;
   try {
     if (typeof deps.isLocked === 'function') {
-      const value = await deps.isLocked();
+      const value = await deps.isLocked(turnSerial);
       locked = typeof value === 'boolean' ? value : true;
     }
   } catch {
@@ -86,9 +89,9 @@ export async function runPresetCommand({ commandId, lang, deps = {} }) {
   if (locked) {
     return { ok: false, reply: strings(lang).locked, steps: [] };
   }
-  const callTool = deps.callTool ?? ((name, toolArgs) => deps.ghost.callTool(name, toolArgs));
+  const callTool = deps.callTool ?? ((name, toolArgs) => deps.ghost.callTool(name, toolArgs, turnSerial));
   try {
-    const result = await callTool(command.tool, { ...command.args });
+    const result = await callTool(command.tool, { ...command.args }, turnSerial);
     const ok = result?.isError !== true;
     const text = textOf(result);
     // Full text is returned; the chat panel folds long messages (double-click
@@ -101,8 +104,11 @@ export async function runPresetCommand({ commandId, lang, deps = {} }) {
 }
 
 export async function runAgentTurn({ config, ghost, userText, lang, deps = {} }) {
+  // Capture once: the lock check and every ghost tool call in this turn must
+  // target the same device, even if the active transport changes mid-turn.
+  const turnSerial = deps.getSerial?.() ?? deps.serial ?? ghost?.getSerial?.();
   const listTools = deps.listTools ?? (() => ghost.listTools());
-  const callTool = deps.callTool ?? ((name, toolArgs) => ghost.callTool(name, toolArgs));
+  const callTool = deps.callTool ?? ((name, toolArgs) => ghost.callTool(name, toolArgs, turnSerial));
   const complete =
     deps.chatCompletion ??
     ((params) =>
@@ -156,7 +162,7 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
   let locked = true;
   try {
     if (typeof deps.isLocked === 'function') {
-      const value = await deps.isLocked();
+      const value = await deps.isLocked(turnSerial);
       locked = typeof value === 'boolean' ? value : true;
     }
   } catch {
@@ -226,7 +232,7 @@ export async function runAgentTurn({ config, ghost, userText, lang, deps = {} })
         return { reply: t.invalidArgs(name, validation.error), steps };
       }
 
-      const result = await callTool(name, args);
+      const result = await callTool(name, args, turnSerial);
       const ok = result?.isError !== true;
       steps.push({ tool: name, ok });
 

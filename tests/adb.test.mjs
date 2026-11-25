@@ -139,6 +139,20 @@ test('isLocked: unreadable wakefulness fails closed as locked', async () => {
 });
 
 
+test('isLocked: an explicit serial pins both power and trust probes to that device', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    return args.includes('power') ? 'mWakefulness=Awake\n' : 'deviceLocked=0\n';
+  }, { mode: 'wifi', serial: 'ACTIVE-AFTER-SWITCH' });
+
+  assert.equal(await adb.isLocked('PINNED-TURN-SERIAL'), false);
+  assert.deepEqual(calls, [
+    ['-s', 'PINNED-TURN-SERIAL', 'shell', 'dumpsys', 'power'],
+    ['-s', 'PINNED-TURN-SERIAL', 'shell', 'dumpsys', 'trust'],
+  ]);
+});
+
 test('wakeScreen sends KEYCODE_WAKEUP on the configured serial', async () => {
   const calls = [];
   const adb = createAdb(async (args) => { calls.push(args); return ''; });

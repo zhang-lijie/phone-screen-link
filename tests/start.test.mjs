@@ -507,6 +507,26 @@ test('chat.run goes through the agent loop and the phone-state gate', async () =
   await handlers.get('SIGINT')();
 });
 
+test('chat preset wiring pins the ADB lock check and ghost call to the captured active serial', async () => {
+  const { deps, calls, handlers, adbClient, ghost } = fakeRuntime();
+  const lockSerials = [];
+  const toolSerials = [];
+  adbClient.isLocked = async (serial) => { lockSerials.push(serial); return false; };
+  ghost.callTool = async (name, args, serial) => {
+    toolSerials.push(serial);
+    return { content: [{ type: 'text', text: 'done' }] };
+  };
+
+  await main(deps);
+  adbClient.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+  const result = await calls.bridgeOptions.chat.runCommand('desktop', 'en');
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(lockSerials, ['10.0.0.5:5555']);
+  assert.deepEqual(toolSerials, ['10.0.0.5:5555']);
+  await handlers.get('SIGINT')();
+});
+
 test('a hanging ghost start is bounded: startup completes with chat disabled', async () => {
   const { deps, calls, handlers, chatConfig } = fakeRuntime({ ghostStartTimeoutMs: 50 });
   deps.createGhostClient = () => ({

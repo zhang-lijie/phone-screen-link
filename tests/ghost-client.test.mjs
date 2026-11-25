@@ -145,6 +145,24 @@ test('ghost client: callTool follows the active adb serial after a connection sw
   assert.equal(deps.transports[0].serverParams.env.DEFAULT_DEVICE, SERIAL);
 });
 
+test('ghost client: an explicit per-turn serial overrides a later active serial change', async () => {
+  const deps = makeDeps();
+  let activeSerial = SERIAL;
+  const client = createGhostClient({ getSerial: () => activeSerial }, deps);
+  await client.start();
+  deps.clients[0].tools = [
+    { name: 'tap', inputSchema: { type: 'object', required: ['device'] } },
+  ];
+  await client.listTools();
+
+  activeSerial = '10.0.0.5:5555';
+  await client.callTool('tap', { x: 1, y: 2 }, SERIAL);
+
+  assert.deepEqual(deps.clients[0].callToolCalls, [
+    { name: 'tap', arguments: { x: 1, y: 2, device: SERIAL } },
+  ]);
+});
+
 test('ghost client: stop() closes the client and is safe to call repeatedly', async () => {
   const deps = makeDeps();
   const client = createGhostClient({ serial: SERIAL }, deps);

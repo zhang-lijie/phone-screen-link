@@ -158,8 +158,8 @@ export function createAdb(runner = defaultRunner, {
     // current app/activity only (no lock info), so the chat gate uses this
     // instead. Unreadable state fails closed: a possibly locked device must
     // never reach the model or action tools.
-    async isLocked() {
-      const serialArgs = ['-s', activeSerial, 'shell'];
+    async isLocked(deviceSerial = activeSerial) {
+      const serialArgs = ['-s', deviceSerial, 'shell'];
       const power = await runner([...serialArgs, 'dumpsys', 'power']);
       const wake = /mWakefulness=(\w+)/.exec(power)?.[1];
       if (wake !== 'Awake') return true; // asleep or unreadable

@@ -286,12 +286,19 @@ export async function main(deps = {}) {
             userText,
             lang,
             // Real lock/sleep state comes from ADB; ghost has no lock tool.
-            deps: { isLocked: () => adbClient.isLocked() },
+            deps: {
+              getSerial: () => adbClient.getSerial(),
+              isLocked: (serial) => adbClient.isLocked(serial),
+            },
           }),
           runCommand: (commandId, lang) => runPresetCommand({
             commandId,
             lang,
-            deps: { ghost, isLocked: () => adbClient.isLocked() },
+            deps: {
+              ghost,
+              getSerial: () => adbClient.getSerial(),
+              isLocked: (serial) => adbClient.isLocked(serial),
+            },
           }),
         }
       : undefined;
