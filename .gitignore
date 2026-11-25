@@ -5,5 +5,6 @@ state/
 *.log
 
 .worktrees/
+.superpowers/
 __pycache__/
 *.pyc
