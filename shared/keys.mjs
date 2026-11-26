@@ -164,6 +164,20 @@ export const MESSAGES = {
     'wireless.error.storage': 'Cannot access browser storage — saved pairing information was not removed',
     'wireless.error.save': 'Browser storage is unavailable — pairing still works, but the form will be lost on reload',
     'wireless.warning': 'Warning: the full form, including the pairing code, is saved in plain text in this browser\'s localStorage. Anyone with access to this browser profile can read it. Pairing codes expire; if pairing fails, get the current code from the phone. Use “Clear saved pairing information” to remove it.',
+    'wireless.modeLabel': 'Connection mode',
+    'wireless.mode.pair': 'Android 11+ pairing code',
+    'wireless.mode.legacy': 'Legacy 5555 (no pairing code)',
+    'wireless.groupLegacy': 'Legacy TCP connection',
+    'wireless.legacyHint': 'For devices without a pairing-code dialog. Use the phone IP shown on its Wireless debugging screen; port 5555 is the default.',
+    'wireless.legacyHost': 'Phone IP',
+    'wireless.legacyPort': 'Port',
+    'wireless.legacyAuto': 'Auto-fetch & connect',
+    'wireless.legacyAuto.loading': 'Fetching IP and enabling TCP mode…',
+    'wireless.legacyConnect': 'Connect',
+    'wireless.legacy.connecting': 'Connecting…',
+    'wireless.legacy.connected': 'Legacy wireless connected — restarting stream…',
+    'wireless.error.legacyUsbOffline': 'The USB device is offline — connect and authorize it before auto-connecting',
+    'wireless.legacyWarning': 'Warning: legacy mode is unencrypted and has no authentication. Use it only on a trusted LAN.',
     // Chat feature: floating button, panel and the settings group. The
     // config itself lives on the backend; these are display strings only.
     'chat.button': 'Chat assistant',
@@ -371,6 +385,20 @@ export const MESSAGES = {
     'wireless.error.storage': '无法访问浏览器存储 — 未删除已保存的配对信息',
     'wireless.error.save': '浏览器存储不可用 — 仍可正常配对，但表单会在刷新后丢失',
     'wireless.warning': '警告：完整表单（含配对码）会以明文保存到此浏览器的 localStorage。能够访问此浏览器配置文件的任何人都可读取。配对码会过期；如果配对失败，请从手机获取最新配对码。使用“清除已保存配对信息”可删除。',
+    'wireless.modeLabel': '连接方式',
+    'wireless.mode.pair': 'Android 11+ 配对码',
+    'wireless.mode.legacy': '传统 5555（无需配对码）',
+    'wireless.groupLegacy': '传统 TCP 连接',
+    'wireless.legacyHint': '适用于没有配对码弹窗的设备。手机 IP 见「无线调试」主页面，端口默认 5555。',
+    'wireless.legacyHost': '手机 IP',
+    'wireless.legacyPort': '端口',
+    'wireless.legacyAuto': '自动获取并连接',
+    'wireless.legacyAuto.loading': '正在获取 IP 并开启 TCP 模式…',
+    'wireless.legacyConnect': '连接',
+    'wireless.legacy.connecting': '正在连接…',
+    'wireless.legacy.connected': '传统无线连接成功 — 正在重启画面…',
+    'wireless.error.legacyUsbOffline': 'USB 设备已离线 — 请先连接并授权 USB 调试后再自动获取并连接',
+    'wireless.legacyWarning': '警告：传统模式未加密、无认证，仅可在可信局域网中使用。',
     'chat.button': '聊天助手',
     'chat.title': '聊天助手',
     'chat.close': '关闭聊天',
@@ -561,6 +589,17 @@ export const DEFAULT_WIRELESS_PAIRING = Object.freeze({
   connectPort: '',
 });
 
+// The selected method and legacy form live in the SAME localStorage entry as
+// the pairing form. Keeping them alongside the pair fields means one clear
+// action removes everything, and a mode switch can never overwrite the code.
+export const WIRELESS_METHODS = Object.freeze({ PAIR: 'pair', LEGACY: 'legacy' });
+export const WIRELESS_MODE_FIELDS = Object.freeze(['method', 'legacyHost', 'legacyPort']);
+export const DEFAULT_WIRELESS_MODE = Object.freeze({
+  method: WIRELESS_METHODS.PAIR,
+  legacyHost: '',
+  legacyPort: '5555',
+});
+
 function normalizeWirelessPairing(raw) {
   const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
   return Object.fromEntries(WIRELESS_PAIRING_FIELDS.map((field) => [
@@ -569,8 +608,36 @@ function normalizeWirelessPairing(raw) {
   ]));
 }
 
+function normalizeWirelessMode(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const rawPort = typeof source.legacyPort === 'string'
+    ? source.legacyPort
+    : (Number.isInteger(source.legacyPort) ? String(source.legacyPort) : '');
+  const legacyPort = /^\d{1,5}$/.test(rawPort)
+    && Number(rawPort) >= 1 && Number(rawPort) <= 65535
+    ? rawPort
+    : DEFAULT_WIRELESS_MODE.legacyPort;
+  return {
+    method: source.method === WIRELESS_METHODS.LEGACY ? WIRELESS_METHODS.LEGACY : WIRELESS_METHODS.PAIR,
+    legacyHost: typeof source.legacyHost === 'string' ? source.legacyHost : DEFAULT_WIRELESS_MODE.legacyHost,
+    legacyPort,
+  };
+}
+
 function resolveWirelessStorage(storageOrProvider) {
   return typeof storageOrProvider === 'function' ? storageOrProvider() : storageOrProvider;
+}
+
+function readStoredWirelessMode(storage) {
+  try {
+    const raw = JSON.parse(storage?.getItem(WIRELESS_PAIRING_STORAGE_KEY));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return Object.fromEntries(WIRELESS_MODE_FIELDS
+      .filter((field) => Object.hasOwn(raw, field))
+      .map((field) => [field, raw[field]]));
+  } catch {
+    return {};
+  }
 }
 
 export function loadWirelessPairing(storageOrProvider) {
@@ -589,11 +656,45 @@ export function saveWirelessPairing(storageOrProvider, values) {
     if (!storage || typeof storage.setItem !== 'function') {
       return { saved: false, values: normalized };
     }
-    storage.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify(normalized));
+    // Preserve the selected method and legacy fields: saving the pair form
+    // happens on every keystroke, so it must not silently reset the mode.
+    storage.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({
+      ...normalized,
+      ...readStoredWirelessMode(storage),
+    }));
     return { saved: true, values: normalized };
   } catch {
     // Private browsing or a full quota: pairing remains usable for this
     // session, but the caller must not claim the form will survive reload.
+    return { saved: false, values: normalized };
+  }
+}
+
+export function loadWirelessMode(storageOrProvider) {
+  try {
+    const storage = resolveWirelessStorage(storageOrProvider);
+    return normalizeWirelessMode(JSON.parse(storage?.getItem(WIRELESS_PAIRING_STORAGE_KEY)));
+  } catch {
+    return { ...DEFAULT_WIRELESS_MODE };
+  }
+}
+
+export function saveWirelessMode(storageOrProvider, values) {
+  const normalized = normalizeWirelessMode(values);
+  try {
+    const storage = resolveWirelessStorage(storageOrProvider);
+    if (!storage || typeof storage.setItem !== 'function') {
+      return { saved: false, values: normalized };
+    }
+    let pairValues;
+    try {
+      pairValues = normalizeWirelessPairing(JSON.parse(storage.getItem(WIRELESS_PAIRING_STORAGE_KEY)));
+    } catch {
+      pairValues = { ...DEFAULT_WIRELESS_PAIRING };
+    }
+    storage.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({ ...pairValues, ...normalized }));
+    return { saved: true, values: normalized };
+  } catch {
     return { saved: false, values: normalized };
   }
 }
@@ -606,6 +707,13 @@ export function isWirelessPairingSuccess(payload) {
     && payload.serial.trim() !== ''
     && payload.online === true,
   );
+}
+
+// A legacy connect returns the same whitelisted status payload as pairing, so
+// the activation rules are identical: only an online wifi target may replace
+// DEVICE_ID and restart the stream.
+export function isLegacyConnectSuccess(payload) {
+  return isWirelessPairingSuccess(payload);
 }
 
 function normalizeWirelessAutoHost(value) {

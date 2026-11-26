@@ -3,6 +3,7 @@
 // import would be refused by the browser.
 import {
   DEFAULT_SETTINGS,
+  DEFAULT_WIRELESS_MODE,
   DEFAULT_WIRELESS_PAIRING,
   ENGINE_TEXT_KEYS,
   CHAT_INPUT_MODE_IDS,
@@ -13,10 +14,13 @@ import {
   clampPanelPosition,
   clearWirelessPairingResult,
   createWirelessRequestGuard,
+  isLegacyConnectSuccess,
+  loadWirelessMode,
   loadWirelessPairing,
   readChatDock,
   readChatPosition,
   readChatSplitRatio,
+  saveWirelessMode,
   saveWirelessPairing,
   shouldCenterDock,
   writeChatDock,
@@ -51,6 +55,7 @@ const CHAT_SCREEN_URL = `${BRIDGE_BASE}/api/chat-screen`;
 const WIRELESS_STATUS_URL = `${BRIDGE_BASE}/api/wireless`;
 const WIRELESS_AUTO_URL = `${BRIDGE_BASE}/api/wireless/auto`;
 const WIRELESS_PAIR_URL = `${BRIDGE_BASE}/api/wireless/pair`;
+const WIRELESS_LEGACY_URL = `${BRIDGE_BASE}/api/wireless/legacy`;
 const WIRELESS_USB_URL = `${BRIDGE_BASE}/api/wireless/usb`;
 const SCREEN_STATE_POLL_MS = 3000;
 
@@ -557,9 +562,18 @@ const wirelessSubmit = document.getElementById('wireless-submit');
 const wirelessAuto = document.getElementById('wireless-auto');
 const wirelessUsb = document.getElementById('wireless-usb');
 const wirelessClear = document.getElementById('wireless-clear');
+const wirelessMode = document.getElementById('wireless-mode');
+const wirelessPairSection = document.getElementById('wireless-pair-section');
+const wirelessLegacySection = document.getElementById('wireless-legacy-section');
+const wirelessLegacyWarning = document.getElementById('wireless-legacy-warning');
+const wirelessLegacyHost = document.getElementById('wireless-legacy-host');
+const wirelessLegacyPort = document.getElementById('wireless-legacy-port');
+const wirelessLegacyAuto = document.getElementById('wireless-legacy-auto');
+const wirelessLegacyConnect = document.getElementById('wireless-legacy-connect');
 let wirelessTrigger = null;
 let wirelessBusy = false;
 let wirelessAutoBusy = false;
+let wirelessLegacyBusy = '';
 let wirelessRefreshTimer = null;
 let wirelessState = { mode: 'unknown', serial: '—', online: false, usbOnline: false };
 let wirelessFeedbackKey = '';
@@ -592,6 +606,36 @@ function saveWirelessFormFromDom() {
     setWirelessStorageFeedback('');
   }
   return result;
+}
+
+function currentWirelessMethod() {
+  return wirelessMode.value === 'legacy' ? 'legacy' : 'pair';
+}
+
+function renderWirelessMode() {
+  const legacy = currentWirelessMethod() === 'legacy';
+  wirelessPairSection.hidden = legacy;
+  wirelessLegacySection.hidden = !legacy;
+  wirelessLegacyWarning.hidden = !legacy;
+  renderWirelessLegacyButtons();
+}
+
+function saveWirelessModeFromDom() {
+  const result = saveWirelessMode(() => localStorage, {
+    method: currentWirelessMethod(),
+    legacyHost: wirelessLegacyHost.value,
+    legacyPort: wirelessLegacyPort.value,
+  });
+  if (!result.saved) setWirelessStorageFeedback('wireless.error.save');
+  return result;
+}
+
+function renderWirelessLegacyButtons() {
+  wirelessLegacyAuto.disabled = wirelessBusy || Boolean(wirelessLegacyBusy) || wirelessState.usbOnline !== true;
+  wirelessLegacyAuto.textContent = t(wirelessLegacyBusy === 'auto' ? 'wireless.legacyAuto.loading' : 'wireless.legacyAuto');
+  wirelessLegacyAuto.classList.toggle('is-loading', wirelessLegacyBusy === 'auto');
+  wirelessLegacyAuto.setAttribute('aria-busy', String(wirelessLegacyBusy === 'auto'));
+  wirelessLegacyConnect.disabled = wirelessBusy;
 }
 
 function setWirelessFeedback(key, vars = {}, isError = false, isWarning = false) {
@@ -637,6 +681,7 @@ function renderWirelessAutoButton() {
   wirelessAuto.textContent = t(wirelessAutoBusy ? 'wireless.auto.loading' : 'wireless.auto');
   wirelessAuto.classList.toggle('is-loading', wirelessAutoBusy);
   wirelessAuto.setAttribute('aria-busy', String(wirelessAutoBusy));
+  renderWirelessLegacyButtons();
 }
 
 function applyWirelessStatus(payload) {
@@ -773,10 +818,16 @@ function openWireless() {
   if (!wirelessOverlay.hidden) return;
   wirelessTrigger = document.activeElement;
   fillWirelessForm(loadWirelessPairing(() => localStorage));
+  const savedMode = loadWirelessMode(() => localStorage);
+  wirelessMode.value = savedMode.method;
+  wirelessLegacyHost.value = savedMode.legacyHost;
+  wirelessLegacyPort.value = savedMode.legacyPort;
   saveWirelessFormFromDom();
   setWirelessFeedback('');
   wirelessOverlay.hidden = false;
-  wirelessFields.pairHost.focus();
+  renderWirelessMode();
+  if (currentWirelessMethod() === 'legacy') wirelessLegacyHost.focus();
+  else wirelessFields.pairHost.focus();
   refreshWirelessStatus();
   wirelessRefreshTimer = setInterval(refreshWirelessStatus, SCREEN_STATE_POLL_MS);
 }
@@ -849,6 +900,76 @@ async function pairWireless() {
   }
 }
 
+async function connectLegacyWireless(enableTcpip) {
+  if (wirelessBusy || currentWirelessMethod() !== 'legacy') return;
+  saveWirelessFormFromDom();
+  saveWirelessModeFromDom();
+  const host = wirelessLegacyHost.value.trim();
+  const port = Number(wirelessLegacyPort.value);
+  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+    setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+    return;
+  }
+  // The backend only runs `adb tcpip` when the user explicitly asks for it and
+  // USB is online. Manual connect never touches the phone's adbd.
+  if (enableTcpip && wirelessState.usbOnline !== true) {
+    wirelessState.usbOnline = false;
+    renderWirelessLegacyButtons();
+    setWirelessFeedback('wireless.error.legacyUsbOffline', {}, true);
+    return;
+  }
+  wirelessLegacyBusy = enableTcpip ? 'auto' : 'connect';
+  setWirelessBusy(true);
+  setWirelessFeedback(enableTcpip ? 'wireless.legacyAuto.loading' : 'wireless.legacy.connecting');
+  try {
+    // enableTcpip is a real boolean from the two call sites; the bridge rejects
+    // the string "true" with 400, so never stringify it here.
+    const body = { host, port, enableTcpip };
+    const result = await wirelessRequests.mutate(async () => {
+      const res = await fetch(WIRELESS_LEGACY_URL, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const payload = await res.json().catch(() => ({}));
+      return { res, payload };
+    });
+    if (result.stale) return;
+    if (result.error) {
+      setWirelessFeedback('wireless.error.network', { error: messageOf(result.error) }, true);
+      return;
+    }
+    const { res, payload } = result.value;
+    if (res.status === 409 && enableTcpip) {
+      wirelessState.usbOnline = false;
+      renderWirelessLegacyButtons();
+      setWirelessFeedback('wireless.error.legacyUsbOffline', {}, true);
+      return;
+    }
+    if (!res.ok) {
+      setWirelessFeedback('wireless.error.request', wirelessRequestError(res, payload), true);
+      return;
+    }
+    if (!applyWirelessStatus(payload)) {
+      setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+      return;
+    }
+    if (!isLegacyConnectSuccess(payload)) {
+      setWirelessFeedback('wireless.error.offline', {}, true);
+      return;
+    }
+    if (!activateDevice(payload.serial)) {
+      setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+      return;
+    }
+    setWirelessFeedback('wireless.legacy.connected');
+    restartStream('status.applying');
+  } finally {
+    wirelessLegacyBusy = '';
+    setWirelessBusy(false);
+  }
+}
+
 async function switchToUsb() {
   if (wirelessBusy) return;
   setWirelessBusy(true);
@@ -891,10 +1012,22 @@ async function switchToUsb() {
 wirelessForm.addEventListener('input', saveWirelessFormFromDom);
 wirelessForm.addEventListener('submit', (event) => {
   event.preventDefault();
-  pairWireless();
+  if (currentWirelessMethod() === 'legacy') connectLegacyWireless(false);
+  else pairWireless();
 });
 wirelessUsb.addEventListener('click', switchToUsb);
 wirelessAuto.addEventListener('click', autoFetchWireless);
+wirelessMode.addEventListener('change', () => {
+  saveWirelessModeFromDom();
+  renderWirelessMode();
+  setWirelessFeedback('');
+  if (currentWirelessMethod() === 'legacy') wirelessLegacyHost.focus();
+  else wirelessFields.pairHost.focus();
+});
+wirelessLegacyHost.addEventListener('input', saveWirelessModeFromDom);
+wirelessLegacyPort.addEventListener('input', saveWirelessModeFromDom);
+wirelessLegacyAuto.addEventListener('click', () => connectLegacyWireless(true));
+wirelessLegacyConnect.addEventListener('click', () => connectLegacyWireless(false));
 wirelessClear.addEventListener('click', () => {
   const result = clearWirelessPairingResult(() => localStorage);
   if (!result.cleared) {
@@ -902,6 +1035,10 @@ wirelessClear.addEventListener('click', () => {
     return;
   }
   fillWirelessForm(DEFAULT_WIRELESS_PAIRING);
+  wirelessMode.value = DEFAULT_WIRELESS_MODE.method;
+  wirelessLegacyHost.value = DEFAULT_WIRELESS_MODE.legacyHost;
+  wirelessLegacyPort.value = DEFAULT_WIRELESS_MODE.legacyPort;
+  renderWirelessMode();
   wirelessWarning.hidden = true;
   setWirelessStorageFeedback('');
   setWirelessFeedback(result.feedbackKey, {}, result.isError);
@@ -913,6 +1050,11 @@ wirelessOverlay.addEventListener('click', (event) => {
   if (event.target === wirelessOverlay) closeWireless();
 });
 fillWirelessForm(loadWirelessPairing(() => localStorage));
+const initialWirelessMode = loadWirelessMode(() => localStorage);
+wirelessMode.value = initialWirelessMode.method;
+wirelessLegacyHost.value = initialWirelessMode.legacyHost;
+wirelessLegacyPort.value = initialWirelessMode.legacyPort;
+renderWirelessMode();
 renderWirelessAutoButton();
 
 const toolboxObserver = new MutationObserver(() => {

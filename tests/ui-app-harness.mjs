@@ -194,6 +194,7 @@ export async function loadWirelessApp({
   storage = memoryStorage(),
   fetchImpl,
   autoResponse = null,
+  legacyResponse = null,
   usbOnline = true,
 } = {}) {
   const document = {
@@ -253,6 +254,10 @@ export async function loadWirelessApp({
       if (autoResponse === null) throw new Error('unexpected auto-fetch request');
       return typeof autoResponse === 'function' ? autoResponse() : autoResponse;
     }
+    if (url.endsWith('/api/wireless/legacy')) {
+      if (legacyResponse === null) throw new Error('unexpected legacy request');
+      return typeof legacyResponse === 'function' ? legacyResponse(url, options) : legacyResponse;
+    }
     throw new Error(`unexpected fetch: ${url}`);
   };
 
@@ -295,6 +300,8 @@ export async function loadWirelessApp({
     buttons: { auto: wirelessAuto, submit: wirelessSubmit, usb: wirelessUsb, clear: wirelessClear },
     feedback: wirelessFeedbackEl,
     warning: wirelessWarning,
+    getDeviceId: () => DEVICE_ID,
+    getRestartGeneration: () => generation,
   };`;
   vm.runInContext(source, context, { filename: 'web/app.js' });
   await flush();

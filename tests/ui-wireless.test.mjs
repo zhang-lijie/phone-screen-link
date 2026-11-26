@@ -236,7 +236,7 @@ test('wireless form automatically saves and reloads all inputs, and clear resets
 test('wireless status and mode changes share the stale-response guard', () => {
   assert.match(app, /const wirelessRequests = createWirelessRequestGuard\(\);/);
   assert.match(app, /wirelessRequests\.refresh\(/);
-  assert.equal([...app.matchAll(/wirelessRequests\.mutate\(/g)].length, 3, 'auto-fetch, pair and USB all exclude stale refreshes');
+  assert.equal([...app.matchAll(/wirelessRequests\.mutate\(/g)].length, 4, 'auto-fetch, pair, legacy and USB all exclude stale refreshes');
 });
 
 test('wireless panel calls the bridge APIs with the documented pairing payload', () => {
@@ -650,4 +650,361 @@ test('disabled wireless auto-fetch styling is muted and not-allowed while loadin
   assert.match(loadingRule, /cursor:\s*progress;/);
   assert.equal(winningWirelessAutoCursor(false), 'not-allowed', 'the generic disabled-button rule must not override the cursor');
   assert.equal(winningWirelessAutoCursor(true), 'progress');
+});
+
+// --- Dual-mode wireless panel (pairing code + legacy tcpip) -----------------
+
+const LEGACY_ONLINE_STATUS = Object.freeze({
+  mode: 'wifi',
+  method: 'legacy',
+  serial: '192.168.3.50:5555',
+  online: true,
+  usbOnline: true,
+});
+
+function legacyHarnessStorage(form = {}, mode = {}, language = 'en') {
+  const storage = memoryStorage();
+  storage.setItem(keys.SETTINGS_STORAGE_KEY, JSON.stringify({ language }));
+  storage.setItem(keys.WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({
+    pairHost: '', pairPort: '', pairCode: '', connectHost: '', connectPort: '',
+    method: 'pair', legacyHost: '', legacyPort: '5555',
+    ...form, ...mode,
+  }));
+  return storage;
+}
+
+function legacyDom(app) {
+  const byId = (id) => app.document.getElementById(id);
+  return {
+    mode: byId('wireless-mode'),
+    pairSection: byId('wireless-pair-section'),
+    legacySection: byId('wireless-legacy-section'),
+    legacyWarning: byId('wireless-legacy-warning'),
+    host: byId('wireless-legacy-host'),
+    port: byId('wireless-legacy-port'),
+    auto: byId('wireless-legacy-auto'),
+    connect: byId('wireless-legacy-connect'),
+    status: byId('status'),
+  };
+}
+
+test('wireless modal exposes a dual-mode selector with a hidden legacy form and default port 5555', () => {
+  const modeTag = html.match(/<select[^>]*id="wireless-mode"[^>]*>/)?.[0];
+  assert.ok(modeTag, 'mode selector is present');
+  assert.match(modeTag, /name="method"/);
+  assert.match(html, /<option value="pair"[^>]*data-i18n="wireless\.mode\.pair"/);
+  assert.match(html, /<option value="legacy"[^>]*data-i18n="wireless\.mode\.legacy"/);
+  assert.match(html, /id="wireless-pair-section"/);
+  assert.match(html, /id="wireless-legacy-section"[^>]*hidden/);
+  for (const id of [
+    'wireless-legacy-host', 'wireless-legacy-port', 'wireless-legacy-auto',
+    'wireless-legacy-connect', 'wireless-legacy-warning',
+  ]) {
+    assert.match(html, new RegExp(`id="${id}"`), `${id} is present`);
+  }
+  const portTag = html.match(/<input[^>]*id="wireless-legacy-port"[^>]*>/)?.[0];
+  assert.ok(portTag, 'legacy port input is present');
+  assert.match(portTag, /type="number"/);
+  assert.match(portTag, /value="5555"/);
+  assert.match(portTag, /min="1"/);
+  assert.match(portTag, /max="65535"/);
+  assert.match(portTag, /\srequired(?:\s|>)/);
+  const hostTag = html.match(/<input[^>]*id="wireless-legacy-host"[^>]*>/)?.[0];
+  assert.match(hostTag, /\srequired(?:\s|>)/);
+  const autoTag = html.match(/<button[^>]*id="wireless-legacy-auto"[^>]*>/)?.[0];
+  assert.match(autoTag, /type="button"/);
+  assert.match(autoTag, /\sdisabled(?:\s|>)/);
+  assert.match(autoTag, /data-i18n="wireless\.legacyAuto"/);
+  assert.match(html, /id="wireless-legacy-warning"[^>]*data-i18n="wireless\.legacyWarning"/);
+  assert.match(css, /\.wireless-section\[hidden\]\s*\{[^}]*display:\s*none;/);
+  assert.match(css, /\.wireless-field select\s*\{/);
+  assert.match(css, /#wireless-legacy-connect\s*\{/);
+});
+
+test('legacy warning states unencrypted, no authentication and trusted LAN in both languages', () => {
+  const en = keys.MESSAGES.en['wireless.legacyWarning'];
+  const zh = keys.MESSAGES.zh['wireless.legacyWarning'];
+  assert.match(en, /unencrypted/i);
+  assert.match(en, /no authentication/i);
+  assert.match(en, /trusted LAN/i);
+  assert.match(zh, /未加密/);
+  assert.match(zh, /无认证/);
+  assert.match(zh, /可信局域网/);
+});
+
+test('wireless mode and legacy fields persist beside the pairing code in the same localStorage entry', () => {
+  const storage = memoryStorage();
+  const pair = {
+    pairHost: '192.168.3.10', pairPort: '37123', pairCode: '654321',
+    connectHost: '192.168.3.10', connectPort: '39541',
+  };
+  keys.saveWirelessPairing(storage, pair);
+  assert.deepEqual(keys.saveWirelessMode(storage, {
+    method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+  }), {
+    saved: true,
+    values: { method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555' },
+  });
+  assert.deepEqual(keys.loadWirelessPairing(storage), pair, 'saving mode must not change pair fields');
+  assert.deepEqual(keys.loadWirelessMode(storage), {
+    method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+  });
+  assert.deepEqual(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)), {
+    ...pair, method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+  });
+
+  keys.saveWirelessPairing(storage, { ...pair, pairCode: '111111' });
+  assert.deepEqual(keys.loadWirelessMode(storage), {
+    method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+  }, 'a later pair save must not drop the selected mode or legacy fields');
+  assert.equal(keys.loadWirelessPairing(storage).pairCode, '111111');
+});
+
+test('wireless mode normalization defaults to pair mode and port 5555 for malformed storage', () => {
+  const storage = memoryStorage();
+  assert.deepEqual(keys.loadWirelessMode(storage), {
+    method: 'pair', legacyHost: '', legacyPort: '5555',
+  });
+  storage.data.set(keys.WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({
+    method: 'legacy', legacyHost: 'phone.local', legacyPort: 5555,
+  }));
+  assert.deepEqual(keys.loadWirelessMode(storage), {
+    method: 'legacy', legacyHost: 'phone.local', legacyPort: '5555',
+  }, 'numeric ports normalize to strings');
+  storage.data.set(keys.WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({
+    method: 'bogus', legacyHost: 42, legacyPort: '70000',
+  }));
+  assert.deepEqual(keys.loadWirelessMode(storage), {
+    method: 'pair', legacyHost: '', legacyPort: '5555',
+  });
+  storage.data.set(keys.WIRELESS_PAIRING_STORAGE_KEY, 'not json');
+  assert.deepEqual(keys.loadWirelessMode(storage), {
+    method: 'pair', legacyHost: '', legacyPort: '5555',
+  });
+});
+
+test('wireless mode storage failures are explicit and never claim persistence', () => {
+  const expected = { method: 'legacy', legacyHost: '', legacyPort: '5555' };
+  assert.deepEqual(keys.saveWirelessMode(undefined, { method: 'legacy' }), {
+    saved: false, values: expected,
+  });
+  const blocked = {
+    getItem: () => { throw new Error('blocked'); },
+    setItem: () => { throw new Error('blocked'); },
+  };
+  assert.deepEqual(keys.saveWirelessMode(blocked, { method: 'legacy' }), {
+    saved: false, values: expected,
+  });
+  assert.deepEqual(keys.loadWirelessMode(blocked), {
+    method: 'pair', legacyHost: '', legacyPort: '5555',
+  });
+});
+
+test('legacy connect activation requires an online wifi target', () => {
+  assert.equal(keys.isLegacyConnectSuccess(LEGACY_ONLINE_STATUS), true);
+  assert.equal(keys.isLegacyConnectSuccess({ ...LEGACY_ONLINE_STATUS, online: false }), false);
+  assert.equal(keys.isLegacyConnectSuccess({ ...LEGACY_ONLINE_STATUS, mode: 'usb' }), false);
+  assert.equal(keys.isLegacyConnectSuccess({ ...LEGACY_ONLINE_STATUS, serial: '' }), false);
+  assert.match(app, /if \(!isLegacyConnectSuccess\(payload\)\)\s*\{[\s\S]*?setWirelessFeedback\('wireless\.error\.offline'/);
+});
+
+test('legacy panel posts a real boolean enableTcpip through the serialized legacy API', () => {
+  assert.match(app, /const WIRELESS_LEGACY_URL = `\$\{BRIDGE_BASE\}\/api\/wireless\/legacy`;/);
+  assert.match(app, /async function connectLegacyWireless\(enableTcpip\)\s*\{[\s\S]*?const body = \{ host, port, enableTcpip \};[\s\S]*?fetch\(WIRELESS_LEGACY_URL,[\s\S]*?method: 'POST'/);
+  assert.match(app, /wirelessRequests\.mutate\(async \(\) => \{[\s\S]*?WIRELESS_LEGACY_URL/);
+  assert.match(app, /if \(!activateDevice\(payload\.serial\)\)[\s\S]*?setWirelessFeedback\('wireless\.error\.invalidResponse'[\s\S]*?setWirelessFeedback\('wireless\.legacy\.connected'\)[\s\S]*?restartStream\('status\.applying'\);/);
+});
+
+test('switching mode hides the inactive form, shows the legacy warning and preserves the pairing code', async () => {
+  const storage = legacyHarnessStorage({ pairCode: '654321' });
+  const app = await loadWirelessApp({ storage });
+  const dom = legacyDom(app);
+
+  assert.equal(dom.mode.value, 'pair');
+  assert.equal(dom.pairSection.hidden, false, 'pair form is visible by default');
+  assert.equal(dom.legacySection.hidden, true);
+  assert.equal(dom.legacyWarning.hidden, true);
+
+  dom.mode.value = 'legacy';
+  await dom.mode.dispatch('change');
+  assert.equal(dom.pairSection.hidden, true);
+  assert.equal(dom.legacySection.hidden, false);
+  assert.equal(dom.legacyWarning.hidden, false, 'legacy mode renders the security warning');
+  assert.equal(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)).method, 'legacy');
+  assert.equal(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)).pairCode, '654321', 'mode switch must not clear the saved pairing code');
+
+  assert.equal(dom.port.value, '5555', 'legacy port defaults to 5555');
+  dom.host.value = '192.168.3.50';
+  dom.port.value = '5556';
+  await dom.host.dispatch('input');
+  assert.deepEqual(keys.loadWirelessMode(storage), {
+    method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5556',
+  });
+
+  const reloaded = await loadWirelessApp({ storage });
+  const restored = legacyDom(reloaded);
+  assert.equal(restored.mode.value, 'legacy');
+  assert.equal(restored.legacySection.hidden, false);
+  assert.equal(restored.legacyWarning.hidden, false);
+  assert.equal(restored.host.value, '192.168.3.50');
+  assert.equal(restored.port.value, '5556');
+  assert.equal(reloaded.api.readWirelessForm().pairCode, '654321');
+});
+
+test('legacy auto-connect is USB-gated while manual connect works without USB', async () => {
+  const storage = legacyHarnessStorage({}, { method: 'legacy' });
+  const app = await loadWirelessApp({
+    storage, usbOnline: false, legacyResponse: LEGACY_ONLINE_STATUS,
+  });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+
+  assert.equal(dom.auto.disabled, true, 'auto-connect is disabled while USB is offline');
+  assert.equal(dom.connect.disabled, false, 'manual connect does not require USB');
+  const before = app.requests.length;
+  await dom.auto.click();
+  assert.equal(app.requests.length, before, 'a disabled auto-connect issues no request');
+
+  app.api.applyWirelessStatus({ mode: 'usb', serial: 'USB123456', online: true, usbOnline: true });
+  assert.equal(dom.auto.disabled, false);
+});
+
+test('legacy auto-connect sends a boolean true, waits for an online response, then restarts the stream', async () => {
+  const storage = legacyHarnessStorage({}, {
+    method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+  });
+  const pending = deferred();
+  const app = await loadWirelessApp({ storage, legacyResponse: () => pending.promise });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+  const initialDevice = app.api.getDeviceId();
+  const initialGeneration = app.api.getRestartGeneration();
+
+  const clicking = dom.auto.click();
+  await app.ready();
+  const request = app.requests.find((entry) => entry.url.endsWith('/api/wireless/legacy'));
+  assert.ok(request, 'legacy endpoint was called');
+  assert.equal(request.options.method, 'POST');
+  const body = JSON.parse(request.options.body);
+  assert.deepEqual(body, { host: '192.168.3.50', port: 5555, enableTcpip: true });
+  assert.equal(typeof body.enableTcpip, 'boolean', 'enableTcpip must be a real boolean, not "true"');
+  assert.equal(dom.auto.disabled, true);
+  assert.equal(dom.auto.getAttribute('aria-busy'), 'true');
+  assert.equal(dom.connect.disabled, true);
+  assert.equal(app.api.feedback.textContent, keys.MESSAGES.en['wireless.legacyAuto.loading']);
+  assert.equal(app.api.getDeviceId(), initialDevice, 'device must not switch before the online response');
+  assert.equal(app.api.getRestartGeneration(), initialGeneration, 'no restart before the online response');
+
+  pending.resolve(response(200, LEGACY_ONLINE_STATUS));
+  await clicking;
+
+  assert.equal(app.api.getDeviceId(), '192.168.3.50:5555');
+  assert.equal(app.api.feedback.textContent, keys.MESSAGES.en['wireless.legacy.connected']);
+  assert.equal(app.api.feedback.classList.contains('is-success'), true);
+  assert.equal(app.api.getRestartGeneration(), initialGeneration + 1, 'stream restart was requested');
+  assert.equal(dom.auto.disabled, false);
+  assert.equal(dom.connect.disabled, false);
+});
+
+test('legacy manual connect sends enableTcpip:false and works with USB offline', async () => {
+  const storage = legacyHarnessStorage({}, {
+    method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+  });
+  const app = await loadWirelessApp({
+    storage,
+    usbOnline: false,
+    legacyResponse: response(200, { ...LEGACY_ONLINE_STATUS, usbOnline: false }),
+  });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+  const initialGeneration = app.api.getRestartGeneration();
+
+  await dom.connect.click();
+
+  const request = app.requests.find((entry) => entry.url.endsWith('/api/wireless/legacy'));
+  assert.deepEqual(JSON.parse(request.options.body), {
+    host: '192.168.3.50', port: 5555, enableTcpip: false,
+  });
+  assert.equal(app.api.getDeviceId(), '192.168.3.50:5555');
+  assert.equal(app.api.getRestartGeneration(), initialGeneration + 1);
+});
+
+test('legacy connect failure preserves the active device and reports the bridge error', async () => {
+  const app = await loadWirelessApp({
+    storage: legacyHarnessStorage({}, {
+      method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+    }),
+    legacyResponse: response(502, { error: 'adb connect failed' }),
+  });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+  const initialDevice = app.api.getDeviceId();
+  const initialGeneration = app.api.getRestartGeneration();
+
+  await dom.connect.click();
+
+  assert.equal(app.api.getDeviceId(), initialDevice);
+  assert.equal(app.api.feedback.classList.contains('is-error'), true);
+  assert.match(app.api.feedback.textContent, /502/);
+  assert.match(app.api.feedback.textContent, /adb connect failed/);
+  assert.equal(app.api.getRestartGeneration(), initialGeneration, 'a failed connect must not restart the stream');
+});
+
+test('legacy connect refuses to activate an offline wifi target', async () => {
+  const app = await loadWirelessApp({
+    storage: legacyHarnessStorage({}, {
+      method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+    }),
+    legacyResponse: response(200, { ...LEGACY_ONLINE_STATUS, online: false }),
+  });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+  const initialDevice = app.api.getDeviceId();
+
+  await dom.connect.click();
+
+  assert.equal(app.api.feedback.textContent, keys.MESSAGES.en['wireless.error.offline']);
+  assert.equal(app.api.getDeviceId(), initialDevice);
+});
+
+test('legacy auto-connect 409 marks USB offline and disables further auto attempts', async () => {
+  const app = await loadWirelessApp({
+    storage: legacyHarnessStorage({}, {
+      method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+    }),
+    legacyResponse: response(409, { error: 'USB device is offline' }),
+  });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+
+  await dom.auto.click();
+
+  assert.equal(app.api.feedback.textContent, keys.MESSAGES.en['wireless.error.legacyUsbOffline']);
+  assert.equal(app.api.feedback.classList.contains('is-error'), true);
+  assert.equal(dom.auto.disabled, true);
+  assert.equal(dom.auto.getAttribute('aria-busy'), 'false');
+  const count = app.requests.length;
+  await dom.auto.click();
+  assert.equal(app.requests.length, count, 'the disabled button cannot retry');
+});
+
+test('legacy and pairing actions share the busy state and clear it on failure', async () => {
+  const app = await loadWirelessApp({
+    storage: legacyHarnessStorage({}, {
+      method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+    }),
+    legacyResponse: response(502, { error: 'adb connect failed' }),
+  });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+
+  const pendingConnect = dom.connect.click();
+  assert.equal(app.api.buttons.submit.disabled, true, 'legacy action disables pair submit');
+  assert.equal(app.api.buttons.auto.disabled, true, 'legacy action disables pair auto-fetch');
+  assert.equal(app.api.buttons.usb.disabled, true);
+  await pendingConnect;
+
+  assert.equal(app.api.buttons.submit.disabled, false);
+  assert.equal(dom.connect.disabled, false);
+  assert.equal(dom.auto.disabled, false);
 });
