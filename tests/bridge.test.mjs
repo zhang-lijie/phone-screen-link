@@ -1154,7 +1154,7 @@ test('wireless: concurrent pair and USB requests wait for serialized transaction
       usbResponse = postWirelessUsb(address);
       await usbInvoked;
       assert.equal(adb.getMode(), 'wifi', 'USB transaction must wait for pairing to commit');
-      assert.deepEqual(store.load(), { mode: 'wifi', address: previousAddress });
+      assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: previousAddress });
     } finally {
       pairGate.resolve();
       await Promise.allSettled([pairResponse, usbResponse]);
@@ -1169,7 +1169,7 @@ test('wireless: concurrent pair and USB requests wait for serialized transaction
     const usb = await usbResponse;
     assert.equal(usb.status, 200);
     assert.deepEqual(await usb.json(), { ok: true, ...USB_STATUS });
-    assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+    assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   });
 });
 

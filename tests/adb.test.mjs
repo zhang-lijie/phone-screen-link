@@ -176,14 +176,19 @@ test('getScreenTimeout parses settings value; setScreenTimeout writes it', async
   assert.deepEqual(calls.at(-1), ['-s', DEFAULT_USB_SERIAL, 'shell', 'settings', 'put', 'system', 'screen_off_timeout', '3600000']);
 });
 
-test('createAdb defaults to USB and exposes mutable connection state', () => {
+test('createAdb defaults to USB pair and exposes mutable connection state', () => {
   const adb = createAdb(async () => '');
   assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getMethod(), 'pair');
   assert.equal(adb.getSerial(), DEFAULT_USB_SERIAL);
 
-  adb.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
+  adb.setConnection({ mode: 'wifi', method: 'legacy', serial: '10.0.0.5:5555' });
   assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getMethod(), 'legacy');
   assert.equal(adb.getSerial(), '10.0.0.5:5555');
+
+  adb.setConnection({ mode: 'wifi', serial: '10.0.0.6:5555' });
+  assert.equal(adb.getMethod(), 'pair', 'a connection switch without a method keeps pair behavior');
 });
 
 test('pair runs adb pair with the pairing endpoint and code', async () => {
@@ -200,9 +205,16 @@ test('connect runs adb connect with the supplied address', async () => {
   assert.deepEqual(calls, [['connect', '192.168.1.20:5555']]);
 });
 
+test('tcpip targets the supplied USB serial and port', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return ''; });
+  await adb.tcpip('USB-SERIAL', 5555);
+  assert.deepEqual(calls, [['-s', 'USB-SERIAL', 'tcpip', '5555']]);
+});
+
 test('pair rejection preserves the active connection and persisted config bytes', async (t) => {
   const { file, store } = tempConnectionStore(t);
-  const original = { mode: 'usb', address: '' };
+  const original = { mode: 'usb', method: 'pair', address: '' };
   store.save(original);
   const before = readFileSync(file);
   const adb = createAdb(async () => { throw new Error('pair rejected'); }, {
@@ -222,7 +234,7 @@ test('pair rejection preserves the active connection and persisted config bytes'
 
 test('connect rejection after pairing preserves the active connection and persisted config bytes', async (t) => {
   const { file, store } = tempConnectionStore(t);
-  const original = { mode: 'usb', address: '' };
+  const original = { mode: 'usb', method: 'pair', address: '' };
   store.save(original);
   const before = readFileSync(file);
   const adb = createAdb(async (args) => {
@@ -357,6 +369,162 @@ test('ensureWirelessConnected returns false if the address remains offline', asy
     ['connect', '10.0.0.5:5555'],
     ['-s', '10.0.0.5:5555', 'get-state'],
   ]);
+});
+
+test('legacy maintenance bootstraps over USB and retries after connect fails', async () => {
+  const address = '10.0.0.5:5555';
+  const calls = [];
+  let wirelessChecks = 0;
+  let connects = 0;
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === 'connect') {
+      connects += 1;
+      if (connects === 1) throw new Error('connect failed');
+      return '';
+    }
+    if (args[0] === '-s' && args[1] === address && args[2] === 'get-state') {
+      wirelessChecks += 1;
+      return wirelessChecks === 3 ? 'device\n' : 'offline\n';
+    }
+    if (args[0] === '-s' && args[1] === 'USB-SERIAL' && args[2] === 'get-state') return 'device\n';
+    return '';
+  });
+
+  assert.equal(await adb.ensureWirelessConnected(address, {
+    method: 'legacy',
+    port: 5555,
+    usbSerial: 'USB-SERIAL',
+  }), true);
+  assert.deepEqual(calls, [
+    ['-s', address, 'get-state'],
+    ['connect', address],
+    ['-s', address, 'get-state'],
+    ['-s', 'USB-SERIAL', 'get-state'],
+    ['-s', 'USB-SERIAL', 'tcpip', '5555'],
+    ['connect', address],
+    ['-s', address, 'get-state'],
+  ]);
+});
+
+test('legacy maintenance bootstraps when connect exits successfully but the endpoint is offline', async () => {
+  const address = '10.0.0.5:5555';
+  const calls = [];
+  let wirelessChecks = 0;
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === '-s' && args[1] === address && args[2] === 'get-state') {
+      wirelessChecks += 1;
+      return wirelessChecks === 3 ? 'device\n' : 'offline\n';
+    }
+    if (args[0] === '-s' && args[1] === 'USB-SERIAL' && args[2] === 'get-state') return 'device\n';
+    return '';
+  });
+
+  assert.equal(await adb.ensureWirelessConnected(address, {
+    method: 'legacy',
+    port: 5555,
+    usbSerial: 'USB-SERIAL',
+  }), true);
+  assert.deepEqual(calls, [
+    ['-s', address, 'get-state'],
+    ['connect', address],
+    ['-s', address, 'get-state'],
+    ['-s', 'USB-SERIAL', 'get-state'],
+    ['-s', 'USB-SERIAL', 'tcpip', '5555'],
+    ['connect', address],
+    ['-s', address, 'get-state'],
+  ]);
+});
+
+test('legacy maintenance stays offline without USB and never enumerates devices', async () => {
+  const address = '10.0.0.5:5555';
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === '-s' && args[1] === 'USB-SERIAL' && args[2] === 'get-state') {
+      throw new Error("error: device 'USB-SERIAL' not found");
+    }
+    return 'offline\n';
+  });
+
+  assert.equal(await adb.ensureWirelessConnected(address, {
+    method: 'legacy',
+    port: 5555,
+    usbSerial: 'USB-SERIAL',
+  }), false);
+  assert.deepEqual(calls, [
+    ['-s', address, 'get-state'],
+    ['connect', address],
+    ['-s', address, 'get-state'],
+    ['-s', 'USB-SERIAL', 'get-state'],
+  ]);
+});
+
+test('legacy maintenance parses the tcpip port from the configured address', async () => {
+  const address = '192.168.1.20:5555';
+  const calls = [];
+  let wirelessChecks = 0;
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === '-s' && args[1] === address && args[2] === 'get-state') {
+      wirelessChecks += 1;
+      return wirelessChecks === 3 ? 'device\n' : 'offline\n';
+    }
+    if (args[0] === '-s' && args[1] === 'USB-SERIAL' && args[2] === 'get-state') return 'device\n';
+    return '';
+  }, { mode: 'wifi', method: 'legacy', serial: address });
+
+  assert.equal(await adb.ensureWirelessConnected(address, { usbSerial: 'USB-SERIAL' }), true);
+  assert.ok(calls.some((args) => args.join(' ') === '-s USB-SERIAL tcpip 5555'));
+});
+
+test('legacy maintenance does not repeat tcpip while the same outage remains offline', async () => {
+  const address = '10.0.0.5:5555';
+  const calls = [];
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === '-s' && args[1] === 'USB-SERIAL' && args[2] === 'get-state') return 'device\n';
+    return 'offline\n';
+  });
+
+  assert.equal(await adb.ensureWirelessConnected(address, {
+    method: 'legacy',
+    port: 5555,
+    usbSerial: 'USB-SERIAL',
+  }), false);
+  assert.equal(await adb.ensureWirelessConnected(address, {
+    method: 'legacy',
+    port: 5555,
+    usbSerial: 'USB-SERIAL',
+  }), false);
+
+  assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 1);
+  assert.equal(calls.filter((args) => args[0] === 'connect').length, 3);
+  assert.equal(calls.filter((args) => args[0] === 'devices').length, 0);
+});
+
+test('legacy maintenance allows a fresh bootstrap after a healthy connection and a new outage', async () => {
+  const address = '10.0.0.5:5555';
+  const calls = [];
+  let wirelessChecks = 0;
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === '-s' && args[1] === address && args[2] === 'get-state') {
+      wirelessChecks += 1;
+      return wirelessChecks === 1 || wirelessChecks === 2 || wirelessChecks === 5 || wirelessChecks === 6
+        ? 'offline\n'
+        : 'device\n';
+    }
+    if (args[0] === '-s' && args[1] === 'USB-SERIAL' && args[2] === 'get-state') return 'device\n';
+    return '';
+  });
+  const options = { method: 'legacy', port: 5555, usbSerial: 'USB-SERIAL' };
+
+  assert.equal(await adb.ensureWirelessConnected(address, options), true);
+  assert.equal(await adb.ensureWirelessConnected(address, options), true);
+  assert.equal(await adb.ensureWirelessConnected(address, options), true);
+  assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 2);
 });
 
 test('parseWifiIp reads the IPv4 address from ip addr output', () => {

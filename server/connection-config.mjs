@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { dirname } from 'node:path';
 
 export const FALLBACK_USB_SERIAL = '2FD0221C09004177';
-export const DEFAULT_CONNECTION_CONFIG = Object.freeze({ mode: 'usb', address: '' });
+export const DEFAULT_CONNECTION_CONFIG = Object.freeze({ mode: 'usb', method: 'pair', address: '' });
 
 // This is endpoint detection, not request validation. It recognizes the
 // host:port serials ADB uses without mistaking emulator-5554 or a USB serial
@@ -27,8 +27,12 @@ function normalizeConfig(value) {
   if (typeof value.address !== 'string') {
     return { ...DEFAULT_CONNECTION_CONFIG };
   }
+  if (value.method !== undefined && value.method !== 'pair' && value.method !== 'legacy') {
+    return { ...DEFAULT_CONNECTION_CONFIG };
+  }
   return {
     mode: value.mode,
+    method: value.method === 'legacy' ? 'legacy' : 'pair',
     address: value.mode === 'wifi' ? value.address.trim() : '',
   };
 }
@@ -40,21 +44,25 @@ export function resolveInitialConnection({
 } = {}) {
   const phoneSerial = typeof env.PHONE_SERIAL === 'string' ? env.PHONE_SERIAL.trim() : '';
   if (isWirelessSerial(phoneSerial)) {
-    return { mode: 'wifi', serial: phoneSerial };
+    return { mode: 'wifi', method: 'pair', serial: phoneSerial };
   }
 
   const explicitUsbSerial = typeof env.PHONE_USB_SERIAL === 'string'
     ? env.PHONE_USB_SERIAL.trim()
     : '';
   if (explicitUsbSerial || phoneSerial) {
-    return { mode: 'usb', serial: explicitUsbSerial || phoneSerial };
+    return { mode: 'usb', method: 'pair', serial: explicitUsbSerial || phoneSerial };
   }
 
   if (stored?.mode === 'wifi' && isWirelessSerial(stored.address)) {
-    return { mode: 'wifi', serial: stored.address.trim() };
+    return {
+      mode: 'wifi',
+      method: stored.method === 'legacy' ? 'legacy' : 'pair',
+      serial: stored.address.trim(),
+    };
   }
 
-  return { mode: 'usb', serial: usbSerial || FALLBACK_USB_SERIAL };
+  return { mode: 'usb', method: 'pair', serial: usbSerial || FALLBACK_USB_SERIAL };
 }
 
 export function createConnectionConfigStore({ file }, { readFile = readFileSync } = {}) {
@@ -80,6 +88,7 @@ export function createConnectionConfigStore({ file }, { readFile = readFileSync 
     const config = load();
     if (patch !== null && typeof patch === 'object' && !Array.isArray(patch)) {
       if (patch.mode === 'usb' || patch.mode === 'wifi') config.mode = patch.mode;
+      if (patch.method === 'pair' || patch.method === 'legacy') config.method = patch.method;
       if (typeof patch.address === 'string') config.address = patch.address.trim();
     }
     if (config.mode === 'usb') config.address = '';

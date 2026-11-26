@@ -79,6 +79,11 @@ function parsePort(value) {
   return Number.isInteger(port) && port >= 1 && port <= 65535 ? port : null;
 }
 
+function parseEndpointPort(address) {
+  const match = /:(\d+)$/.exec(String(address ?? '').trim());
+  return match ? parsePort(match[1]) : null;
+}
+
 export function parseWifiIp(text) {
   const output = String(text ?? '');
   for (const match of output.matchAll(/\binet\s+(\S+)/g)) {
@@ -112,9 +117,12 @@ export function parseMdnsServices(text) {
 export function createAdb(runner = defaultRunner, {
   serial = DEFAULT_USB_SERIAL,
   mode = 'usb',
+  method = 'pair',
 } = {}) {
   let activeSerial = serial;
   let activeMode = mode;
+  let activeMethod = method === 'legacy' ? 'legacy' : 'pair';
+  let legacyBootstrapKey = null;
 
   async function list() {
     return parseDevices(await runner(['devices']));
@@ -168,9 +176,15 @@ export function createAdb(runner = defaultRunner, {
       return activeMode;
     },
 
-    setConnection({ mode: nextMode, serial: nextSerial }) {
+    getMethod() {
+      return activeMethod;
+    },
+
+    setConnection({ mode: nextMode, serial: nextSerial, method: nextMethod }) {
       activeMode = nextMode;
       activeSerial = nextSerial;
+      activeMethod = nextMethod === 'legacy' ? 'legacy' : 'pair';
+      legacyBootstrapKey = null;
     },
 
     async pair({ host, port, code }) {
@@ -181,15 +195,60 @@ export function createAdb(runner = defaultRunner, {
       return runner(['connect', address]);
     },
 
+    async tcpip(deviceSerial, port) {
+      return runner(['-s', deviceSerial, 'tcpip', String(port)]);
+    },
+
     getState,
     getWifiIp,
     getWirelessConnectPort,
     mdnsServices,
 
-    async ensureWirelessConnected(address) {
-      if (await wirelessIsOnline(address)) return true;
-      await runner(['connect', address]);
-      return wirelessIsOnline(address);
+    async ensureWirelessConnected(address, {
+      method = activeMethod,
+      port,
+      usbSerial = DEFAULT_USB_SERIAL,
+    } = {}) {
+      const tcpipPort = parsePort(port ?? parseEndpointPort(address));
+      const bootstrapKey = method === 'legacy'
+        ? JSON.stringify([address, usbSerial, tcpipPort])
+        : null;
+      if (await wirelessIsOnline(address)) {
+        if (legacyBootstrapKey === bootstrapKey) legacyBootstrapKey = null;
+        return true;
+      }
+
+      // Pairing-mode supervision keeps its original reconnect behavior. Legacy
+      // mode may recover a dead TCP listener through an online USB transport.
+      if (method !== 'legacy') {
+        await runner(['connect', address]);
+        return wirelessIsOnline(address);
+      }
+
+      try {
+        await runner(['connect', address]);
+      } catch {
+        // A rejected connect is the expected first symptom of a stopped adbd.
+      }
+      if (await wirelessIsOnline(address)) {
+        if (legacyBootstrapKey === bootstrapKey) legacyBootstrapKey = null;
+        return true;
+      }
+      if (tcpipPort === null || legacyBootstrapKey === bootstrapKey) return false;
+      if (!(await wirelessIsOnline(usbSerial))) return false;
+
+      // Mark before invoking adb: overlapping maintenance ticks must not restart
+      // adbd twice. A later healthy probe clears the marker for the next outage.
+      legacyBootstrapKey = bootstrapKey;
+      try {
+        await runner(['-s', usbSerial, 'tcpip', String(tcpipPort)]);
+        await runner(['connect', address]);
+      } catch {
+        return false;
+      }
+      const online = await wirelessIsOnline(address);
+      if (online) legacyBootstrapKey = null;
+      return online;
     },
 
     async ensureUsbOnly() {

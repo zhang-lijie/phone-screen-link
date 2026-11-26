@@ -276,7 +276,7 @@ test('main defaults to USB, applies it before engine spawn, and rechecks USB eve
 
   assert.equal(calls.connectionConfigOptions.file, join('/x', 'state', 'connection.json'));
   assert.equal(calls.connectionLoad, 1);
-  assert.deepEqual(calls.setConnection, [{ mode: 'usb', serial: DEFAULT_USB_SERIAL }]);
+  assert.deepEqual(calls.setConnection, [{ mode: 'usb', method: 'pair', serial: DEFAULT_USB_SERIAL }]);
   assert.ok(calls.order.indexOf('setConnection') < calls.order.indexOf('ensureUsb'));
   assert.ok(calls.order.indexOf('setConnection') < calls.order.indexOf('spawn'));
   assert.equal(calls.ensureUsb, 1);
@@ -304,7 +304,7 @@ test('stored wireless mode skips USB enforcement and reconnects only the active 
 
   await main(deps);
 
-  assert.deepEqual(calls.setConnection, [{ mode: 'wifi', serial: address }]);
+  assert.deepEqual(calls.setConnection, [{ mode: 'wifi', method: 'pair', serial: address }]);
   assert.ok(calls.order.indexOf('setConnection') < calls.order.indexOf('spawn'));
   assert.equal(calls.ensureUsb, 0);
   assert.deepEqual(calls.ensureWireless, []);
@@ -324,7 +324,7 @@ test('PHONE_SERIAL wireless override takes precedence over stored USB mode', asy
 
   await main(deps);
 
-  assert.deepEqual(calls.setConnection, [{ mode: 'wifi', serial: '10.0.0.8:5555' }]);
+  assert.deepEqual(calls.setConnection, [{ mode: 'wifi', method: 'pair', serial: '10.0.0.8:5555' }]);
   assert.equal(calls.ensureUsb, 0);
 
   await handlers.get('SIGINT')();

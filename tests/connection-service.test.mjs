@@ -114,8 +114,8 @@ test('connection service: pairAndConnect pairs, connects, confirms online, then 
   assert.equal(calls.some((args) => args[0] === 'devices'), false);
   assert.equal(adb.getMode(), 'wifi');
   assert.equal(adb.getSerial(), WIRELESS_ADDRESS);
-  assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
-  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { mode: 'wifi', address: WIRELESS_ADDRESS });
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
   assert.deepEqual(result, {
     mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true,
   });
@@ -133,7 +133,7 @@ test('connection service: a persistence failure before USB-to-wireless activatio
 
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), 'USB-ORIGINAL');
-  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   assert.deepEqual(readFileSync(file), before);
 });
 
@@ -149,7 +149,7 @@ test('connection service: a persistence failure before wireless-to-USB activatio
 
   assert.equal(adb.getMode(), 'wifi');
   assert.equal(adb.getSerial(), WIRELESS_ADDRESS);
-  assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
   assert.deepEqual(readFileSync(file), before);
 });
 
@@ -163,7 +163,7 @@ test('connection service: a post-commit wireless status failure does not turn pa
     mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: false,
   });
   assert.equal(adb.getMode(), 'wifi');
-  assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
 });
 
 test('connection service: a post-commit USB status failure does not turn a completed switch into a failure', async (t) => {
@@ -182,7 +182,7 @@ test('connection service: a post-commit USB status failure does not turn a compl
     mode: 'usb', serial: USB_SERIAL, online: false, usbOnline: false,
   });
   assert.equal(adb.getMode(), 'usb');
-  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
 });
 
 test('connection service: a pair failure leaves the active device and persisted config unchanged', async (t) => {
@@ -200,7 +200,7 @@ test('connection service: a pair failure leaves the active device and persisted 
   assert.deepEqual(calls, [['pair', '192.168.1.20:37123', '123456']]);
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), 'USB-ORIGINAL');
-  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   assert.deepEqual(readFileSync(file), before);
 });
 
@@ -223,7 +223,7 @@ test('connection service: a connect failure after pairing leaves the active devi
   ]);
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), 'USB-ORIGINAL');
-  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   assert.deepEqual(readFileSync(file), before);
 });
 
@@ -240,7 +240,7 @@ test('connection service: an offline device after connect is not activated or pe
 
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), 'USB-ORIGINAL');
-  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   assert.deepEqual(readFileSync(file), before);
 });
 
@@ -272,7 +272,7 @@ test('connection service: invalid pairing input is rejected before any ADB comma
   assert.deepEqual(calls, []);
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), 'USB-ORIGINAL');
-  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   assert.deepEqual(readFileSync(file), before);
 });
 
@@ -305,7 +305,7 @@ test('connection service: switchToUsb restores the supplied USB serial and clear
 
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), USB_SERIAL);
-  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   assert.deepEqual(result, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true });
   assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
 });
@@ -335,7 +335,7 @@ test('connection service: concurrent pair and USB mutations serialize and return
   const usbPromise = service.switchToUsb();
   try {
     assert.equal(adb.getMode(), 'wifi', 'USB mutation must wait for the in-flight pair transaction');
-    assert.deepEqual(store.load(), { mode: 'wifi', address: previousAddress });
+    assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: previousAddress });
   } finally {
     pairGate.resolve();
     await Promise.allSettled([pairPromise, usbPromise]);
@@ -346,7 +346,7 @@ test('connection service: concurrent pair and USB mutations serialize and return
   });
   assert.deepEqual(await usbPromise, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true });
   assert.equal(adb.getMode(), 'usb');
-  assert.deepEqual(store.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
 });
 
 test('connection service: wireless-to-wireless connect failure leaves the previous wireless runtime and disk state unchanged', async (t) => {
@@ -365,7 +365,7 @@ test('connection service: wireless-to-wireless connect failure leaves the previo
 
   assert.equal(adb.getMode(), 'wifi');
   assert.equal(adb.getSerial(), previousAddress);
-  assert.deepEqual(store.load(), { mode: 'wifi', address: previousAddress });
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: previousAddress });
   assert.deepEqual(readFileSync(file), before);
 });
 
@@ -561,7 +561,7 @@ test('connection service: discovery uses the TLS connect property and same-IP pa
   assert.deepEqual(sleeps, []);
   assert.equal(adb.getMode(), 'wifi');
   assert.equal(adb.getSerial(), WIRELESS_ADDRESS);
-  assert.deepEqual(store.load(), { mode: 'wifi', address: WIRELESS_ADDRESS });
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
   assert.deepEqual(readFileSync(file), before);
 });
 
