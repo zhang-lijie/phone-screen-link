@@ -5,6 +5,10 @@ import { WIRELESS_AUTO_WARNING_CODES } from '../shared/keys.mjs';
 const MDNS_POLL_INTERVAL_MS = 500;
 const MDNS_POLL_TIMEOUT_MS = 8_000;
 const LEGACY_WARNING_THROTTLE_MS = 60_000;
+// EMUI restarts adbd when `adb tcpip` runs. The first connect after that can
+// be refused for a second or two, so allow a short bounded settle window.
+const LEGACY_SETTLE_WINDOW_MS = 3_000;
+const LEGACY_SETTLE_DELAYS_MS = [250, 500, 1_000, 1_000];
 const PAIRING_SERVICE = '_adb-tls-pairing._tcp';
 const CONNECT_SERVICE = '_adb-tls-connect._tcp';
 
@@ -132,6 +136,43 @@ export function createConnectionService({
     if (state !== 'device') throw usbOfflineError();
   }
 
+  // Only a bootstrap-triggered connect gets a settle window: pair mode must
+  // keep its original single attempt, and a manual legacy connect without
+  // tcpip has nothing to wait for. The injected clock bounds the window even
+  // if an injected sleep implementation does not advance time.
+  async function connectAndConfirm(address, settle) {
+    const deadline = now() + LEGACY_SETTLE_WINDOW_MS;
+    let lastConnectError = null;
+    for (let attempt = 0; ; attempt += 1) {
+      let connectOk = false;
+      try {
+        await adb.connect(address);
+        connectOk = true;
+        lastConnectError = null;
+      } catch (err) {
+        if (!settle) throw err;
+        lastConnectError = err;
+      }
+      // A rejected connect must never be treated as success just because a
+      // stale previous endpoint still reports `device`.
+      if (connectOk) {
+        let online = false;
+        try {
+          online = String(await adb.getState(address)).trim() === 'device';
+        } catch {
+          // A nonzero get-state is how adb reports an offline or unknown device.
+        }
+        if (online) return true;
+      }
+      if (!settle || attempt >= LEGACY_SETTLE_DELAYS_MS.length) break;
+      const delay = LEGACY_SETTLE_DELAYS_MS[attempt];
+      if (now() + delay > deadline) break;
+      await sleep(delay);
+    }
+    if (settle && lastConnectError) throw lastConnectError;
+    return false;
+  }
+
   async function status() {
     const mode = adb.getMode();
     const serial = adb.getSerial();
@@ -228,15 +269,10 @@ export function createConnectionService({
 
       let online = false;
       try {
-        await adb.connect(address);
+        online = await connectAndConfirm(address, enableTcpip);
       } catch (err) {
         if (enableTcpip) warnLegacyBootstrapFailure(address, err);
         throw err;
-      }
-      try {
-        online = String(await adb.getState(address)).trim() === 'device';
-      } catch {
-        // A nonzero get-state is how adb reports an offline or unknown device.
       }
       if (!online) {
         if (enableTcpip) warnLegacyBootstrapFailure(address);

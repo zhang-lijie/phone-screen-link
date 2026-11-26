@@ -1071,9 +1071,11 @@ test('connection service: a failed tcpip leaves the active device and persisted 
 test('connection service: a connect failure after tcpip leaves the previous pair state unchanged', async (t) => {
   const previousAddress = '10.0.0.9:5555';
   const calls = [];
+  const sleeps = [];
   const { adb, store, service, file } = setup(t, {
     initial: { mode: 'wifi', serial: previousAddress, method: 'pair' },
     stored: { mode: 'wifi', method: 'pair', address: previousAddress },
+    sleep: async (ms) => { sleeps.push(ms); },
     runner: async (args) => {
       calls.push(args);
       if (args[0] === 'connect') throw new Error('connect rejected');
@@ -1084,11 +1086,12 @@ test('connection service: a connect failure after tcpip leaves the previous pair
 
   await assert.rejects(service.connectLegacy(TCPIP_INPUT), /connect rejected/);
 
-  assert.deepEqual(calls, [
+  assert.deepEqual(calls.slice(0, 3), [
     ['-s', USB_SERIAL, 'get-state'],
     ['-s', USB_SERIAL, 'tcpip', '5555'],
     ['connect', LEGACY_ADDRESS],
   ]);
+  assert.deepEqual(sleeps, [250, 500, 1000, 1000]);
   assert.equal(adb.getMode(), 'wifi');
   assert.equal(adb.getSerial(), previousAddress);
   assert.equal(adb.getMethod(), 'pair');
@@ -1300,4 +1303,99 @@ test('connection service: supervision without an explicit serial uses the last-k
   assert.equal(await adb.ensureWirelessConnected(LEGACY_ADDRESS, { method: 'legacy' }), true);
   assert.ok(calls.some((args) => args.join(' ') === `-s ${USB_SERIAL} tcpip 5555`));
   assert.equal(calls.some((args) => args[1] === DEFAULT_USB_SERIAL && args[2] === 'tcpip'), false);
+});
+
+// ---------------------------------------------------------------------------
+// Legacy adbd settle after tcpip (live-device bug)
+// ---------------------------------------------------------------------------
+
+test('connection service: an immediate post-tcpip connect succeeds without any settle delay', async (t) => {
+  const sleeps = [];
+  const { service } = setup(t, {
+    sleep: async (ms) => { sleeps.push(ms); },
+    runner: async () => 'device\n',
+  });
+
+  const result = await service.connectLegacy(TCPIP_INPUT);
+
+  assert.equal(result.online, true);
+  assert.equal(result.method, 'legacy');
+  assert.deepEqual(sleeps, []);
+});
+
+test('connection service: a delayed post-tcpip connect retries with bounded backoff and succeeds', async (t) => {
+  const sleeps = [];
+  let targetChecks = 0;
+  const calls = [];
+  const { adb, store, service } = setup(t, {
+    sleep: async (ms) => { sleeps.push(ms); },
+    runner: async (args) => {
+      calls.push(args);
+      if (args[0] === '-s' && args[1] === LEGACY_ADDRESS && args[2] === 'get-state') {
+        targetChecks += 1;
+        return targetChecks >= 4 ? 'device\n' : 'offline\n';
+      }
+      return 'device\n';
+    },
+  });
+
+  const result = await service.connectLegacy(TCPIP_INPUT);
+
+  assert.equal(result.online, true);
+  assert.equal(result.method, 'legacy');
+  assert.equal(adb.getMethod(), 'legacy');
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'legacy', address: LEGACY_ADDRESS });
+  assert.deepEqual(sleeps, [250, 500, 1000]);
+  assert.equal(calls.filter((args) => args[0] === 'connect').length, 4);
+  assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 1);
+});
+
+test('connection service: a permanently offline target after tcpip stays atomic with bounded retries', async (t) => {
+  const sleeps = [];
+  const warnings = [];
+  const calls = [];
+  const { adb, store, service, file } = setup(t, {
+    sleep: async (ms) => { sleeps.push(ms); },
+    warn: (message) => warnings.push(message),
+    runner: async (args) => {
+      calls.push(args);
+      if (args[0] === '-s' && args[1] === LEGACY_ADDRESS) return 'offline\n';
+      return 'device\n';
+    },
+  });
+  const before = readFileSync(file);
+
+  await assert.rejects(service.connectLegacy(TCPIP_INPUT), /offline after connect/i);
+
+  assert.deepEqual(sleeps, [250, 500, 1000, 1000]);
+  assert.equal(calls.filter((args) => args[0] === 'connect').length, 5);
+  assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 1);
+  assert.equal(warnings.length, 1, 'a whole failed transaction must warn once');
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+  assert.equal(adb.getMethod(), 'pair');
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+  assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: a permanently rejected connect after tcpip surfaces the last ADB error', async (t) => {
+  const sleeps = [];
+  const calls = [];
+  const { adb, store, service, file } = setup(t, {
+    sleep: async (ms) => { sleeps.push(ms); },
+    runner: async (args) => {
+      calls.push(args);
+      if (args[0] === 'connect') throw new Error('connect refused');
+      return 'device\n';
+    },
+  });
+  const before = readFileSync(file);
+
+  await assert.rejects(service.connectLegacy(TCPIP_INPUT), /connect refused/);
+
+  assert.deepEqual(sleeps, [250, 500, 1000, 1000]);
+  assert.equal(calls.filter((args) => args[0] === 'connect').length, 5);
+  assert.equal(adb.getMode(), 'usb');
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+  assert.deepEqual(readFileSync(file), before);
 });

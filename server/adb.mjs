@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { isIP } from 'node:net';
 import { dirname, join } from 'node:path';
+import { performance } from 'node:perf_hooks';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { KEY_CODES } from '../shared/keys.mjs';
@@ -67,6 +68,15 @@ const ADB_TLS_SERVICES = new Set([
   '_adb-tls-connect._tcp',
 ]);
 
+// After `adb tcpip`, adbd restarts its TCP listener. EMUI can take ~1-2s
+// before `adb connect` succeeds, so post-bootstrap connects settle briefly.
+const LEGACY_SETTLE_WINDOW_MS = 3_000;
+const LEGACY_SETTLE_DELAYS_MS = [250, 500, 1_000, 1_000];
+
+function defaultSleep(ms) {
+  return new Promise((resolve) => { setTimeout(resolve, ms); });
+}
+
 function parseIpv4(value) {
   const address = String(value ?? '').trim();
   return isIP(address) === 4 ? address : null;
@@ -118,6 +128,8 @@ export function createAdb(runner = defaultRunner, {
   serial = DEFAULT_USB_SERIAL,
   mode = 'usb',
   method = 'pair',
+  sleep = defaultSleep,
+  now = () => performance.now(),
 } = {}) {
   let activeSerial = serial;
   let activeMode = mode;
@@ -166,6 +178,24 @@ export function createAdb(runner = defaultRunner, {
       return String(await getState(address)).trim() === 'device';
     } catch {
       return false;
+    }
+  }
+
+  // Retry only connect + target state, never tcpip: adbd has already been
+  // restarted once and overlapping ticks must not restart it again.
+  async function connectAfterBootstrap(address) {
+    const deadline = now() + LEGACY_SETTLE_WINDOW_MS;
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await runner(['connect', address]);
+        if (await wirelessIsOnline(address)) return true;
+      } catch {
+        // A refused connect or offline get-state is expected during restart.
+      }
+      if (attempt >= LEGACY_SETTLE_DELAYS_MS.length) return false;
+      const delay = LEGACY_SETTLE_DELAYS_MS[attempt];
+      if (now() + delay > deadline) return false;
+      await sleep(delay);
     }
   }
 
@@ -252,11 +282,10 @@ export function createAdb(runner = defaultRunner, {
       legacyBootstrapKey = bootstrapKey;
       try {
         await runner(['-s', usbSerial, 'tcpip', String(tcpipPort)]);
-        await runner(['connect', address]);
       } catch {
         return false;
       }
-      const online = await wirelessIsOnline(address);
+      const online = await connectAfterBootstrap(address);
       if (online) legacyBootstrapKey = null;
       return online;
     },

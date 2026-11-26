@@ -486,7 +486,7 @@ test('legacy maintenance does not repeat tcpip while the same outage remains off
     calls.push(args);
     if (args[0] === '-s' && args[1] === 'USB-SERIAL' && args[2] === 'get-state') return 'device\n';
     return 'offline\n';
-  });
+  }, { sleep: async () => {}, now: () => 0 });
 
   assert.equal(await adb.ensureWirelessConnected(address, {
     method: 'legacy',
@@ -500,7 +500,7 @@ test('legacy maintenance does not repeat tcpip while the same outage remains off
   }), false);
 
   assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 1);
-  assert.equal(calls.filter((args) => args[0] === 'connect').length, 3);
+  assert.equal(calls.filter((args) => args[0] === 'connect').length, 7);
   assert.equal(calls.filter((args) => args[0] === 'devices').length, 0);
 });
 
@@ -525,6 +525,80 @@ test('legacy maintenance allows a fresh bootstrap after a healthy connection and
   assert.equal(await adb.ensureWirelessConnected(address, options), true);
   assert.equal(await adb.ensureWirelessConnected(address, options), true);
   assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 2);
+});
+
+test('legacy maintenance waits for EMUI adbd to settle after tcpip before retrying connect', async () => {
+  const address = '10.0.0.5:5555';
+  const calls = [];
+  const sleeps = [];
+  let elapsed = 0;
+  let wirelessChecks = 0;
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === '-s' && args[1] === address && args[2] === 'get-state') {
+      wirelessChecks += 1;
+      return wirelessChecks >= 5 ? 'device\n' : 'offline\n';
+    }
+    return 'device\n';
+  }, {
+    sleep: async (ms) => { sleeps.push(ms); elapsed += ms; },
+    now: () => elapsed,
+  });
+
+  assert.equal(await adb.ensureWirelessConnected(address, {
+    method: 'legacy',
+    port: 5555,
+    usbSerial: 'USB-SERIAL',
+  }), true);
+
+  assert.deepEqual(sleeps, [250, 500]);
+  assert.equal(calls.filter((args) => args[0] === 'connect').length, 4);
+  assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 1);
+  assert.equal(calls.some((args) => args[0] === 'devices'), false);
+});
+
+test('legacy maintenance bounds retries when the target never comes online after tcpip', async () => {
+  const address = '10.0.0.5:5555';
+  const calls = [];
+  const sleeps = [];
+  let elapsed = 0;
+  const adb = createAdb(async (args) => {
+    calls.push(args);
+    if (args[0] === '-s' && args[1] === 'USB-SERIAL' && args[2] === 'get-state') return 'device\n';
+    if (args[0] === '-s' && args[1] === address && args[2] === 'get-state') return 'offline\n';
+    return '';
+  }, {
+    sleep: async (ms) => { sleeps.push(ms); elapsed += ms; },
+    now: () => elapsed,
+  });
+  const options = { method: 'legacy', port: 5555, usbSerial: 'USB-SERIAL' };
+
+  assert.equal(await adb.ensureWirelessConnected(address, options), false);
+  assert.deepEqual(sleeps, [250, 500, 1000, 1000]);
+  assert.equal(calls.filter((args) => args[0] === 'connect').length, 6);
+  assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 1);
+
+  assert.equal(await adb.ensureWirelessConnected(address, options), false);
+  assert.equal(calls.filter((args) => args[0] === 'connect').length, 7);
+  assert.equal(calls.filter((args) => args[2] === 'tcpip').length, 1);
+  assert.equal(calls.some((args) => args[0] === 'devices'), false);
+});
+
+test('pair-mode supervision keeps its single connect without settle retries', async () => {
+  const calls = [];
+  const sleeps = [];
+  const adb = createAdb(async (args) => { calls.push(args); return 'offline\n'; }, {
+    sleep: async (ms) => { sleeps.push(ms); },
+    now: () => 0,
+  });
+
+  assert.equal(await adb.ensureWirelessConnected('10.0.0.5:5555'), false);
+  assert.deepEqual(calls, [
+    ['-s', '10.0.0.5:5555', 'get-state'],
+    ['connect', '10.0.0.5:5555'],
+    ['-s', '10.0.0.5:5555', 'get-state'],
+  ]);
+  assert.deepEqual(sleeps, []);
 });
 
 test('parseWifiIp reads the IPv4 address from ip addr output', () => {
