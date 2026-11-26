@@ -26,7 +26,10 @@ export function fitCanvasSize({ width, height, availableWidth, availableHeight }
   const h = Number(height);
   const aw = Number(availableWidth);
   const ah = Number(availableHeight);
-  if (![w, h, aw, ah].every(Number.isFinite) || w <= 0 || h <= 0 || aw <= 0 || ah <= 0) return null;
+  if (![w, h, aw, ah].every(Number.isFinite) || w <= 1 || h <= 1 || aw <= 0 || ah <= 0) return null;
   const scale = Math.min(aw / w, ah / h);
-  return { width: Math.round(w * scale), height: Math.round(h * scale) };
+  const fittedWidth = Math.floor(w * scale);
+  const fittedHeight = Math.floor(h * scale);
+  if (fittedWidth < 1 || fittedHeight < 1) return null;
+  return { width: fittedWidth, height: fittedHeight };
 }

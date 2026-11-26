@@ -635,15 +635,33 @@ async function refreshDevices() {
 // window the picture stays at its negotiated resolution and leaves black
 // borders. Size both stacked layers to the available cell, preserving aspect
 // so pointer/touch mapping still matches the visible image.
-function fitStreamCanvas() {
+function fitStreamCanvas(info) {
   const canvas = streamEl.querySelector('canvas.video-layer');
   const touch = streamEl.querySelector('canvas.touch-layer');
   const video = streamEl.querySelector('.video');
   if (!canvas || !video) return;
+  let width = canvas.width;
+  let height = canvas.height;
+  // onConnect fires before the first config frame sets the canvas resolution.
+  // Prefer metadata so the portrait/landscape aspect is right from frame one.
+  const match = typeof info?.resolution === 'string'
+    && /^(\d+)\s*x\s*(\d+)$/.exec(info.resolution);
+  if (match) {
+    width = Number(match[1]);
+    height = Number(match[2]);
+  } else if (Number.isFinite(info?.width) && Number.isFinite(info?.height)
+    && info.width > 0 && info.height > 0) {
+    width = info.width;
+    height = info.height;
+  } else if (width === 300 && height === 150) {
+    // Engine placeholder, not a real video size. A MutationObserver below
+    // refits when the config frame replaces it with the real dimensions.
+    return;
+  }
   const rect = video.getBoundingClientRect();
   const fitted = fitCanvasSize({
-    width: canvas.width,
-    height: canvas.height,
+    width,
+    height,
     availableWidth: rect.width,
     availableHeight: rect.height - 4, // two 2px breathing margins
   });
@@ -653,6 +671,15 @@ function fitStreamCanvas() {
     layer.style.height = `${fitted.height}px`;
   }
 }
+
+// The engine swaps in a fresh canvas and sets width/height when the codec
+// config arrives. Refit whenever those attributes change so the early
+// onConnect fit is corrected without waiting for a window event.
+new MutationObserver(() => fitStreamCanvas()).observe(streamEl, {
+  attributes: true,
+  attributeFilter: ['width', 'height'],
+  subtree: true,
+});
 
 function labelToolbox() {
   const list = streamEl.querySelector('.control-buttons-list');
@@ -1818,6 +1845,7 @@ function applyDockWidth(requested) {
   const width = clampDockStreamWidth(requested, available);
   document.body.style.setProperty('--dock-stream-width', `${width}px`);
   updateDockCentering();
+  fitStreamCanvas();
   return width;
 }
 
@@ -1884,6 +1912,7 @@ function exitChatDock() {
     chatPanel.style.bottom = '';
   }
   setChatDockButton();
+  fitStreamCanvas();
 }
 
 // While chat is open, uncheck the engine's three input-mode checkboxes so
@@ -2178,7 +2207,7 @@ function startStream() {
   options.onResize = (info) => {
     if (gen !== generation) return;
     handleStreamOrientation(info);
-    fitStreamCanvas();
+    requestAnimationFrame(() => fitStreamCanvas(info));
   };
 
   try {

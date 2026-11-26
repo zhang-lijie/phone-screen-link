@@ -43,9 +43,18 @@ test('README documents the 400px stream and 240px chat dock minimums', () => {
 
 test('floating stream canvas is fitted on connect, resize and tab visibility', () => {
   assert.match(app, /import \{[^}]*fitCanvasSize[^}]*\} from '\.\/device-ui\.js';/);
-  assert.match(app, /function fitStreamCanvas\(\)[\s\S]*?canvas\.video-layer[\s\S]*?fitCanvasSize\([\s\S]*?style\.width[\s\S]*?style\.height/);
+  assert.match(app, /function fitStreamCanvas\(info\)[\s\S]*?canvas\.video-layer[\s\S]*?fitCanvasSize\([\s\S]*?style\.width[\s\S]*?style\.height/);
   assert.match(app, /options\.onConnect = \(info\) => \{[\s\S]*?fitStreamCanvas\(\)/);
   assert.match(app, /options\.onResize = \(info\) => \{[\s\S]*?fitStreamCanvas\(\)/);
   assert.match(app, /window\.addEventListener\('resize', \(\) => \{[\s\S]*?fitStreamCanvas\(\)/);
   assert.match(app, /document\.addEventListener\('visibilitychange', \(\) => \{[\s\S]*?fitStreamCanvas\(\)/);
+});
+
+
+test('canvas fit survives metadata timing, rotation and dock layout changes', () => {
+  assert.match(app, /function fitStreamCanvas\(info\)[\s\S]*?info\?\.resolution[\s\S]*?info\?\.width/);
+  assert.match(app, /new MutationObserver\(\(\) => fitStreamCanvas\(\)\)[\s\S]*?attributeFilter: \['width', 'height'\]/);
+  assert.match(app, /options\.onResize = \(info\) => \{[\s\S]*?requestAnimationFrame\(\(\) => fitStreamCanvas\(info\)\)/);
+  assert.match(app, /function applyDockWidth\(requested\)[\s\S]*?fitStreamCanvas\(\)/);
+  assert.match(app, /function exitChatDock\(\)[\s\S]*?fitStreamCanvas\(\)/);
 });

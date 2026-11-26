@@ -47,7 +47,7 @@ test('scheduleStart captures the generation at schedule time, not after a bump',
 
 test('fitCanvasSize scales up and down while preserving the aspect ratio', () => {
   assert.deepEqual(fitCanvasSize({ width: 620, height: 1280, availableWidth: 1848, availableHeight: 1023 }), {
-    width: 496,
+    width: 495,
     height: 1023,
   });
   assert.deepEqual(fitCanvasSize({ width: 620, height: 1280, availableWidth: 310, availableHeight: 2000 }), {
@@ -60,8 +60,13 @@ test('fitCanvasSize scales up and down while preserving the aspect ratio', () =>
   });
 });
 
-test('fitCanvasSize refuses invalid dimensions', () => {
+test('fitCanvasSize refuses invalid dimensions and accepts numeric strings', () => {
   assert.equal(fitCanvasSize({ width: 0, height: 100, availableWidth: 800, availableHeight: 600 }), null);
+  assert.equal(fitCanvasSize({ width: 0.4, height: 100, availableWidth: 800, availableHeight: 600 }), null);
   assert.equal(fitCanvasSize({ width: 100, height: Number.NaN, availableWidth: 800, availableHeight: 600 }), null);
   assert.equal(fitCanvasSize({ width: 100, height: 100, availableWidth: -1, availableHeight: 600 }), null);
+  assert.deepEqual(fitCanvasSize({ width: '620', height: '1280', availableWidth: '800', availableHeight: '600' }), {
+    width: 290,
+    height: 600,
+  });
 });
