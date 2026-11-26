@@ -12,6 +12,30 @@ function deps({ locked = false, toolResult = { content: [{ type: 'text', text: '
   };
 }
 
+test('preset command: lock authorization and tool injection stay pinned to the serial captured for the command', async () => {
+  let serial = 'USB-PRESET';
+  const lockTargets = [];
+  const toolTargets = [];
+  const d = {
+    getSerial: () => serial,
+    isLocked: async (target) => {
+      lockTargets.push(target);
+      serial = 'WIFI-SWITCHED-DURING-LOCK-CHECK';
+      return false;
+    },
+    callTool: async (name, args, target) => {
+      toolTargets.push(target);
+      return { content: [{ type: 'text', text: 'done' }] };
+    },
+  };
+
+  const result = await runPresetCommand({ commandId: 'desktop', lang: 'en', deps: d });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(lockTargets, ['USB-PRESET']);
+  assert.deepEqual(toolTargets, ['USB-PRESET']);
+});
+
 test('preset command: locked phone refuses without calling tool', async () => {
   const d = deps({ locked: true });
   const r = await runPresetCommand({ commandId: 'desktop', lang: 'zh', deps: d });

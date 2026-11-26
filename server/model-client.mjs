@@ -1,7 +1,7 @@
 // Thin client for an OpenAI-compatible /v1/chat/completions endpoint.
 // fetch is injected so callers (and tests) control the transport.
 
-export const DEFAULT_BASE_URL = 'http://127.0.0.1:11434/v1';
+export const DEFAULT_BASE_URL = 'http://192.168.3.123:8080/v1';
 
 function parseArguments(raw, name) {
   if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) return raw;

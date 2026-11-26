@@ -62,8 +62,8 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 
 ![手机主屏幕投屏](docs/screenshots/03-phone-home.png)
 
-> 聊天面板的实拍截图待补：拍它需要 `uvx` + 局域网 tool-calling 模型 + 真机都到位（见[真机冒烟](#真机冒烟手动尚未在本环境执行)），
-> 本机缺的是可用的模型端点，因此不放伪造或占位图。
+> 聊天面板的实拍截图待补：工具链与已配置的局域网 tool-calling 端点已就绪，但还需完成真机聊天冒烟（见[真机冒烟](#真机冒烟手动尚未在本环境执行)），
+> 因此不放伪造或占位图。
 
 ## 功能
 
@@ -78,7 +78,8 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 - **多语言界面**：中文 / 英文，在设置面板切换，默认跟随浏览器语言，即时生效无需刷新；按钮文字、状态提示、锁屏/剪贴板提示、右侧工具栏的悬浮提示（tooltip），以及引擎直接绘制在画面上的画质统计文字都会一起翻译。
 - **分辨率自适应**：自动探测设备编码器能接受的尺寸，画面糊时自动降档，无需手动调参。
 - **对话控制手机**（新增）：右下角常驻对话按钮，点开聊天面板，用中英文自然语言让局域网上的 OpenAI 兼容大模型选工具，经白名单校验后由 ghost 执行点击、滑动、输入、启动应用等操作；执行步骤以 `工具 ✓/✗` 标签回显，失败给可读错误，聊天坏了不影响投屏和按钮。详见[聊天控制手机](#聊天控制手机chat-agent)。
-- **聊天面板可拖动 / 可并排**：标题栏拖动把手可把浮动聊天面板拖到任意位置（位置持久化）；标题栏开关可切换到「并排」模式——画面保持原尺寸靠左、聊天填满右侧剩余空间，中间的分隔条可拖动调整两侧宽度（画面侧最小 500px、聊天侧最小 240px，比例持久化）。并排时聊天窗口不随全屏消失，关闭面板自动退出并排。
+- **无线 ADB 双模式**：右侧工具栏齿轮旁的 `WIFI / 无线` 按钮可打开无线面板，顶部选择「Android 11+ 配对码」或「传统 5555（无需配对码）」。配对模式支持 USB 自动获取 IP/端口（6 位配对码仍需手动输入）并完成 `adb pair → adb connect`；传统模式可用 USB「自动获取并连接」执行 `adb tcpip 5555 → adb connect`，也可在手机已开启 TCP 模式时直接「连接」。切换后投屏、触摸、按键、锁屏检测与 ghost 聊天都跟随无线地址。传统模式**未加密、无认证，仅限可信局域网**。详见[无线 ADB 双模式](#无线-adb-双模式)。
+- **聊天面板可拖动 / 可并排**：标题栏拖动把手可把浮动聊天面板拖到任意位置（位置持久化）；标题栏开关可切换到「并排」模式——画面保持原尺寸靠左、聊天填满右侧剩余空间，中间的分隔条可拖动调整两侧宽度（画面侧最小 400px、聊天侧最小 240px，比例持久化）。并排时聊天窗口不随全屏消失，关闭面板自动退出并排。
 
 ## 界面与操作
 
@@ -91,11 +92,12 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 | 截图 / 键盘 / 鼠标 / 统计 / 显示模式 / 刷新 / 剪贴板 | 右侧窄工具栏 | 引擎自带工具，带文字标签 |
 | 选择 / 更换手机 | 底部状态栏的手机名或「选择手机 (N)」 | `GET /api/devices` 列出设备，`POST /api/devices/select` 切换；选择只存浏览器 `localStorage` |
 | 设置 | 工具栏 `SET` 齿轮 | 自定义面板，见下节 |
+| 无线 ADB 配对 / 传统 5555 / USB 自动获取 / 切回 USB | 工具栏 `WIFI / 无线` | 独立双模式面板，`GET/POST /api/wireless*`，见下节 |
 | 画面全屏 / 退出 | 画面左上角图标按钮（tooltip），或 `Esc` 退出 | CSS 铺满视口，全屏时隐藏工具栏，保留画面圆角与描边 |
 | 打开 / 收起聊天 | 右下角圆形对话按钮（tooltip「聊天助手」），或 `Esc` 收起 | 前端面板；按钮只在后端 `enabled` 为真时出现 |
 | 拖动聊天面板 | 浮动模式下拖标题栏 | 位置存 `localStorage` |
 | 并排 / 浮动切换 | 聊天标题栏分屏开关 | 并排时画面靠左、聊天占右侧，开关状态持久化 |
-| 调整并排两侧宽度 | 拖动两栏之间的分隔条 | 画面 ≥ 500px、聊天 ≥ 240px，比例持久化 |
+| 调整并排两侧宽度 | 拖动两栏之间的分隔条 | 画面 ≥ 400px、聊天 ≥ 240px，比例持久化 |
 | 自然语言控制手机 | 聊天面板输入框 + `发送` | `POST /chat` → agent 循环 → ghost MCP → ADB |
 | 清空对话 | 聊天面板底部 `清空对话` | 只清前端显示的气泡，后端本就无状态 |
 | 聊天配置 | 设置面板「聊天」分组 + `保存聊天设置` | `GET/POST /api/chat-config`，存后端 `state/chat.json` |
@@ -128,6 +130,82 @@ v0.5.13，Home / Back / 音量 / 电源等按键走一条轻量 ADB 控制桥。
 **为什么要做分辨率阶梯**：实测 Mate 40 Pro 屏幕为 1152×2376，但引擎按视口反推请求尺寸时，设备编码器会拒绝请求并抛出
 `IllegalArgumentException`，回退到最大边 512 的帧（248×512），被浏览器放大后明显发糊。该编码器能接受的上限还会随设备状态变化，
 因此页面在连上后检查协商分辨率，一旦被大幅降级就自动重启并降低一档；实测稳定结果为 **522×1080**（约 4.4 倍像素量）。
+
+## 无线 ADB 双模式
+
+面板顶部的「连接方式」决定使用哪种无线模式；选择会与表单一起保存在浏览器 `localStorage`，刷新后自动恢复。两种模式的连接切换都走同一套串行事务，失败不会改变当前活动连接。
+
+### Android 11+ 配对码模式
+
+电脑与手机必须处于**同一个局域网**，手机需运行 **Android 11 或更高版本**并已开启开发者选项。
+默认仍从 USB 开始；下面的流程不需要在终端手工执行 ADB 命令。
+
+1. 推荐首次使用时用 USB 连接手机，选择「文件传输 / MTP」并授权 USB 调试，先确认浏览器能看到投屏和按键；如果当前 USB 已在线，可继续下面步骤。
+2. 手机打开「设置 → 开发者选项 → 无线调试」。不同厂商菜单名称可能略有差异。
+3. 进入「无线调试」主页面，再点「使用配对码配对设备」，记下弹窗里的 **IP 地址、端口和 6 位配对码**，并保持弹窗打开。这是**配对端口**，不是固定 `5555`；配对码会过期。
+4. 浏览器点右侧工具栏齿轮旁的 `WIFI / 无线`。USB 在线时「USB 自动获取」可用；点击后应用通过 USB 读取手机 Wi‑Fi IP 和连接端口，并最多等待 8 秒从 mDNS 获取配对端口，自动填回对应表单。**自动获取不会读取配对码，也不会发起配对。**
+5. 6 位配对码仍须手动输入。若只获取到部分信息，面板会保留已获取字段并显示警告；可检查手机无线调试主页，手动补齐缺失的配对 IP/端口或连接 IP/端口后再继续。
+6. 点「配对并连接」。应用依次执行 `adb pair <配对 IP:端口> <配对码>`、`adb connect <连接 IP:端口>`，确认设备状态为 `device` 后才保存无线地址、切换活动设备并自动重启投屏。任一步失败都不会切换当前设备或保存新地址；并发切换请求会串行处理。
+7. 状态显示 `Wireless · <连接 IP:端口> · online` 后，可以拔掉 USB；镜像、触摸、右侧按键、锁屏检测和 ghost 聊天应继续工作。
+
+> **两组地址不要混用**：`adb pair` 使用配对弹窗的临时端口；后续连接、断线重连、投屏和 ghost 使用无线调试主页面的连接端口。手机重启、切换网络或无线调试重新开关后，连接端口可能变化，需要按新值重新连接。
+
+### 传统 5555 模式（无需配对码）
+
+适用于不提供配对码弹窗的设备（例如 EMUI）。仍需电脑与手机处于**同一个局域网**，默认从 USB 开始。
+
+1. 用 USB 连接手机并授权 USB 调试，打开「开发者选项 → 无线调试」（部分厂商只需开启 USB 调试即可）。
+2. 打开 `WIFI / 无线` 面板，把「连接方式」切到「传统 5555（无需配对码）」。端口默认 `5555`，可按需修改（1–65535）。
+3. 若手机 TCP 模式尚未开启：保持 USB 在线，点「自动获取并连接」。应用先从 USB 读取手机 Wi‑Fi IP 填回表单，再由这次点击触发 `adb -s <USB 序列号> tcpip <端口>`，随后 `adb connect <IP>:<端口>` 并确认目标在线。**该按钮只在后端报告 `usbOnline: true` 时可用；USB 离线时不会执行 `tcpip`。**
+4. 若手机已开启 TCP 模式（例如此前已执行过 `adb tcpip 5555`），填好 IP/端口后直接点「连接」即可；不要求 USB 在线，也不会执行 `tcpip`。
+5. 成功后状态显示无线地址与 `online`，自动重启投屏，之后可拔掉 USB。掉线时后端每 5 秒只重连保存的地址；若配置为传统模式且 USB 在线，会尝试一次 `tcpip` 后重连，不会反复重启 adbd。
+6. 切回 USB 与配对模式相同：`WIFI / 无线` → 「切回 USB」。
+
+> **安全警告**：传统模式**未加密、无认证**，同一局域网内的任何设备都能连接手机的调试端口。仅可在**可信局域网**使用，不要在公共 Wi‑Fi 或不可信网络开启；用完建议切回 USB 或关闭手机无线调试。面板切到传统模式时会显示同样的警告。
+
+> `enableTcpip` 必须是真正的 JSON 布尔值：「自动获取并连接」发送 `true`，「连接」发送 `false`；字符串 `"true"` 会被控制桥以 `400` 拒绝。
+
+### 浏览器存储与安全
+
+完整表单（配对 IP/端口、配对码、连接 IP/端口）会以**明文 JSON**保存在当前浏览器
+`localStorage` 的 `phone-link-wireless-pairing` 键中，刷新或重启浏览器后自动回填。能访问该浏览器配置文件的
+人、恶意扩展或本机脚本都可能读取它，**不要把浏览器配置目录、开发者工具快照或含该键的导出文件分享出去**。
+
+所选连接方式与传统模式的 IP/端口也保存在同一个 `phone-link-wireless-pairing` 键中；保存配对表单不会重置模式，切换模式也不会清除配对码。「清除已保存配对信息」会一并删除。
+
+配对码**不会**写入后端 `state/connection.json`，也不会进入项目日志；它只在提交配对时发送给本机控制桥。
+配对码是短时凭据，失败后应从手机重新获取。不再需要时点面板里的「清除已保存配对信息」；清除只删除浏览器表单，
+不会断开当前连接。共享电脑上建议配对成功后立即清除。若浏览器禁用存储或空间不足，当前会话仍能正常配对，
+但表单会在刷新后丢失；界面会明确提示，并隐藏“表单已明文保存”的警告，不会谎报已保存。
+
+### 无线模式下的 USB 行为与切回 USB
+
+- 进入无线模式后，启动时和每 5 秒的维护任务都**不再执行 USB 设备枚举或强制断开 Wi‑Fi ADB**。
+  维护任务只对已保存的无线地址执行 `adb -s <地址> get-state`，离线时仅重连该地址，不会探测或切回 USB 设备。
+- 活动无线地址与连接方式（`method: "pair" | "legacy"`，缺省为 `pair`）保存到 `state/connection.json`（`0600`）；重启服务后自动恢复无线模式和原模式，并通过同一套重连逻辑上线。
+  浏览器里保存的表单只是方便回填，不是连接状态的真相源。
+- 投屏重启、右侧按键和锁屏检测使用当前活动序列号；ghost 每次聊天开始时捕获当前序列号，本次锁屏检查与工具调用固定到该设备，从 USB 切到无线后无需重启。
+- 切回 USB：插回已授权的 USB 手机，打开 `WIFI / 无线` 面板，点「切回 USB」。应用会先清空后端保存的无线地址，再切换活动设备为 USB 序列号并重启投屏；下一轮 5 秒维护任务恢复 USB 检查。浏览器里的配对表单不会被自动清除，
+  如需一并删除请再点「清除已保存配对信息」。
+- 可用 `PHONE_SERIAL=<连接 IP:端口> npm start` 直接以指定无线地址启动；`PHONE_USB_SERIAL=<USB 序列号>` 用于指定切回 USB 时使用的设备。
+
+### 状态接口
+
+控制桥 `http://127.0.0.1:8100` 上：
+
+| 方法 | 路径 | 用途 |
+| --- | --- | --- |
+| `GET` | `/health` | 当前 `{ ok, online, serial, mode }` |
+| `GET` | `/api/wireless` | 当前 `{ ok, mode, method, serial, online, usbOnline }`，面板打开时读取 |
+| `POST` | `/api/wireless/auto` | USB 辅助只读获取 `{ usbSerial, pairHost, pairPort, connectHost, connectPort, warnings }`；缺失端点为 `null`，USB 离线返回 `409`；`warnings` 使用稳定代码（`WIFI_IP_UNAVAILABLE` / `CONNECT_PORT_UNAVAILABLE` / `PAIRING_PORT_UNAVAILABLE`），界面按中英文映射为可读提示 |
+| `POST` | `/api/wireless/pair` | 提交 `{ pairHost, pairPort, pairCode, connectHost, connectPort }`，成功后返回无线状态 |
+| `POST` | `/api/wireless/legacy` | 提交 `{ host, port, enableTcpip }`；`enableTcpip` 必须是布尔值，`true` 时先检查 USB 在线并执行 `adb tcpip`，`false` 时只 `adb connect`；成功后返回无线状态（`method: "legacy"`） |
+| `POST` | `/api/wireless/usb` | 切回 USB 并返回状态 |
+
+所有 POST 接口沿用桥的 Origin 白名单；桥仍只监听 `127.0.0.1`。配对码必须是 6 位数字，端口范围为 1–65535；
+校验失败返回 `400`，ADB 执行失败返回 `502`，错误响应会隐藏配对码。
+
+`POST /api/wireless/auto` 虽然使用 POST 携带 Origin 防护，但**只读取 USB 信息与 mDNS 服务**：不调用配对/连接、不修改活动设备或 `state/connection.json`，也不接受或返回配对码。自动获取填回的 IP/端口会走现有浏览器表单持久化；是否真正配对仍由用户输入配对码后点击「配对并连接」决定。
 
 ## 聊天控制手机（Chat Agent）
 
@@ -162,9 +240,10 @@ uvx --from ghost-in-the-droid android-agent-mcp
   `engine/dependencies/adb`（引擎自带的那份）加到子进程 `PATH` 最前面，系统装了 adb 也不冲突；
   因此不需要自己软链或导出 `PATH`。这一条仍列在冒烟清单第 1 步，等待真机复核；
 - 首次运行 `uvx` 会从 PyPI 下载 `ghost-in-the-droid` 并建隔离环境，**需要联网**（或预先 `uv tool install ghost-in-the-droid` / 配置镜像）。
-- 手机仍按现有方式用 USB 连着并完成授权。ghost 启动时用环境变量 `DEFAULT_DEVICE` 选设备，
-  之后页面在投屏页切换手机时，控制桥回调 `server/ghost-client.mjs` 的 `setSerial()`，
-  每次调用工具再把当前序列号注入 `device` 参数；所以聊天和投屏不会分叉到两台手机。
+- 手机仍按现有方式连接并完成授权（USB 或 Android 11+ 无线调试）；ghost 通过环境变量 `DEFAULT_DEVICE` 选设备。
+  `scripts/start.mjs` 把 `adb.getSerial()` 提供给 `server/ghost-client.mjs`，后者在**每次工具调用时**动态注入 `device` 参数；
+  应用内在多台 USB 手机间切换、切到无线或切回 USB 后，下一次聊天请求即使用新设备，无需重启聊天子进程。
+  单次聊天会在开始时捕获序列号，锁屏检查与本次所有工具调用都固定到该设备，避免切换过程中检查了 A 手机却操作 B 手机。
 
 `npm run setup` 会顺带探测 `uvx`/`uv`，缺失时只打印安装提示、**不阻断**引擎构建；
 `npm start` 时若 ghost 起不来（或 **25 秒**内没起来，例如 `uvx` 卡在下载），会打印
@@ -176,8 +255,8 @@ ghost 连接失败时其子进程传输会被立即关闭，不留残余进程�
 | 设置项 | 字段 | 默认值 | 说明 |
 | --- | --- | --- | --- |
 | 启用聊天 | `enabled` | 关 | 关闭时右下角图标不显示，后端 `/chat` 直接返回 503 `chat disabled`，不发任何模型请求 |
-| 模型服务地址 | `baseUrl` | `http://127.0.0.1:11434/v1` | OpenAI 兼容 base URL，本项目按 `<baseUrl>/chat/completions` 请求；填自己的局域网地址 |
-| 模型名 | `model` | 空 | **留空即禁用**（后端强制，不信任前端开关）；需支持 function/tool calling |
+| 模型服务地址 | `baseUrl` | `http://192.168.3.123:8080/v1` | OpenAI 兼容 base URL，本项目按 `<baseUrl>/chat/completions` 请求；填自己的局域网地址 |
+| 模型名 | `model` | `local` | 需支持 function/tool calling；留空仍会禁用聊天 |
 | API Key | `apiKey` | 空 | 可选，局域网模型通常不需要；只在请求里作 `Authorization: Bearer`，**从不回传前端**（前端只看到 `hasApiKey`） |
 | 截图发给模型 | `screenshot` | 开 | 关闭时连 `screenshot` 工具都不暴露给模型；开启时截图以 base64 data URI 作视觉消息回灌，模型不支持视觉会报可读错误 |
 | 单次最大步数 | `maxSteps` | 100 | agent 一次请求最多调几轮工具（界面 1–100），到了就停并提示「已达到最大步数」。后端强制：整数收敛到 1–100，非整数丢弃 |
@@ -220,7 +299,7 @@ CORS 只拦「读响应」，恶意网页仍能发出免预检的简单请求（
 - **默认会把截图发给模型**（`截图发给模型` 勾选着），连同屏幕文字和指令文本一起离开本机、发往你填的模型地址；
   不想外发就关掉该开关，或先把 `模型服务地址` 收到自己的局域网内。剪贴板只读（`clipboard_get`）不在名单里，不会被发出去。
 - API Key 只写不读：存 `state/chat.json`、只出现在模型请求头里，接口响应不回传，页面 `input` 是 `type="password"`。
-- 锁屏真相源是后端：每一步请求前，后端调 ghost 的 `get_phone_state` 自行判断，读不到状态就**按锁定处理**（fail closed），
+- 锁屏真相源是后端：每次聊天或快捷命令开始时，后端用该轮捕获的设备序列号调用 ADB 的 power/trust 状态，读不到状态就**按锁定处理**（fail closed），
   锁定时只回一句「请先解锁」，模型和动作工具都不会被调用；前端 3 秒轮询的状态只用于界面显示。
 - 聊天是**新增**入口：自研桥的 `/keyevent` 和右侧按钮、投屏、触摸、滚动全部照旧，两条路径互不依赖；
   ghost 起不来或模型超时，最多是聊天气泡报错。每次模型调用限时 **60 秒**（超时中断请求），
@@ -237,8 +316,9 @@ CORS 只拦「读响应」，恶意网页仍能发出免预检的简单请求（
 
 单元测试覆盖的是逻辑（白名单、配置读写、模型响应解析、agent 循环、路由、启动编排、i18n）；
 **ghost 真实返回的消息结构和模型 tool calling 行为必须在配好工具链的环境里手工验收**。
-本机开发环境有 `uvx`、有 `adb`、手机也连着，但**没有任何可用且开启 function/tool calling 的模型端点**
-（默认 `http://127.0.0.1:11434/v1` 无服务），因此下面的清单**未执行、不得当成已通过**：
+本机开发环境有 `uvx`、`adb`，手机也连着；已配置的局域网端点 `http://192.168.3.123:8080/v1`
+已用普通对话和 function/tool calling 请求验证可用（均返回 HTTP 200，工具请求返回 `tool_calls`）。
+但 ghost 在真机上的返回结构、模型选工具及手机动作仍需完成下面的手动冒烟，清单**未执行、不得当成已通过**：
 
 1. `which uvx adb` 都有输出；`uvx --from ghost-in-the-droid android-agent-mcp` 能手工起来（stdio，等待输入）。
 2. `npm run setup && npm start`，日志出现 `control bridge listening at http://127.0.0.1:8100`，且**没有** `ghost MCP server failed to start`。
@@ -254,26 +334,28 @@ CORS 只拦「读响应」，恶意网页仍能发出免预检的简单请求（
 
 ```
 浏览器 (http://127.0.0.1:8000)
-├── web/               自定义页面：设置面板、聊天面板、状态栏、对引擎工具栏的包装
+├── web/               自定义页面：设置面板、无线双模式面板、聊天面板、状态栏、对引擎工具栏的包装
 │   └── shared/keys.mjs  浏览器与 Node 共用的按键码、设置校验、分辨率策略、语言包
 ├── engine/             ws-scrcpy-web v0.5.13（由 npm run setup 拉取，不入库）
 │   ├── HTTP :8000     仅绑定 127.0.0.1，提供页面与 WebSocket
 │   └── scrcpy-server  视频/音频流 + 触摸/滚轮/剪贴板控制通道
 └── control bridge     http://127.0.0.1:8100
     ├── POST /keyevent → adb input keyevent → 手机
+    ├── GET/POST /api/wireless* → 配对/传统 tcpip 连接/模式切换 → adb
     ├── POST /chat     → agent 循环 → 局域网模型 /v1/chat/completions
     │                    └→ 白名单校验 → ghost MCP (stdio 子进程) → adb → 手机
     └── GET/POST /api/chat-config → state/chat.json（Key 不出后端）
 ```
 
-四个部分各司其职：**引擎**负责视频解码和控制协议，**桥**做按键转发与聊天编排，
+四个部分各司其职：**引擎**负责视频解码和控制协议，**桥**做按键转发、无线连接管理与聊天编排，
 **agent 循环**负责模型调用、白名单与锁屏门禁，**页面**负责交互层和分辨率/设置策略。
-`scripts/start.mjs` 负责资源复制、进程启动、ghost 子进程与聊天配置存储的装配、就绪等待和信号清理。
+`state/connection.json` 保存活动模式与无线地址；`server/adb.mjs` 的可变序列号让桥、锁屏检测和 ghost 跟随当前设备。
+`scripts/start.mjs` 负责连接模式解析、资源复制、进程启动、ghost 子进程与聊天配置存储的装配、就绪等待和信号清理。
 
 安全边界：引擎与桥都只绑定回环地址；桥的 CORS 白名单仅允许
 `http://127.0.0.1:8000` 与 `http://localhost:8000` 两个精确来源，且**所有 POST 路由都强制 Origin 校验**
-（白名单外的 Origin 直接 403，堵住免预检的跨站简单请求）；启动时强制断开 Wi‑Fi ADB，只允许固定 USB 设备。
-聊天不新增端口、不放宽 CORS，模型出口只有后端一处，且工具受白名单约束。
+（白名单外的 Origin 直接 403，堵住免预检的跨站简单请求）。USB 模式保留启动检查和每 5 秒的 Wi‑Fi ADB 清理；
+无线模式的控制桥只检查/重连指定地址，不枚举 USB。聊天不新增端口、不放宽 CORS，模型出口只有后端一处，且工具受白名单约束。
 
 ## 安装向导
 
@@ -295,7 +377,7 @@ CORS 只拦「读响应」，恶意网页仍能发出免预检的简单请求（
 - Node.js（开发验证于 v26）与 npm
 - `adb`：可以装系统版，也可以不装——首次启动时引擎会在后台把自带的一份下载到
   `engine/dependencies/adb`（约 15 MB，下载期间投屏与按键要等它就绪）
-- 通过 USB 连接、已授权 USB 调试的华为 Mate 40 Pro
+- Android 设备：默认通过 USB 连接并已授权 USB 调试；Android 11+ 可用配对码模式，其他设备（如 EMUI）可用传统 5555 模式，见[无线 ADB 双模式](#无线-adb-双模式)
 - **仅聊天功能还需要**：Python 3.10+、`uv`/`uvx`、`adb`（引擎自带或系统均可，启动脚本会把引擎目录加到 ghost 的 PATH），以及一个局域网内支持
   function/tool calling 的 OpenAI 兼容模型端点。缺这些只是聊天不可用，投屏与按钮照常（详见[前置条件](#前置条件ghost-工具层)）。
 
@@ -304,10 +386,11 @@ CORS 只拦「读响应」，恶意网页仍能发出免预检的简单请求（
 ```sh
 npm run setup   # 首次运行：克隆并构建固定版本引擎，打上仅监听 127.0.0.1 的补丁（已构建则跳过）
 npm start       # 复制 web/ 资源、启动引擎、控制桥与 ghost MCP 子进程
-npm test        # 运行 146 个 node 单元测试 + 16 个安装向导 python 测试
+npm run stop    # 停止当前项目的启动进程；先 SIGTERM，必要时 SIGKILL
+npm test        # 运行全部 node 单元测试
 ```
 
-浏览器打开 <http://127.0.0.1:8000/>。按 `Ctrl-C` 或发送 `SIGTERM` 即可干净停止引擎、桥和 ghost 子进程，无需进程守护工具。
+浏览器打开 <http://127.0.0.1:8000/>。按 `Ctrl-C`、发送 `SIGTERM`，或在另一个终端执行 `npm run stop`，即可干净停止引擎、桥和 ghost 子进程，无需进程守护工具。`npm run stop` 只匹配当前项目目录下的 `scripts/start.mjs` / `dist/index.js`，不会误杀其他副本；超时后会对残留进程执行 `SIGKILL`。
 
 > 修改 `web/` 或 `shared/` 后必须**重启 `npm start`**：自定义页面只在启动时复制到引擎目录。
 > 修改 `server/` 后同样需要重启桥。聊天设置改完不用重启，`state/chat.json` 每次请求都重新读。
@@ -356,18 +439,26 @@ npm run build
 `npm start` 会把：
 
 - `web/index.html`、`web/app.js`、`web/styles.css` 原样复制到 `engine/dist/public/`；
-- `shared/keys.mjs` 复制为 `engine/dist/public/keys.js`（引擎静态服务器不支持 `.mjs` 的 MIME 类型且设置了 `nosniff`，所以浏览器侧必须用 `.js` 扩展名）。
+- `shared/keys.mjs` 复制为 `engine/dist/public/keys.js`，`shared/device-ui.mjs` 复制为 `engine/dist/public/device-ui.js`（引擎静态服务器不支持 `.mjs` 的 MIME 类型且设置了 `nosniff`，所以浏览器侧必须用 `.js` 扩展名）。
 
 因此每次修改 `web/` 或 `shared/` 都要重新运行 `npm start` 才能看到效果。
 
 ## 配置
 
-- **首选设备序列号**：默认 `2FD0221C09004177`，可用 `PHONE_SERIAL=<序列号> npm start` 或安装向导的「首选设备序列号」覆盖，留空表示自动选择。它只表示**优先**：在线时先用它；不在线时依次用浏览器记住的选择、唯一一台已授权设备；有多台且没有先前选择时，页面会让你选。选择结果只存在浏览器 `localStorage`，不需要重启服务，也不写后端状态文件。
-
+- **首选设备与浏览器记忆（多台 USB）**：首选序列号只表示**优先**：在线时先用它；不在线时依次用浏览器记住的选择、唯一一台已授权设备；有多台且没有先前选择时，页面会让你选。
+  选择经控制桥 `POST /api/devices/select` 调用 `adb.setConnection()`，只改运行时的活动序列号（ghost、按键、聊天都跟随 `adb.getSerial()`），不写后端状态文件，也不需要重启服务。
 - **adb 路径**：默认依次使用 `PHONE_ADB`、`engine/dependencies/adb/adb`（引擎自带）、`PATH` 里的 `adb`；前两个由启动脚本和引擎自动维护，一般不用设置。
 - **设备必须支持 ADB**：本项目基于 ADB/scrcpy，只认 ADB 设备。华为 HDC 模式（`lsusb` 显示 `HDC Device`、USB ID `12d1:1101`）或纯血鸿蒙设备无法连接，需在手机开发者选项开启 **USB 调试（ADB）** 并切到传输文件（MTP）模式；纯鸿蒙 NEXT 无 ADB，不适用本方案。
-- **端口**：引擎 `8000`，控制桥 `8100`（`/health`、`/api/devices`、`/keyevent`、`/chat`、`/api/chat-config` 共用），在 `scripts/start.mjs` 中配置。
-- **USB 限制**：`scripts/start.mjs` 启动时及每 5 秒断开 Wi‑Fi ADB `192.168.3.123:5555`；无线连接不会被接受。
+- **端口**：引擎默认 `8000`，控制桥 `8100`（`/health`、`/api/devices`、`/api/devices/select`、`/keyevent`、`/chat`、`/api/wireless*`、`/api/chat-config` 共用）。可用 `ENGINE_PORT=<端口> npm start` 更改引擎端口；
+  启动脚本会同步设置引擎端口、就绪检查地址和控制桥的 Origin 白名单。手机无线 ADB 的配对端口和连接端口由手机动态分配，见上文，不是这两个本机端口。
+- **USB / 无线策略**：USB 模式在启动时及每 5 秒断开遗留 Wi‑Fi ADB `192.168.3.123:5555`；应用内配对成功后切到无线模式，
+  本项目的连接维护停止 USB 设备枚举，只对保存的无线地址做状态检查和重连。点「切回 USB」恢复 USB 策略。
+- **设备序列号与连接模式**：默认 USB 序列号为 `2FD0221C09004177`。`PHONE_SERIAL=<USB 序列号>` 可覆盖 USB 设备（安装向导的「首选设备序列号」也写这个变量）；
+  `PHONE_SERIAL=<连接 IP:端口>` 会自动选择无线模式；`PHONE_USB_SERIAL=<USB 序列号>` 可指定应用内「切回 USB」时使用的设备。
+  环境变量优先于 `state/connection.json`，没有覆盖时使用应用内保存的模式与地址。USB 模式下，如果当前序列号消失且只有一台物理 USB 手机在线，
+  每 5 秒的维护任务会自动采用新序列号，投屏、控制桥和聊天会一起切换到新手机；同时在线多台设备时不会猜测，仍使用显式配置的序列号。
+- **连接配置**：`state/connection.json` 保存 `{ mode: "usb" | "wifi", method: "pair" | "legacy", address }`（旧配置缺少 `method` 时按 `pair` 处理），以 `0600` 原子写入；无线地址是手机无线调试主页面的
+  `IP:端口`，不是配对弹窗的临时端口。文件不含配对码，浏览器表单的存储位置见[浏览器存储与安全](#浏览器存储与安全)。
 - **聊天配置**：存在 `state/chat.json`（gitignore），由设置面板的「聊天」分组写；想直接改（例如删掉 `apiKey`）就编辑这个文件，字段见[聊天设置](#聊天设置6-项存在后端)。
 - **ghost 启动方式**：`uvx --from ghost-in-the-droid android-agent-mcp` 固定在 `server/ghost-client.mjs` 的 `DEFAULT_GHOST_COMMAND` / `DEFAULT_GHOST_ARGS`，不读环境变量；换启动方式（例如 `uv tool run` 或本地克隆的 `python3 -m gitd.mcp_server`）改这两个常量。
 
@@ -385,13 +476,13 @@ npm run build
 4. 否则只有一台已授权设备 → 自动选它；
 5. 否则 `selected: null`，等待用户选择，此时按键/聊天返回 409，不会打到任何手机。
 
-设备相关接口（只允许 `127.0.0.1:8000` / `localhost:8000` 的 Origin，其他来源的 POST 返回 403）：
+设备相关接口（只允许 `127.0.0.1:8000` / `localhost:8000` 以及 `ENGINE_PORT` 对应的本机 Origin，其他来源的 POST 返回 403）：
 
 | 方法 | 路径 | 响应 |
 | --- | --- | --- |
 | `GET` | `/api/devices` | `{ devices, selected, preferred, adbMissing }`；`devices` 每项为 `{ serial, state, model, product, transport, selectable }` |
 | `POST` | `/api/devices/select` | `{ serial }` → `200 { ok, selected }`；`400 serial required`；`409 device not available` |
-| `GET` | `/health` | `{ ok, online, serial, devices, preferred }`；`serial` 是当前选中设备，未选时为 `null` |
+| `GET` | `/health` | `{ ok, online, serial, mode }`；`serial` 来自 `adb.getSerial()`（与 ghost、按键、聊天一致），`mode` 为 `usb` / `wifi` |
 
 ### 手动验收清单
 
@@ -413,7 +504,8 @@ npm run build
 
 - **锁屏黑屏**：Android 的 keyguard 只向 scrcpy 提供黑色画面，这是系统限制，不是流坏了。解锁手机即可，状态栏会显示锁屏提示。
 - **安全上下文**：WebCodecs 解码要求 secure context，普通 HTTP 只能在 `127.0.0.1` / `localhost` 上使用；局域网地址（如 `192.168.x.x:8000`）无法解码视频，远程访问需自行加 HTTPS 并放宽 CORS/绑定地址。
-- **USB Only**：只允许上述 USB 设备，不实现无线投屏。
+- **无线调试要求**：配对模式仅支持 Android 11+；不提供配对码弹窗的设备可用传统 5555 模式（需在 USB 在线时由用户点击开启 TCP 模式）。电脑与手机需在同一局域网。配对端口仍需手机打开配对码弹窗后由 mDNS 公布，自动获取不会读取配对码。传统模式未加密、无认证，仅限可信局域网。无线真机完整冒烟尚未执行，不能把自动化测试当作配对/拔线/重连/切回 USB 已通过。
+- **浏览器明文保存配对表单**：为满足刷新后回填的需求，配对码会明文保存在 `localStorage`；这是明确的安全取舍，共享环境应及时清除，详见[浏览器存储与安全](#浏览器存储与安全)。
 - **无守护进程**：刻意不引入 supervisor，由启动脚本自己处理清理。
 - **引擎许可**：`engine/` 是 GPLv3 的第三方项目，由 `npm run setup` 单独拉取，未提交到本仓库；详见「开源组件声明」与「引擎安装」。
 - **聊天每条消息无状态**：面板保留历史气泡，但模型只看到当前这句（`/chat` 契约里没有历史字段），所以「再点一下它左边的」这类追问不会被理解成上一轮的延续，见[本版本没有做的](#本版本没有做的)。
@@ -434,10 +526,19 @@ npm run build
 | 画面全黑但显示已连接 | 手机处于锁屏状态，解锁后恢复；不绕过锁屏 |
 | 引擎首次运行弹出安装范围对话框 | 选 “no, me only”；自定义页面通常会替换掉该首页 |
 | `npm run setup` 出现 `velopack` 的 `EBADENGINE` 警告 | 可忽略，不影响安装和运行 |
+| **无线配对失败 / 配对码过期** | 重新打开手机「无线调试 → 使用配对码配对设备」，用新弹窗里的配对 IP、端口和 6 位码；配对端口通常与连接端口不同。浏览器会回填旧表单，不要误用已过期的配对码 |
+| **USB 自动获取不可用 / 只拿到部分信息** | 确认 USB 已连接并授权调试、手机无线调试已开启且配对码弹窗保持打开；按钮只在后端报告 `usbOnline: true` 时可用。部分结果会保留并显示警告，可手动补齐缺失的配对 IP/端口和连接 IP/端口 |
+| **配对成功但连接失败 / 连接离线** | 确认填的是无线调试主页面的连接 IP/端口，不是配对弹窗端口；手机与电脑需在同一局域网且无线调试仍开启。端口可能在手机重启或切换网络后变化 |
+| **无线掉线后没有恢复** | 面板状态变为 offline 时，服务每 5 秒只重连后端保存的地址；若地址已变化，重新输入当前连接 IP/端口并配对/连接。无线模式不会自动切回 USB |
+| **传统模式「自动获取并连接」不可用** | 该按钮只在后端报告 `usbOnline: true` 时启用；请插回已授权的 USB 手机。手动「连接」不要求 USB，但要求手机已开启 TCP 模式 |
+| **传统模式连接报 `409` / 端口不对** | `409` 表示 USB 离线，`tcpip` 未执行；手机 IP 见「无线调试」主页面，端口默认 `5555`。若改过端口，需确保 `adb tcpip <端口>` 与面板端口一致 |
+| **传统模式连接报 `400`** | 只有布尔 `enableTcpip` 被接受；这是接口契约（面板已发送真正的布尔值），不要手工提交字符串 `"true"` |
+| **更换 USB 手机后视频流报错** | 当前版本会在 USB 维护任务中重新枚举设备：旧序列号消失且只有一台物理 USB 手机在线时自动切换，页面每 3 秒读取控制桥健康状态并重连。若同时在线多台手机，请用 `PHONE_SERIAL=<实际 USB 序列号>` 明确指定目标 |
+| **切回 USB 后仍离线** | 插回 USB 并授权调试。若默认序列号不正确，先用 `PHONE_USB_SERIAL=<实际 USB 序列号>` 重启服务，再点「切回 USB」；该按钮切换到配置的 USB 序列号，后续维护任务可在仅有一台替代手机在线时自动发现它 |
 | **右下角没有对话图标** | 图标只看 `GET /api/chat-config` 的 `enabled`：设置里勾了「启用聊天」并点过 `保存聊天设置` 才会出现（模型名留空时图标会出现，但发送会报「聊天未启用或模型名为空」）。桥没起来（`curl http://127.0.0.1:8100/health` 不通）时前端拿不到配置，图标也不显示；重启 `npm start` 后刷新页面 |
 | **聊天报「聊天服务不可用」（503 `chat unavailable`）** | ghost 子进程没起来，日志里是 `ghost MCP server failed to start; chat disabled`。依次确认 `which uvx`、`which adb`、`uvx --from ghost-in-the-droid android-agent-mcp` 能否手工启动（首次需要联网下载包），Python 需 3.10+；补齐后重启 `npm start` |
 | **模型只回文字、从不动手机**（没有 `工具 ✓` 标签） | 该端点多半不支持或没开启 function/tool calling（或模型太小/太旧）。换支持 tool calling 的模型，或按所用推理服务打开工具调用能力；system prompt 已要求「只调用给出的工具列表」，正常模型会以 `tool_calls` 应答 |
-| **手机锁着时聊天只回「请先解锁」** | 设计如此：后端每步都调 `get_phone_state` 自行判断，读不到状态按锁定处理（fail closed），绝不尝试解锁。解锁手机再重发；投屏此刻是黑屏，两者同源 |
+| **手机锁着时聊天只回「请先解锁」** | 设计如此：后端每轮用捕获的设备序列号读取 ADB power/trust 状态，读不到状态按锁定处理（fail closed），绝不尝试解锁。解锁手机再重发；投屏此刻是黑屏，两者同源 |
 | **`screenshot` 报错 / 模型看不懂截图** | 关掉设置里的「截图发给模型」，或换成支持视觉输入的模型；本项目不预先探测模型是否支持视觉 |
 
 ## 目录结构
@@ -448,24 +549,27 @@ installer/server.py      本地回环安装向导 HTTP 服务（检测/装依赖
 installer/web/index.html 向导单页界面
 scripts/make-release.sh  从 git tag 构建发布 tar.gz（剔除 engine/node_modules/state）
 scripts/setup.mjs        克隆/构建/打补丁固定版本引擎，附带检测 uvx/uv
-scripts/start.mjs        启动编排：USB 检查、资源复制、进程管理、装配聊天后端、就绪等待
-server/adb.mjs           ADB 可用性检查与设备发现
-server/bridge.mjs        回环 HTTP 控制桥（/health、/keyevent、/chat、/api/chat-config，含 CORS 白名单）
+scripts/start.mjs        启动编排：连接模式解析、资源复制、进程管理、装配聊天后端、就绪等待
+server/adb.mjs           ADB 可用性检查、设备发现、动态序列号与无线 pair/connect/重连
+server/connection-config.mjs  state/connection.json 连接模式持久化与环境变量解析
+server/connection-service.mjs 配对/连接/在线确认、失败回滚与切回 USB
+server/bridge.mjs       回环 HTTP 控制桥（/health、/keyevent、/api/wireless*、/chat、/api/chat-config）
 server/chat-config.mjs   聊天配置的读写与持久化（state/chat.json，Key 不回传）
 server/chat-agent.mjs    agent 循环：锁屏门禁、模型调用、白名单执行、结果回灌
 server/model-client.mjs  OpenAI 兼容 /chat/completions 客户端（解析 tool_calls）
 server/ghost-client.mjs  ghost 的 stdio MCP client（uvx 子进程、tools/list、callTool）
 shared/keys.mjs          共用按键码、设置校验、分辨率策略与中英文语言包
 shared/chat-tools.mjs    工具白名单、拒绝清单与发给模型的 tool 定义/参数校验
-web/index.html           页面结构、设置面板与聊天面板
-web/app.js               状态栏、按钮处理、设置持久化、聊天前端、工具栏包装
-web/styles.css           紧凑暗色主题、聊天面板与布局覆盖
-tests/*.test.mjs         146 个 node:test 用例
-tests/installer_test.py  16 个 python unittest 用例（安装向导）
+web/index.html           页面结构、设置面板、无线双模式面板与聊天面板
+web/app.js               状态栏、按钮处理、设置持久化、无线配对/传统连接、聊天前端、工具栏包装
+web/styles.css           紧凑暗色主题、无线面板、聊天面板与布局覆盖
+tests/*.test.mjs         Node node:test 用例
+tests/installer_test.py  Python unittest 用例（安装向导）
 docs/requirements-analysis.md  需求分析（需求来源、追溯、验收、遗留）
 docs/screenshots/        README 中使用的界面截图
 docs/superpowers/        设计规格、实施计划与开发台账
 state/chat.json          聊天配置（本地生成，已 gitignore）
+state/connection.json    活动连接模式与无线地址（本地生成，已 gitignore，不含配对码）
 engine/                  GPLv3 第三方引擎，由 setup 生成，已加入 .gitignore
 ```
 
@@ -476,12 +580,13 @@ npm test   # node 单元测试
 python3 -m unittest discover -s tests -p 'installer_test.py' -v   # 安装向导测试
 ```
 
-覆盖 ADB 设备筛选、桥的 CORS/按键/聊天/配置接口、引擎安装与启动编排（含 ghost 起不来时不影响桥）、
+覆盖 ADB 设备筛选与动态序列号、USB 竞态防护、无线 pair/connect/在线确认/失败回滚/重连、连接配置持久化与环境变量覆盖、
+桥的 CORS/按键/聊天/配置/无线接口、引擎安装与启动编排（含 ghost 起不来时不影响桥）、
 按键码、设置校验与持久化、聊天配置存储与公开视图、工具白名单与参数校验、模型响应与 `tool_calls` 解析、
 MCP client 的命令与调用形状、agent 循环（锁定门禁、越权拒绝、截图回灌顺序、最大步数）、
-分辨率阶梯与降级检测、中英文语言包完整性等，共 146 个 node 用例；安装向导（token、环境检测、配置合并、发布包）另有 16 个 python 用例。
+分辨率阶梯与降级检测、中英文语言包完整性等；安装向导（token、环境检测、配置合并、发布包）另有 Python 用例。
 
 全部用注入的假依赖跑，**不碰真机、不起 ghost、不发真实模型请求**。
 因此 ghost 工具的真实返回形状和模型 tool calling 行为属于手工验收范围，见
-[真机冒烟](#真机冒烟手动尚未在本环境执行)；本机虽有 `uvx`/`adb` 和连着的手机，但**没有可用的局域网 tool-calling 模型端点**，
-该清单**尚未执行**，不应被当成已通过。
+[真机冒烟](#真机冒烟手动尚未在本环境执行)；本机虽有 `uvx`/`adb`、连着的手机和已验证可用的局域网 tool-calling 端点，
+但 ghost 真机返回与模型驱动手机动作尚未完成手动冒烟，该清单**尚未执行**，不应被当成已通过。

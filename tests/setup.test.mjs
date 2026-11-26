@@ -6,6 +6,7 @@ import {
   engineDir,
   LOOPBACK_PATCH,
   KEYBOARD_FOCUS_PATCH,
+  AUDIO_WORKLET_FALLBACK_PATCHES,
   UHID_KEYBOARD_FOCUS_PATCHES,
   FETCH_NODE_DARWIN_PATCH,
   ADB_DARWIN_PATCH,
@@ -33,6 +34,44 @@ test('keyboard-focus patch guards KeyInputHandler for editable targets', () => {
   assert.match(KEYBOARD_FOCUS_PATCH.from, /KeyToCodeMap\.get\(keyboardEvent\.code\)/);
   for (const needle of ['isContentEditable', 'INPUT', 'TEXTAREA', 'SELECT', 'return;']) {
     assert.ok(KEYBOARD_FOCUS_PATCH.to.includes(needle), `patch must include ${needle}`);
+  }
+});
+
+test('audio fallback patches cover the startup race, timeout and ScriptProcessor path', () => {
+  assert.ok(Array.isArray(AUDIO_WORKLET_FALLBACK_PATCHES));
+  assert.equal(AUDIO_WORKLET_FALLBACK_PATCHES.length, 7);
+
+  for (const patch of AUDIO_WORKLET_FALLBACK_PATCHES) {
+    assert.equal(patch.file, 'src/app/audio/AudioPlayer.ts');
+    assert.ok(patch.from.length > 0, 'patch must have an anchor');
+    assert.notEqual(patch.from, patch.to, 'patch must change something');
+  }
+
+  const anchors = AUDIO_WORKLET_FALLBACK_PATCHES.map((p) => p.from).join('\n');
+  for (const needle of [
+    'private workletNode?: AudioWorkletNode | undefined;',
+    'await this.audioContext.audioWorklet.addModule(url);',
+    'this.workletNode!.port.postMessage(',
+    'this.gainNode?.disconnect();',
+  ]) {
+    assert.ok(anchors.includes(needle), `anchor must still match upstream: ${needle}`);
+  }
+
+  const output = AUDIO_WORKLET_FALLBACK_PATCHES.map((p) => p.to).join('\n');
+  for (const needle of [
+    'this.audioContext !== context',
+    'private async loadWorklet(',
+    '1500',
+    'createScriptProcessor(2048, 1, 2)',
+    'this.outputQueue.length > 50',
+    'output.getChannelData(ch).fill(0, written)',
+    'this.enqueue(channels, numFrames)',
+    'this.enqueue(channels, framesPerChannel)',
+    'this.scriptNode.onaudioprocess = null',
+    'await context.resume().catch',
+    'this.audioContext !== context',
+  ]) {
+    assert.ok(output.includes(needle), `patch must include ${needle}`);
   }
 });
 

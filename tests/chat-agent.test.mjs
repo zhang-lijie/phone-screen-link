@@ -57,6 +57,38 @@ function makeConfig(overrides = {}) {
   };
 }
 
+test('agent loop: lock authorization and tool injection stay pinned to the serial captured for the turn', async () => {
+  let serial = 'USB-TURN';
+  const lockTargets = [];
+  const toolTargets = [];
+  const deps = fakeDeps({
+    responses: [
+      { content: null, toolCalls: [{ id: 't1', name: 'tap', arguments: { x: 1, y: 2 } }] },
+      { content: 'done', toolCalls: [] },
+    ],
+  });
+  deps.getSerial = () => serial;
+  deps.isLocked = async (target) => { lockTargets.push(target); return false; };
+  deps.callTool = async (name, args, target) => {
+    toolTargets.push(target);
+    return { content: [{ type: 'text', text: 'tapped' }] };
+  };
+  deps.chatCompletion = async (params) => {
+    deps.chatCalls.push(params);
+    if (deps.chatCalls.length === 1) {
+      serial = 'WIFI-SWITCHED-MID-TURN';
+      return { content: null, toolCalls: [{ id: 't1', name: 'tap', arguments: { x: 1, y: 2 } }] };
+    }
+    return { content: 'done', toolCalls: [] };
+  };
+
+  const result = await runAgentTurn({ config: makeConfig(), userText: 'tap', lang: 'en', deps });
+
+  assert.equal(result.reply, 'done');
+  assert.deepEqual(lockTargets, ['USB-TURN']);
+  assert.deepEqual(toolTargets, ['USB-TURN']);
+});
+
 test('agent loop: locked phone returns unlock hint without calling the model', async () => {
   const deps = fakeDeps({
     locked: true,

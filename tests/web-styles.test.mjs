@@ -28,4 +28,5 @@ test('chat dock button colour follows the docked state', () => {
   // The SVG icon has no fill attribute; without this rule its path stays
   // black no matter what colour the button has.
   assert.match(ruleBody('#chat-dock svg'), /fill:\s*currentColor\s*;/);
+  assert.doesNotMatch(css, /#chat-dock:not\(:disabled\)/, 'no later higher-specificity override');
 });

@@ -6,11 +6,16 @@ import { adb, bundledAdbDir, DEFAULT_USB_SERIAL, isMissingAdbError } from '../se
 import { runAgentTurn, runPresetCommand } from '../server/chat-agent.mjs';
 import { createChatConfigStore } from '../server/chat-config.mjs';
 import { createBridge } from '../server/bridge.mjs';
+import { createConnectionConfigStore, resolveInitialConnection } from '../server/connection-config.mjs';
+import { createConnectionService } from '../server/connection-service.mjs';
 import { createGhostClient } from '../server/ghost-client.mjs';
 import { engineDir } from './setup.mjs';
 
 const BRIDGE_PORT = 8100;
-const ENGINE_URL = 'http://127.0.0.1:8000/';
+// Defaults to upstream's 8000. This deployment keeps Splash on 8000 and uses
+// ENGINE_PORT=8001 via start-8001.sh.
+const ENGINE_PORT = Number.parseInt(process.env.ENGINE_PORT ?? '', 10) || 8000;
+const ENGINE_URL = `http://127.0.0.1:${ENGINE_PORT}/`;
 const USB_RECHECK_MS = 5_000;
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 250;
@@ -33,7 +38,7 @@ export function ghostEnv(env = process.env, root) {
 
 export function buildPlan({ engineDir, webDir }) {
   return [
-    { kind: 'enforceUsb' },
+    { kind: 'configureConnection' },
     {
       kind: 'copyWeb',
       files: ['index.html', 'app.js', 'styles.css'],
@@ -109,11 +114,13 @@ export async function main(deps = {}) {
     adb: adbClient = adb,
     createBridge: makeBridge = createBridge,
     createChatConfigStore: makeChatConfig = createChatConfigStore,
+    createConnectionConfigStore: makeConnectionConfig = createConnectionConfigStore,
     createGhostClient: makeGhost = createGhostClient,
     spawn: spawnChild = spawn,
     waitForEngine: checkEngine = waitForEngine,
     engineDir: getEngineDir = engineDir,
     copyWeb: copyFiles = copyWeb,
+    env = process.env,
     setTimer = setInterval,
     clearTimer = clearInterval,
     ghostStartTimeoutMs = GHOST_START_TIMEOUT_MS,
@@ -129,14 +136,31 @@ export async function main(deps = {}) {
     webDir: join(projectDir, 'web'),
   });
 
+  // Resolve the persisted/environment-selected transport before the engine or
+  // any device-specific client starts. USB remains the fallback default.
+  const connectionStore = makeConnectionConfig({ file: join(projectDir, 'state', 'connection.json') });
+  const connectionService = createConnectionService({
+    adb: adbClient,
+    store: connectionStore,
+    usbSerial: DEFAULT_USB_SERIAL,
+  });
+  const initialConnection = resolveInitialConnection({
+    env,
+    stored: connectionStore.load(),
+    usbSerial: DEFAULT_USB_SERIAL,
+  });
+  adbClient.setConnection(initialConnection);
+
   // A missing adb must not abort startup: on a fresh install the engine's
   // bundled copy only appears after the engine boots and its background
-  // dependency install finishes. The USB-only rule is re-checked every 5s.
-  try {
-    await adbClient.ensureUsbOnly();
-  } catch (err) {
-    if (!isMissingAdbError(err)) throw err;
-    log(ADB_MISSING_HINT);
+  // dependency install finishes. The active connection is re-checked every 5s.
+  if (initialConnection.mode === 'usb') {
+    try {
+      await adbClient.ensureUsbOnly();
+    } catch (err) {
+      if (!isMissingAdbError(err)) throw err;
+      log(ADB_MISSING_HINT);
+    }
   }
 
   copyFiles(copyStep, join(spawnStep.cwd, 'dist', 'public'));
@@ -147,9 +171,6 @@ export async function main(deps = {}) {
   let ghost;
   let ghostStart;
   let ghostStopped = false;
-  // The bridge owns the active device; chat follows it. A null selection
-  // means "no device chosen" and never becomes a ghost device argument.
-  let activeSerial = DEFAULT_USB_SERIAL;
   let usbInterval;
   let bridgeStopped = false;
   let engineKilled = false;
@@ -228,7 +249,7 @@ export async function main(deps = {}) {
     engine = spawnChild(spawnStep.command, spawnStep.args, {
       cwd: spawnStep.cwd,
       stdio: 'inherit',
-      env: { ...process.env, ...engineEnv() },
+      env: { ...process.env, ...engineEnv(), WS_SCRCPY_WEB_PORT: String(ENGINE_PORT) },
     });
     if (aborted) throw new Error('startup aborted');
 
@@ -238,7 +259,7 @@ export async function main(deps = {}) {
     // absent and the bridge reports it as unavailable.
     const chatConfig = makeChatConfig({ file: join(projectDir, 'state', 'chat.json') });
     try {
-      ghost = makeGhost({ serial: DEFAULT_USB_SERIAL, env: ghostEnv(process.env, projectDir) });
+      ghost = makeGhost({ getSerial: () => adbClient.getSerial(), env: ghostEnv(env, projectDir) });
       // A hanging ghost.start() (e.g. uvx stuck downloading) must not block
       // the bridge: bound it and fall into the chat-disabled catch below.
       ghostStart = withTimeout(ghost.start(), ghostStartTimeoutMs, 'ghost MCP server start');
@@ -268,12 +289,19 @@ export async function main(deps = {}) {
             userText,
             lang,
             // Real lock/sleep state comes from ADB; ghost has no lock tool.
-            deps: { isLocked: () => adbClient.isLocked(activeSerial) },
+            deps: {
+              getSerial: () => adbClient.getSerial(),
+              isLocked: (serial) => adbClient.isLocked(serial),
+            },
           }),
           runCommand: (commandId, lang) => runPresetCommand({
             commandId,
             lang,
-            deps: { ghost, isLocked: () => adbClient.isLocked(activeSerial) },
+            deps: {
+              ghost,
+              getSerial: () => adbClient.getSerial(),
+              isLocked: (serial) => adbClient.isLocked(serial),
+            },
           }),
         }
       : undefined;
@@ -283,11 +311,7 @@ export async function main(deps = {}) {
       port: bridgeStep.port,
       chatConfig,
       chat,
-      onSelectionChange: (next) => {
-        if (!next) return; // chat stays on the last real device while unselected
-        activeSerial = next;
-        ghost?.setSerial?.(next);
-      },
+      connectionService,
     });
     bridgeStart = bridge.start();
     const { address } = await bridgeStart;
@@ -301,11 +325,15 @@ export async function main(deps = {}) {
     if (ready === ABORTED || aborted) throw new Error('startup aborted');
 
     usbInterval = setTimer(() => {
-      adbClient.ensureUsbOnly().catch((err) => {
+      // The service owns the active method and the configured USB serial; the
+      // timer only supplies the tick. It also throttles legacy bootstrap
+      // warnings so a persistently offline endpoint stays quiet.
+      const mode = typeof adbClient.getMode === 'function' ? adbClient.getMode() : 'usb';
+      connectionService.supervise().catch((err) => {
         // The engine may still be installing adb in the background; that is
-        // not a USB failure and must not spam the log every 5 seconds.
+        // not a connection failure and must not spam the log every 5 seconds.
         if (isMissingAdbError(err)) return;
-        error('USB re-check failed:', err);
+        error(mode === 'wifi' ? 'Wireless re-check failed:' : 'USB re-check failed:', err);
       });
     }, USB_RECHECK_MS);
     running = true;

@@ -1,10 +1,17 @@
 import http from 'node:http';
-import { KEY_CODES } from '../shared/keys.mjs';
+import { KEY_CODES, WIRELESS_AUTO_WARNING_CODES } from '../shared/keys.mjs';
 import { chooseDevice } from '../shared/device-selection.mjs';
 import { DEFAULT_USB_SERIAL, isMissingAdbError } from './adb.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
-const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
+const WIRELESS_WARNING_CODES = new Set(Object.values(WIRELESS_AUTO_WARNING_CODES));
+const ENGINE_PORT = Number.parseInt(process.env.ENGINE_PORT ?? '', 10) || 8000;
+const ALLOWED_ORIGINS = new Set([
+  'http://127.0.0.1:8000',
+  'http://localhost:8000',
+  `http://127.0.0.1:${ENGINE_PORT}`,
+  `http://localhost:${ENGINE_PORT}`,
+]);
 const MAX_BODY_BYTES = 64 * 1024;
 const TOO_LARGE = Symbol('too-large');
 const INVALID_JSON = Symbol('invalid-json');
@@ -17,6 +24,11 @@ const PREFLIGHT_METHODS = {
   '/api/chat-screen': 'POST, OPTIONS',
   '/api/chat-command': 'POST, OPTIONS',
   '/api/chat-config': 'GET, POST, OPTIONS',
+  '/api/wireless': 'GET, OPTIONS',
+  '/api/wireless/pair': 'POST, OPTIONS',
+  '/api/wireless/legacy': 'POST, OPTIONS',
+  '/api/wireless/usb': 'POST, OPTIONS',
+  '/api/wireless/auto': 'POST, OPTIONS',
 };
 
 function sendJson(res, status, payload) {
@@ -59,43 +71,162 @@ function readJsonBody(req, res) {
   });
 }
 
+function errorDetail(err, fallback) {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === 'string' && err) return err;
+  return fallback;
+}
+
+function redactedErrorDetail(err, pairingCode, fallback) {
+  const detail = errorDetail(err, fallback);
+  return pairingCode ? detail.split(pairingCode).join('[redacted]') || fallback : detail;
+}
+
+function validateHost(value, field) {
+  const host = typeof value === 'string' ? value.trim() : '';
+  let valid;
+  if (/^[\d.]+$/.test(host)) {
+    const parts = host.split('.');
+    valid = parts.length === 4 && parts.every((part) => (
+      /^\d{1,3}$/.test(part) && Number(part) <= 255
+    ));
+  } else {
+    valid = host.length <= 253 && host.split('.').every((label) => (
+      label.length >= 1
+      && label.length <= 63
+      && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)
+    ));
+  }
+  if (!valid) throw new Error(`${field} must be a valid IPv4 address or hostname`);
+}
+
+function validatePort(value, field) {
+  const text = typeof value === 'string' ? value.trim() : value;
+  const port = typeof text === 'number' ? text : (
+    typeof text === 'string' && /^\d+$/.test(text) ? Number(text) : NaN
+  );
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${field} must be an integer between 1 and 65535`);
+  }
+}
+
+function validatePairingInput(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('pairing input is required');
+  }
+  validateHost(input.pairHost, 'pairHost');
+  validatePort(input.pairPort, 'pairPort');
+  if (typeof input.pairCode !== 'string' || !/^\d{6}$/.test(input.pairCode)) {
+    throw new Error('pairCode must be exactly 6 digits');
+  }
+  validateHost(input.connectHost, 'connectHost');
+  validatePort(input.connectPort, 'connectPort');
+}
+
+function validateLegacyInput(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('legacy input is required');
+  }
+  validateHost(input.host, 'host');
+  validatePort(input.port, 'port');
+  if (input.enableTcpip !== undefined && typeof input.enableTcpip !== 'boolean') {
+    throw new Error('enableTcpip must be a boolean');
+  }
+}
+
+function wirelessStatusPayload(status) {
+  return {
+    ok: true,
+    mode: status?.mode,
+    method: status?.method,
+    serial: status?.serial,
+    online: status?.online,
+    usbOnline: status?.usbOnline === true,
+  };
+}
+
+function wirelessDiscoveryPayload(result) {
+  return {
+    usbSerial: result?.usbSerial,
+    pairHost: result?.pairHost ?? null,
+    pairPort: result?.pairPort ?? null,
+    connectHost: result?.connectHost ?? null,
+    connectPort: result?.connectPort ?? null,
+    warnings: Array.isArray(result?.warnings)
+      ? [...new Set(result.warnings.filter((warning) => WIRELESS_WARNING_CODES.has(warning)))]
+      : [],
+  };
+}
+
 // `chat` is `{ run(userText, lang, config) }`, wired in scripts/start.mjs
 // around the agent loop; `config` is the store snapshot the /chat gate already
 // loaded. `chatConfig` is the backend store: it gates /chat and backs the
-// /api/chat-config routes.
+// /api/chat-config routes. `connectionService` owns pairing, persistence, and
+// the active ADB transport.
 export function createBridge({
   adb,
   host,
   port,
   chatConfig,
   chat,
+  connectionService,
   preferredSerial = DEFAULT_USB_SERIAL,
-  onSelectionChange,
 }) {
   const bindHost = host ?? DEFAULT_HOST;
   let server;
   let boundAddress;
   let savedScreenTimeout = null; // original timeout while chat keeps screen awake
-  let selected = null; // the one serial every device action targets
+  // Small change-detection cache. adb.getSerial() stays the single source of
+  // truth for the active serial; this only lets us drop a saved screen timeout
+  // when the phone actually changes — including changes made externally by
+  // connectionService (pairing, legacy connect, switchToUsb, supervise).
+  let lastSerial = null;
 
-  // The callback retargets chat (ghost tools and lock checks). A chat failure
-  // must never turn a device-list read into a 500.
-  function announce(next) {
-    if (!onSelectionChange) return;
-    Promise.resolve().then(() => onSelectionChange(next)).catch(() => {});
+  function activeSerial() {
+    return typeof adb.getSerial === 'function' ? adb.getSerial() : null;
   }
 
-  // The only place that changes the active serial. A saved screen timeout
-  // belongs to the phone that was awake, so it must be discarded on every
-  // change — including an explicit selection (POST /api/devices/select).
-  function setSelected(next) {
-    if (next === selected) return;
-    selected = next;
-    savedScreenTimeout = null;
-    announce(next);
+  function activeMode() {
+    return typeof adb.getMode === 'function' ? adb.getMode() : 'usb';
+  }
+
+  // Adopt a USB selection as the active connection so ghost (getSerial), key
+  // events, chat and the page all follow the same phone.
+  function applyConnection(serial) {
+    const previous = activeSerial() ?? lastSerial;
+    if (serial && serial !== previous && typeof adb.setConnection === 'function') {
+      adb.setConnection({
+        mode: 'usb',
+        serial,
+        method: typeof adb.getMethod === 'function' ? adb.getMethod() : 'pair',
+        usbSerial: serial,
+      });
+    }
+    if (serial !== lastSerial) {
+      const hadSerial = lastSerial !== null && lastSerial !== undefined;
+      lastSerial = serial ?? null;
+      // A saved timeout belongs to the phone that was awake; never write it
+      // to a different device on a later `restore`.
+      if (hadSerial || serial !== null) savedScreenTimeout = null;
+    }
+  }
+
+  // Mirror an externally changed serial into the cache and forget a stale
+  // saved timeout, without re-applying the serial ourselves.
+  function observeSerial() {
+    const current = activeSerial();
+    if (current && current !== lastSerial) {
+      const hadSerial = lastSerial !== null && lastSerial !== undefined;
+      lastSerial = current;
+      if (hadSerial) savedScreenTimeout = null;
+    }
+    return current;
   }
 
   async function deviceState() {
+    // Legacy adb doubles (and older bridges) may not expose the USB list; in
+    // that case the active serial itself is the only selection information.
+    if (typeof adb.listDevices !== 'function') return { devices: null, adbMissing: false };
     let devices = [];
     let adbMissing = false;
     try {
@@ -107,16 +238,23 @@ export function createBridge({
     return { devices, adbMissing };
   }
 
-  // Called before any device action: the list is the source of truth, so a
-  // phone that was unplugged stops receiving keys on the next request.
-  async function snapshot() {
-    const { devices, adbMissing } = await deviceState();
-    setSelected(chooseDevice({ devices, selected, preferred: preferredSerial }));
-    return { devices, adbMissing, selected };
+  // The USB list is the source of truth for multi-device selection, using the
+  // current -> remembered -> preferred -> only-device -> null policy. In wifi
+  // mode we never replace the active wireless endpoint with a USB device.
+  async function resolveSerial(knownDevices) {
+    const current = observeSerial();
+    if (activeMode() === 'wifi') return current ?? DEFAULT_USB_SERIAL;
+    const { devices } = knownDevices
+      ? { devices: knownDevices }
+      : await deviceState();
+    if (devices === null) return current ?? DEFAULT_USB_SERIAL;
+    const chosen = chooseDevice({ devices, selected: current, preferred: preferredSerial });
+    if (chosen && chosen !== current) applyConnection(chosen);
+    return chosen ?? current ?? null;
   }
 
   async function requireSelected(res) {
-    const { selected: serial } = await snapshot();
+    const serial = await resolveSerial();
     if (!serial) {
       sendJson(res, 409, { error: 'device selection required' });
       return null;
@@ -153,16 +291,19 @@ export function createBridge({
       }
 
       if (req.method === 'GET' && pathname === '/health') {
-        const { devices, selected: serial } = await snapshot();
+        const serial = await resolveSerial();
+        const mode = activeMode();
         const online = serial ? await adb.isOnline(serial) : false;
-        sendJson(res, 200, {
-          ok: true, online, serial, devices: devices.length, preferred: preferredSerial,
-        });
+        sendJson(res, 200, { ok: true, online, serial, mode });
         return;
       }
 
       if (req.method === 'GET' && pathname === '/api/devices') {
-        sendJson(res, 200, { ...(await snapshot()), preferred: preferredSerial });
+        const { devices, adbMissing } = await deviceState();
+        const selected = await resolveSerial(devices);
+        sendJson(res, 200, {
+          devices: devices ?? [], selected, adbMissing, preferred: preferredSerial,
+        });
         return;
       }
 
@@ -178,15 +319,118 @@ export function createBridge({
           sendJson(res, 400, { error: 'serial required' });
           return;
         }
-        // Validate against the live list, but do not resolve (and announce)
-        // an intermediate preferred device just to replace it immediately.
+        // Validate against the live list, but do not resolve (and apply) an
+        // intermediate preferred device just to replace it immediately.
         const { devices } = await deviceState();
-        if (!devices.some((device) => device.serial === serial && device.selectable)) {
+        if (!Array.isArray(devices)
+          || !devices.some((device) => device.serial === serial && device.selectable)) {
           sendJson(res, 409, { error: 'device not available' });
           return;
         }
-        setSelected(serial);
-        sendJson(res, 200, { ok: true, selected });
+        applyConnection(serial);
+        sendJson(res, 200, { ok: true, selected: serial });
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/api/wireless') {
+        if (!connectionService) {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        try {
+          sendJson(res, 200, wirelessStatusPayload(await connectionService.status()));
+        } catch (err) {
+          sendJson(res, 502, { error: errorDetail(err, 'wireless status failed') });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wireless/auto') {
+        if (!connectionService || typeof connectionService.discoverWirelessConfig !== 'function') {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        try {
+          const discovery = await connectionService.discoverWirelessConfig();
+          sendJson(res, 200, wirelessDiscoveryPayload(discovery));
+        } catch (err) {
+          if (err?.code === 'USB_OFFLINE') {
+            sendJson(res, 409, { error: errorDetail(err, 'USB device is offline') });
+            return;
+          }
+          sendJson(res, 502, { error: errorDetail(err, 'wireless auto discovery failed') });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wireless/pair') {
+        if (!connectionService) {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        try {
+          validatePairingInput(body);
+        } catch (err) {
+          sendJson(res, 400, { error: errorDetail(err, 'invalid pairing input') });
+          return;
+        }
+        try {
+          const status = await connectionService.pairAndConnect(body);
+          sendJson(res, 200, wirelessStatusPayload(status));
+        } catch (err) {
+          sendJson(res, 502, {
+            error: redactedErrorDetail(err, body.pairCode, 'wireless pairing failed'),
+          });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wireless/legacy') {
+        if (!connectionService || typeof connectionService.connectLegacy !== 'function') {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        try {
+          validateLegacyInput(body);
+        } catch (err) {
+          sendJson(res, 400, { error: errorDetail(err, 'invalid legacy input') });
+          return;
+        }
+        try {
+          const status = await connectionService.connectLegacy(body);
+          sendJson(res, 200, wirelessStatusPayload(status));
+        } catch (err) {
+          if (err?.code === 'USB_OFFLINE') {
+            sendJson(res, 409, { error: errorDetail(err, 'USB device is offline') });
+            return;
+          }
+          sendJson(res, 502, { error: errorDetail(err, 'legacy wireless connect failed') });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wireless/usb') {
+        if (!connectionService) {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        try {
+          sendJson(res, 200, wirelessStatusPayload(await connectionService.switchToUsb()));
+        } catch (err) {
+          sendJson(res, 502, { error: errorDetail(err, 'usb switch failed') });
+        }
         return;
       }
 

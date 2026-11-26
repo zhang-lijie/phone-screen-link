@@ -7,8 +7,8 @@ import { DEFAULT_CHAT_CONFIG, createChatConfigStore } from '../server/chat-confi
 
 const EXPECTED_DEFAULT = {
   enabled: false,
-  baseUrl: 'http://127.0.0.1:11434/v1',
-  model: '',
+  baseUrl: 'http://192.168.3.123:8080/v1',
+  model: 'local',
   maxSteps: 100,
   screenshot: true,
   apiKey: '',
@@ -64,8 +64,8 @@ test('chat config: publicConfig hides apiKey and reports hasApiKey', (t) => {
   assert.equal(Object.hasOwn(emptyPub, 'apiKey'), false);
   assert.deepEqual(emptyPub, {
     enabled: false,
-    baseUrl: 'http://127.0.0.1:11434/v1',
-    model: '',
+    baseUrl: 'http://192.168.3.123:8080/v1',
+    model: 'local',
     maxSteps: 100,
     screenshot: true,
     hasApiKey: false,

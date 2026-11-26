@@ -11,6 +11,7 @@ export const DEFAULT_GHOST_ARGS = Object.freeze(['--from', 'ghost-in-the-droid',
 export function createGhostClient(
   {
     serial,
+    getSerial,
     command = DEFAULT_GHOST_COMMAND,
     args = DEFAULT_GHOST_ARGS,
     env = {},
@@ -20,17 +21,24 @@ export function createGhostClient(
   const ClientImpl = deps.Client ?? Client;
   const TransportImpl = deps.StdioClientTransport ?? StdioClientTransport;
 
+  function currentSerial() {
+    return getSerial ? getSerial() : (overrideSerial ?? serial);
+  }
+
   let client = null;
-  let activeSerial = serial;
-  // Names of tools whose schema accepts a `device` argument. Populated by
-  // listTools(); null until then (we inject conservatively in that case).
+  // Optional override for standalone use (no `getSerial` injected). Production
+  // wires `getSerial` to adb.getSerial(), which stays the single source of
+  // truth; this fallback never competes with it.
+  let overrideSerial = null;
+  // Names of tools whose schema accepts a `device` argument (required or
+  // optional). Populated by listTools(); null until then (inject conservatively).
   let deviceTools = null;
 
-  // The bridge calls this when the user picks a different phone. ghost's
-  // DEFAULT_DEVICE is fixed at spawn, so per-tool arguments are what actually
-  // retarget an already-running session.
+  // A bridge that has no adb connection service can still retarget an
+  // already-running session explicitly. With `getSerial` wired, the injected
+  // getter wins, so this cannot make ghost follow a stale serial.
   function setSerial(next) {
-    activeSerial = next;
+    overrideSerial = next;
   }
 
   async function start() {
@@ -40,7 +48,7 @@ export function createGhostClient(
       args,
       // ghost selects the device via DEFAULT_DEVICE; the SDK merges these
       // over its safe inherited-environment defaults.
-      env: { ...env, DEFAULT_DEVICE: serial },
+      env: { ...env, DEFAULT_DEVICE: currentSerial() },
     });
     const next = new ClientImpl({ name: 'phone-screen-link', version: '1.0.0' });
     try {
@@ -82,15 +90,16 @@ export function createGhostClient(
     return tools;
   }
 
-  async function callTool(name, toolArgs = {}) {
+  async function callTool(name, toolArgs = {}, targetSerial = currentSerial()) {
     const args = { ...toolArgs };
     // ghost tools are device-scoped. Inject/override the serial so neither
     // internal calls nor model-generated calls can target the wrong device.
-    if (activeSerial && (deviceTools === null || deviceTools.has(name))) {
-      args.device = activeSerial;
+    // An explicit per-turn serial wins over a later active-serial change.
+    if (targetSerial && (deviceTools === null || deviceTools.has(name))) {
+      args.device = targetSerial;
     }
     return requireClient().callTool({ name, arguments: args });
   }
 
-  return { start, stop, listTools, callTool, setSerial };
+  return { start, stop, listTools, callTool, getSerial: currentSerial, setSerial };
 }

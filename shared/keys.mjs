@@ -59,6 +59,7 @@ export const MESSAGES = {
     'tool.copy': 'COPY',
     'tool.paste': 'PASTE',
     'tool.settings': 'SET',
+    'tool.wireless': 'WIFI',
     'settings.title': 'Stream settings',
     'settings.close': 'Close settings',
     'settings.resolution': 'Resolution',
@@ -119,6 +120,66 @@ export const MESSAGES = {
     'settings.note': 'Auto tries 1280 first and steps down if the phone rejects it. Applying restarts the picture.',
     'settings.reset': 'Reset',
     'settings.apply': 'Apply & restart',
+    // Wireless ADB pairing. The backend owns connection state; the browser
+    // only mirrors it and persists the user-entered pairing form.
+    'wireless.title': 'Wireless debugging',
+    'wireless.close': 'Close wireless debugging',
+    'wireless.current': 'Mode: {mode} · Address: {address} · {online}',
+    'wireless.mode.usb': 'USB',
+    'wireless.mode.wifi': 'Wireless',
+    'wireless.mode.unknown': 'Unknown',
+    'wireless.online.online': 'online',
+    'wireless.online.offline': 'offline',
+    'wireless.loading': 'Loading wireless status…',
+    'wireless.groupPair': 'Pair (Android 11+)',
+    'wireless.pairHint': 'Open Developer options → Wireless debugging → Pair device with pairing code.',
+    'wireless.auto': 'Auto-fetch over USB',
+    'wireless.autoHint': 'Connect the phone by USB, enable Wireless debugging, and open the pairing-code dialog. Auto-fetch reads the IP and ports; enter the 6-digit pairing code manually.',
+    'wireless.auto.loading': 'Fetching wireless details…',
+    'wireless.auto.fetched': 'Wireless details fetched — enter the pairing code.',
+    'wireless.auto.partial': 'Only partial wireless details were fetched. Check the fields before pairing.{warnings}',
+    'wireless.warning.wifiIpUnavailable': 'Could not read the phone Wi-Fi IP address.',
+    'wireless.warning.connectPortUnavailable': 'Wireless connect port is unavailable; make sure Wireless debugging is enabled.',
+    'wireless.warning.pairingPortUnavailable': 'Wireless pairing port is unavailable; open the Android pairing dialog and try again.',
+    'wireless.pairHost': 'Pair IP',
+    'wireless.pairPort': 'Pair port',
+    'wireless.pairCode': '6-digit pairing code',
+    'wireless.groupConnect': 'Connect',
+    'wireless.connectHint': 'Use the IP address and port on the main Wireless debugging screen.',
+    'wireless.connectHost': 'Connect IP',
+    'wireless.connectPort': 'Connect port',
+    'wireless.submit': 'Pair & connect',
+    'wireless.usb': 'Switch to USB',
+    'wireless.clear': 'Clear saved pairing information',
+    'wireless.cleared': 'Saved pairing information cleared',
+    'wireless.pairing': 'Pairing and connecting…',
+    'wireless.switchingUsb': 'Switching to USB…',
+    'wireless.connected': 'Wireless connected — restarting stream…',
+    'wireless.usbConnected': 'USB selected — restarting stream…',
+    'wireless.error.request': 'Wireless request failed ({status}) — {error}',
+    'wireless.error.network': 'Cannot reach the control bridge — {error}',
+    'wireless.error.invalidResponse': 'The control bridge returned an invalid wireless response',
+    'wireless.error.offline': 'The wireless device is offline — it was not activated',
+    'wireless.error.usbOffline': 'The USB device is offline — connect and authorize it before auto-fetching',
+    'wireless.error.storage': 'Cannot access browser storage — saved pairing information was not removed',
+    'wireless.error.save': 'Browser storage is unavailable — pairing still works, but the form will be lost on reload',
+    'wireless.warning': 'Warning: the full form, including the pairing code, is saved in plain text in this browser\'s localStorage. Anyone with access to this browser profile can read it. Pairing codes expire; if pairing fails, get the current code from the phone. Use “Clear saved pairing information” to remove it.',
+    'wireless.modeLabel': 'Connection mode',
+    'wireless.mode.pair': 'Android 11+ pairing code',
+    'wireless.mode.legacy': 'Legacy 5555 (no pairing code)',
+    'wireless.groupLegacy': 'Legacy TCP connection',
+    'wireless.legacyHint': 'For devices without a pairing-code dialog. Use the phone IP shown on its Wireless debugging screen; port 5555 is the default.',
+    'wireless.legacyHost': 'Phone IP',
+    'wireless.legacyPort': 'Port',
+    'wireless.legacyAuto': 'Auto-fetch & connect',
+    'wireless.legacyAuto.loading': 'Fetching IP and enabling TCP mode…',
+    'wireless.legacyConnect': 'Connect',
+    'wireless.legacy.connecting': 'Connecting…',
+    'wireless.legacy.connected': 'Legacy wireless connected — restarting stream…',
+    'wireless.error.legacyUsbOffline': 'The USB device is offline — connect and authorize it before auto-connecting',
+    'wireless.error.legacyAutoNoIp': 'Could not read the phone Wi-Fi IP address over USB — enter the IP manually and try again',
+    'wireless.legacyWarning': 'Warning: legacy mode is unencrypted and has no authentication. Use it only on a trusted LAN.',
+    'wireless.activeMethod.legacy': 'Active method: legacy (unencrypted, no authentication)',
     // Chat feature: floating button, panel and the settings group. The
     // config itself lives on the backend; these are display strings only.
     'chat.button': 'Chat assistant',
@@ -233,6 +294,7 @@ export const MESSAGES = {
     'tool.copy': '复制',
     'tool.paste': '粘贴',
     'tool.settings': '设置',
+    'tool.wireless': '无线',
     'settings.title': '视频设置',
     'settings.close': '关闭设置',
     'settings.resolution': '分辨率',
@@ -293,6 +355,64 @@ export const MESSAGES = {
     'settings.note': '自动模式先尝试 1280，被手机拒绝时会自动降档。应用设置会重启画面。',
     'settings.reset': '恢复默认',
     'settings.apply': '应用并重启',
+    'wireless.title': '无线调试',
+    'wireless.close': '关闭无线调试',
+    'wireless.current': '模式：{mode} · 地址：{address} · {online}',
+    'wireless.mode.usb': 'USB',
+    'wireless.mode.wifi': '无线',
+    'wireless.mode.unknown': '未知',
+    'wireless.online.online': '在线',
+    'wireless.online.offline': '离线',
+    'wireless.loading': '正在读取无线状态…',
+    'wireless.groupPair': '配对（Android 11+）',
+    'wireless.pairHint': '打开开发者选项 → 无线调试 → 使用配对码配对设备。',
+    'wireless.auto': 'USB 自动获取',
+    'wireless.autoHint': '请用 USB 连接手机，开启无线调试并打开配对码弹窗。自动获取只读取 IP 和端口，6 位配对码仍需手动输入。',
+    'wireless.auto.loading': '正在获取无线调试信息…',
+    'wireless.auto.fetched': '已获取无线调试信息 — 请输入配对码。',
+    'wireless.auto.partial': '仅获取到部分无线调试信息，请检查表单后再配对。{warnings}',
+    'wireless.warning.wifiIpUnavailable': '无法读取手机 Wi-Fi IP 地址。',
+    'wireless.warning.connectPortUnavailable': '无法获取无线连接端口；请确认已开启无线调试。',
+    'wireless.warning.pairingPortUnavailable': '无法获取无线配对端口；请打开 Android 配对弹窗后重试。',
+    'wireless.pairHost': '配对 IP',
+    'wireless.pairPort': '配对端口',
+    'wireless.pairCode': '6 位配对码',
+    'wireless.groupConnect': '连接',
+    'wireless.connectHint': '请使用无线调试主界面显示的 IP 地址和端口。',
+    'wireless.connectHost': '连接 IP',
+    'wireless.connectPort': '连接端口',
+    'wireless.submit': '配对并连接',
+    'wireless.usb': '切回 USB',
+    'wireless.clear': '清除已保存配对信息',
+    'wireless.cleared': '已清除保存的配对信息',
+    'wireless.pairing': '正在配对并连接…',
+    'wireless.switchingUsb': '正在切回 USB…',
+    'wireless.connected': '无线连接成功 — 正在重启画面…',
+    'wireless.usbConnected': '已选择 USB — 正在重启画面…',
+    'wireless.error.request': '无线请求失败（{status}）— {error}',
+    'wireless.error.network': '无法连接控制桥 — {error}',
+    'wireless.error.invalidResponse': '控制桥返回了无效的无线状态',
+    'wireless.error.offline': '无线设备已离线 — 未切换活动设备',
+    'wireless.error.usbOffline': 'USB 设备已离线 — 请连接并授权 USB 调试后再自动获取',
+    'wireless.error.storage': '无法访问浏览器存储 — 未删除已保存的配对信息',
+    'wireless.error.save': '浏览器存储不可用 — 仍可正常配对，但表单会在刷新后丢失',
+    'wireless.warning': '警告：完整表单（含配对码）会以明文保存到此浏览器的 localStorage。能够访问此浏览器配置文件的任何人都可读取。配对码会过期；如果配对失败，请从手机获取最新配对码。使用“清除已保存配对信息”可删除。',
+    'wireless.modeLabel': '连接方式',
+    'wireless.mode.pair': 'Android 11+ 配对码',
+    'wireless.mode.legacy': '传统 5555（无需配对码）',
+    'wireless.groupLegacy': '传统 TCP 连接',
+    'wireless.legacyHint': '适用于没有配对码弹窗的设备。手机 IP 见「无线调试」主页面，端口默认 5555。',
+    'wireless.legacyHost': '手机 IP',
+    'wireless.legacyPort': '端口',
+    'wireless.legacyAuto': '自动获取并连接',
+    'wireless.legacyAuto.loading': '正在获取 IP 并开启 TCP 模式…',
+    'wireless.legacyConnect': '连接',
+    'wireless.legacy.connecting': '正在连接…',
+    'wireless.legacy.connected': '传统无线连接成功 — 正在重启画面…',
+    'wireless.error.legacyUsbOffline': 'USB 设备已离线 — 请先连接并授权 USB 调试后再自动获取并连接',
+    'wireless.error.legacyAutoNoIp': '无法通过 USB 读取手机 Wi-Fi IP 地址 — 请手动输入 IP 后重试',
+    'wireless.legacyWarning': '警告：传统模式未加密、无认证，仅可在可信局域网中使用。',
+    'wireless.activeMethod.legacy': '当前方式：传统（未加密、无认证）',
     'chat.button': '聊天助手',
     'chat.title': '聊天助手',
     'chat.close': '关闭聊天',
@@ -469,6 +589,285 @@ export const DEFAULT_SETTINGS = {
 };
 export const SETTINGS_STORAGE_KEY = 'phone-link-settings';
 
+export const WIRELESS_AUTO_WARNING_CODES = Object.freeze({
+  WIFI_IP_UNAVAILABLE: 'WIFI_IP_UNAVAILABLE',
+  CONNECT_PORT_UNAVAILABLE: 'CONNECT_PORT_UNAVAILABLE',
+  PAIRING_PORT_UNAVAILABLE: 'PAIRING_PORT_UNAVAILABLE',
+});
+// The user explicitly requested that the complete wireless pairing form,
+// including its short-lived pairing code, survive browser reloads. Keep this
+// separate from backend connection config: the backend never stores the code.
+export const WIRELESS_PAIRING_STORAGE_KEY = 'phone-link-wireless-pairing';
+export const WIRELESS_PAIRING_FIELDS = Object.freeze([
+  'pairHost',
+  'pairPort',
+  'pairCode',
+  'connectHost',
+  'connectPort',
+]);
+export const DEFAULT_WIRELESS_PAIRING = Object.freeze({
+  pairHost: '',
+  pairPort: '',
+  pairCode: '',
+  connectHost: '',
+  connectPort: '',
+});
+
+// The selected method and legacy form live in the SAME localStorage entry as
+// the pairing form. Keeping them alongside the pair fields means one clear
+// action removes everything, and a mode switch can never overwrite the code.
+export const WIRELESS_METHODS = Object.freeze({ PAIR: 'pair', LEGACY: 'legacy' });
+export const WIRELESS_MODE_FIELDS = Object.freeze(['method', 'legacyHost', 'legacyPort']);
+export const DEFAULT_WIRELESS_MODE = Object.freeze({
+  method: WIRELESS_METHODS.PAIR,
+  legacyHost: '',
+  legacyPort: '5555',
+});
+
+function normalizeWirelessPairing(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return Object.fromEntries(WIRELESS_PAIRING_FIELDS.map((field) => [
+    field,
+    typeof source[field] === 'string' ? source[field] : DEFAULT_WIRELESS_PAIRING[field],
+  ]));
+}
+
+function normalizeWirelessMode(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  const rawPort = typeof source.legacyPort === 'string'
+    ? source.legacyPort
+    : (Number.isInteger(source.legacyPort) ? String(source.legacyPort) : '');
+  const legacyPort = /^\d{1,5}$/.test(rawPort)
+    && Number(rawPort) >= 1 && Number(rawPort) <= 65535
+    ? rawPort
+    : DEFAULT_WIRELESS_MODE.legacyPort;
+  return {
+    method: source.method === WIRELESS_METHODS.LEGACY ? WIRELESS_METHODS.LEGACY : WIRELESS_METHODS.PAIR,
+    legacyHost: typeof source.legacyHost === 'string' ? source.legacyHost : DEFAULT_WIRELESS_MODE.legacyHost,
+    legacyPort,
+  };
+}
+
+function resolveWirelessStorage(storageOrProvider) {
+  return typeof storageOrProvider === 'function' ? storageOrProvider() : storageOrProvider;
+}
+
+function readStoredWirelessMode(storage) {
+  try {
+    const raw = JSON.parse(storage?.getItem(WIRELESS_PAIRING_STORAGE_KEY));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return {};
+    return Object.fromEntries(WIRELESS_MODE_FIELDS
+      .filter((field) => Object.hasOwn(raw, field))
+      .map((field) => [field, raw[field]]));
+  } catch {
+    return {};
+  }
+}
+
+export function loadWirelessPairing(storageOrProvider) {
+  try {
+    const storage = resolveWirelessStorage(storageOrProvider);
+    return normalizeWirelessPairing(JSON.parse(storage?.getItem(WIRELESS_PAIRING_STORAGE_KEY)));
+  } catch {
+    return { ...DEFAULT_WIRELESS_PAIRING };
+  }
+}
+
+export function saveWirelessPairing(storageOrProvider, values) {
+  const normalized = normalizeWirelessPairing(values);
+  try {
+    const storage = resolveWirelessStorage(storageOrProvider);
+    if (!storage || typeof storage.setItem !== 'function') {
+      return { saved: false, values: normalized };
+    }
+    // Preserve the selected method and legacy fields: saving the pair form
+    // happens on every keystroke, so it must not silently reset the mode.
+    // Normalize only the fields that were actually stored, so a malformed
+    // entry is repaired instead of written back verbatim, while a form-only
+    // entry keeps its original shape.
+    const storedMode = readStoredWirelessMode(storage);
+    const normalizedMode = normalizeWirelessMode(storedMode);
+    const modePatch = Object.fromEntries(WIRELESS_MODE_FIELDS
+      .filter((field) => Object.hasOwn(storedMode, field))
+      .map((field) => [field, normalizedMode[field]]));
+    storage.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({
+      ...normalized,
+      ...modePatch,
+    }));
+    return { saved: true, values: normalized };
+  } catch {
+    // Private browsing or a full quota: pairing remains usable for this
+    // session, but the caller must not claim the form will survive reload.
+    return { saved: false, values: normalized };
+  }
+}
+
+export function loadWirelessMode(storageOrProvider) {
+  try {
+    const storage = resolveWirelessStorage(storageOrProvider);
+    return normalizeWirelessMode(JSON.parse(storage?.getItem(WIRELESS_PAIRING_STORAGE_KEY)));
+  } catch {
+    return { ...DEFAULT_WIRELESS_MODE };
+  }
+}
+
+export function saveWirelessMode(storageOrProvider, values) {
+  const normalized = normalizeWirelessMode(values);
+  try {
+    const storage = resolveWirelessStorage(storageOrProvider);
+    if (!storage || typeof storage.setItem !== 'function') {
+      return { saved: false, values: normalized };
+    }
+    let pairValues;
+    try {
+      pairValues = normalizeWirelessPairing(JSON.parse(storage.getItem(WIRELESS_PAIRING_STORAGE_KEY)));
+    } catch {
+      pairValues = { ...DEFAULT_WIRELESS_PAIRING };
+    }
+    storage.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({ ...pairValues, ...normalized }));
+    return { saved: true, values: normalized };
+  } catch {
+    return { saved: false, values: normalized };
+  }
+}
+
+export function isWirelessPairingSuccess(payload) {
+  return Boolean(
+    payload
+    && payload.mode === 'wifi'
+    && typeof payload.serial === 'string'
+    && payload.serial.trim() !== ''
+    && payload.online === true,
+  );
+}
+
+// A legacy connect returns the same whitelisted status payload as pairing, so
+// the activation rules are identical: only an online wifi target may replace
+// DEVICE_ID and restart the stream.
+export function isLegacyConnectSuccess(payload) {
+  return isWirelessPairingSuccess(payload);
+}
+
+function normalizeWirelessAutoHost(value) {
+  if (typeof value !== 'string') return '';
+  const host = value.trim();
+  if (host === '' || host.length > 253 || /\s/.test(host)) return '';
+  if (/^[\d.]+$/.test(host)) {
+    const parts = host.split('.');
+    return parts.length === 4 && parts.every((part) => (
+      /^\d{1,3}$/.test(part) && Number(part) <= 255
+    )) ? host : '';
+  }
+  return host.split('.').every((label) => (
+    label.length >= 1
+    && label.length <= 63
+    && /^[A-Za-z0-9](?:[A-Za-z0-9-]*[A-Za-z0-9])?$/.test(label)
+  )) ? host : '';
+}
+
+function normalizeWirelessAutoPort(value) {
+  return Number.isInteger(value) && value >= 1 && value <= 65535 ? String(value) : '';
+}
+
+export function wirelessAutoWarningKey(code) {
+  return Object.hasOwn(WIRELESS_AUTO_WARNING_CODES, code)
+    ? `wireless.warning.${{
+      WIFI_IP_UNAVAILABLE: 'wifiIpUnavailable',
+      CONNECT_PORT_UNAVAILABLE: 'connectPortUnavailable',
+      PAIRING_PORT_UNAVAILABLE: 'pairingPortUnavailable',
+    }[code]}`
+    : null;
+}
+
+// The auto endpoint is read-only and may return partial data. Validate its
+// envelope, keep only usable address fields, and never accept a pairing code
+// from it: the user must always enter that short-lived credential manually.
+export function parseWirelessAutoResult(payload) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+      || typeof payload.usbSerial !== 'string' || payload.usbSerial.trim() === ''
+      || !Array.isArray(payload.warnings)) {
+    return null;
+  }
+
+  const updates = {};
+  const pairHost = normalizeWirelessAutoHost(payload.pairHost);
+  const pairPort = normalizeWirelessAutoPort(payload.pairPort);
+  const connectHost = normalizeWirelessAutoHost(payload.connectHost);
+  const connectPort = normalizeWirelessAutoPort(payload.connectPort);
+  if (pairHost) updates.pairHost = pairHost;
+  if (pairPort) updates.pairPort = pairPort;
+  if (connectHost) updates.connectHost = connectHost;
+  if (connectPort) updates.connectPort = connectPort;
+
+  const warnings = [...new Set(payload.warnings
+    .map((warning) => (wirelessAutoWarningKey(warning) ? warning : ''))
+    .filter(Boolean))];
+
+  return {
+    usbSerial: payload.usbSerial.trim(),
+    updates,
+    warnings,
+    complete: Boolean(updates.pairHost && updates.pairPort && updates.connectHost && updates.connectPort),
+  };
+}
+
+export function clearWirelessPairing(storageOrProvider) {
+  try {
+    const storage = resolveWirelessStorage(storageOrProvider);
+    if (!storage || typeof storage.removeItem !== 'function') return false;
+    storage.removeItem(WIRELESS_PAIRING_STORAGE_KEY);
+    return true;
+  } catch {
+    // The caller must not claim removal succeeded when storage is inaccessible.
+    return false;
+  }
+}
+
+export function clearWirelessPairingResult(storageOrProvider) {
+  const cleared = clearWirelessPairing(storageOrProvider);
+  return {
+    cleared,
+    feedbackKey: cleared ? 'wireless.cleared' : 'wireless.error.storage',
+    isError: !cleared,
+  };
+}
+
+// A modal-open status refresh can overlap a pair/USB mutation. Only the newest
+// refresh may update the display, and mutations invalidate refreshes both when
+// they start and when they settle. Refreshes started during a mutation never run.
+export function createWirelessRequestGuard() {
+  let version = 0;
+  let mutationActive = false;
+
+  async function settle(request, token) {
+    try {
+      const value = await request();
+      return token === version ? { stale: false, value } : { stale: true };
+    } catch (error) {
+      return token === version ? { stale: false, error } : { stale: true };
+    }
+  }
+
+  return {
+    refresh(request) {
+      if (mutationActive) return Promise.resolve({ stale: true });
+      const token = ++version;
+      return settle(request, token);
+    },
+    async mutate(request) {
+      mutationActive = true;
+      version += 1;
+      const token = version;
+      try {
+        return await settle(request, token);
+      } finally {
+        version += 1;
+        mutationActive = false;
+      }
+    },
+  };
+}
+
 // Wheel-scroll amplification: how many engine scroll steps the phone is
 // scrolled per browser wheel event. The engine converts one browser wheel
 // tick into a single "swipe" message, so the phone screen (1152 CSS px tall)
@@ -571,9 +970,9 @@ export function shouldCenterDock(streamWidth, chatWidth) {
 }
 
 // Docked splitter: how much of the stage the stream side takes. Stored as a
-// ratio so it survives window resizes. Stream keeps at least 450px, chat 240px.
+// ratio so it survives window resizes. Stream keeps at least 400px, chat 240px.
 export const CHAT_SPLIT_KEY = 'phone-link-chat-split-ratio';
-export const MIN_DOCK_STREAM = 450;
+export const MIN_DOCK_STREAM = 400;
 export const MIN_DOCK_CHAT = 240;
 
 export function clampDockStreamWidth(requested, available) {

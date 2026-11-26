@@ -77,6 +77,7 @@ body {
 #stream {
   position: relative;
   flex: 1;
+  min-width: 400px;
   min-height: 0;
   display: flex;
   align-items: center;
@@ -331,6 +332,250 @@ body.nav-text-only #stream .control-button[data-label]::after {
   fill: #5b9aff;
 }
 
+#stream .control-button.wireless-button > svg {
+  fill: #9fb6d8;
+}
+
+#stream .control-button.wireless-button:hover > svg {
+  fill: #5b9aff;
+}
+
+/* Wireless pairing is a separate modal: the form includes a deliberately
+   persisted pairing code, so its plaintext-storage warning stays visible. */
+.wireless-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgb(0 0 0 / 62%);
+}
+
+.wireless-overlay[hidden] {
+  display: none;
+}
+
+.wireless-panel {
+  width: min(380px, 100%);
+  max-height: calc(100vh - 32px);
+  overflow-y: auto;
+  padding: 14px 16px 16px;
+  border: 1px solid #2c3038;
+  border-radius: 12px;
+  background: #181b21;
+  box-shadow: 0 18px 50px rgb(0 0 0 / 55%);
+  color: var(--ui-text-color);
+  font-size: calc(12px * var(--ui-font-scale));
+}
+
+.wireless-status,
+.wireless-feedback,
+.wireless-storage {
+  margin: 0 0 8px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.wireless-storage {
+  color: #e8a49e;
+}
+
+.wireless-storage[hidden] {
+  display: none;
+}
+
+.wireless-status {
+  color: var(--ui-text-muted);
+}
+
+.wireless-method-badge {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 3px 9px;
+  border: 1px solid #8a5a32;
+  border-radius: 999px;
+  background: #2b1d14;
+  color: #f0b27a;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+}
+
+.wireless-method-badge[hidden] {
+  display: none;
+}
+
+.wireless-feedback:empty {
+  display: none;
+}
+
+.wireless-feedback.is-error {
+  color: #e8a49e;
+}
+
+.wireless-feedback.is-success {
+  color: #6fd2a8;
+}
+
+.wireless-feedback.is-warning {
+  color: #d8bd83;
+}
+
+.wireless-section[hidden] {
+  display: none;
+}
+
+.wireless-form fieldset {
+  min-width: 0;
+  margin: 12px 0 0;
+  padding: 10px 12px 12px;
+  border: 1px solid #2c3038;
+  border-radius: 9px;
+}
+
+.wireless-form legend {
+  padding: 0 5px;
+  color: var(--ui-text-soft);
+  font-weight: 600;
+}
+
+.wireless-legend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+.wireless-auto {
+  padding: 4px 8px;
+  border: 1px solid #3a6fb5;
+  border-radius: 6px;
+  background: #243d5d;
+  color: #dce9fb;
+  font: 600 calc(11px * var(--ui-font-scale))/1.2 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.wireless-auto:hover:not(:disabled) {
+  background: #2e5f9e;
+}
+
+.wireless-panel .wireless-auto:disabled {
+  border-color: #2c465f;
+  background: #1b2a3d;
+  color: #8190a3;
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.wireless-panel .wireless-auto.is-loading:disabled {
+  opacity: 0.75;
+  cursor: progress;
+}
+
+.wireless-hint {
+  margin: 0 0 8px;
+  color: var(--ui-text-muted);
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.45;
+}
+
+.wireless-field {
+  display: grid;
+  grid-template-columns: 1fr 150px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  color: var(--ui-text-soft);
+}
+
+.wireless-field input,
+.wireless-field select {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 7px;
+  border: 1px solid #343a44;
+  border-radius: 6px;
+  background: #21262d;
+  color: var(--ui-text-color);
+  font: inherit;
+}
+
+.wireless-field input:focus-visible,
+.wireless-field select:focus-visible,
+.wireless-panel button:focus-visible {
+  outline: 2px solid #5b9aff;
+  outline-offset: 1px;
+}
+
+#wireless-submit,
+#wireless-legacy-connect {
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px 12px;
+  border: 1px solid #3a6fb5;
+  border-radius: 7px;
+  background: #2e5f9e;
+  color: #fff;
+  font: 600 calc(12px * var(--ui-font-scale))/1 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+#wireless-submit:hover:not(:disabled),
+#wireless-legacy-connect:hover:not(:disabled) {
+  background: #3a73bb;
+}
+
+.wireless-legacy-auto {
+  width: 100%;
+  margin-top: 12px;
+}
+
+.wireless-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.wireless-actions button {
+  padding: 6px 9px;
+  border: 1px solid #343a44;
+  border-radius: 7px;
+  background: #21262d;
+  color: var(--ui-text-soft);
+  font: 500 calc(11px * var(--ui-font-scale))/1.3 system-ui, -apple-system, sans-serif;
+  cursor: pointer;
+}
+
+.wireless-actions button:hover:not(:disabled) {
+  background: #2b323c;
+}
+
+.wireless-panel button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.wireless-warning {
+  margin: 12px 0 0;
+  padding: 9px 10px;
+  border: 1px solid #66522c;
+  border-radius: 8px;
+  background: #292318;
+  color: #d8bd83;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.5;
+}
+
+@media (max-width: 440px) {
+  .wireless-field {
+    grid-template-columns: 1fr 120px;
+  }
+}
+
 /* Settings dialog. Fixed overlay so it stays put while the stream restarts
    underneath it; the panel stays small and uses the same quiet dark palette. */
 .settings-overlay {
@@ -558,11 +803,13 @@ body.nav-text-only #stream .control-button[data-label]::after {
 
 /* ----------------------------------------------------------------- chat */
 /* Floating round entry point, bottom right. app.js keeps it hidden while the
-   backend reports chat disabled. Its z-index sits above the fullscreen
-   picture (40) so chat works in both layouts. */
+   backend reports chat disabled. Reserve the tool rail's width so this button
+   can never cover the settings or wireless entries at the bottom of the rail.
+   Its z-index sits above the fullscreen picture (40) so chat works in both
+   layouts. */
 .chat-fab {
   position: fixed;
-  right: 18px;
+  right: calc(2.75rem * var(--rail-scale, 1) + 26px);
   bottom: 18px;
   z-index: 45;
   display: flex;
@@ -958,7 +1205,7 @@ body.chat-docked #chat-dock:hover {
 }
 
 #stream {
-  min-width: 0;
+  min-width: 400px;
 }
 
 .chat-head-actions {
@@ -976,6 +1223,7 @@ body.chat-docked #chat-dock:hover {
 .chat-head-actions button svg {
   width: 14px;
   height: 14px;
+  fill: currentColor;
 }
 
 .chat-head-actions button:disabled {
@@ -987,6 +1235,12 @@ body.chat-docked .stage {
   justify-content: flex-start;
 }
 
+/* In docked mode the tool rail is no longer at the viewport's right edge, so
+   keep the chat entry in its original corner instead of reserving rail space. */
+body.chat-docked .chat-fab {
+  right: 18px;
+}
+
 body.chat-docked.chat-centered .stage {
   justify-content: center;
 }
@@ -994,7 +1248,7 @@ body.chat-docked.chat-centered .stage {
 body.chat-docked #stream {
   flex: 0 0 auto;
   width: var(--dock-stream-width, 320px);
-  min-width: 0;
+  min-width: 400px;
 }
 
 body.chat-docked .chat-panel {

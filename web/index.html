@@ -40,7 +40,7 @@
       <header class="chat-head">
         <h2 id="chat-title" data-i18n="chat.title">Chat assistant</h2>
         <div class="chat-head-actions">
-          <button type="button" id="chat-dock" title="Dock chat beside the screen" aria-label="Dock chat beside the screen">
+          <button type="button" id="chat-dock" title="Dock chat beside the screen" aria-label="Dock chat beside the screen" aria-pressed="false">
             <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">
               <path d="M3 4h8v16H3V4zm10 0h8v16h-8V4z"/>
             </svg>
@@ -249,6 +249,91 @@
         <button type="button" id="settings-reset" data-i18n="settings.reset">Reset</button>
         <button type="button" id="settings-apply" data-i18n="settings.apply">Apply &amp; restart</button>
       </footer>
+    </section>
+  </div>
+  <div id="wireless-overlay" class="wireless-overlay" hidden>
+    <section class="wireless-panel" role="dialog" aria-modal="true" aria-labelledby="wireless-title" tabindex="-1">
+      <header class="settings-head">
+        <h2 id="wireless-title" data-i18n="wireless.title">Wireless debugging</h2>
+        <button type="button" id="wireless-close" data-i18n-aria="wireless.close" aria-label="Close wireless debugging">&times;</button>
+      </header>
+
+      <p id="wireless-status" class="wireless-status" role="status" aria-live="polite" data-i18n="wireless.loading">Loading wireless status…</p>
+      <p id="wireless-method-badge" class="wireless-method-badge" data-i18n="wireless.activeMethod.legacy" hidden>Active method: legacy (unencrypted, no authentication)</p>
+      <p id="wireless-legacy-warning" class="wireless-warning wireless-legacy-warning" data-i18n="wireless.legacyWarning" hidden>Warning: legacy mode is unencrypted and has no authentication. Use it only on a trusted LAN.</p>
+      <p id="wireless-feedback" class="wireless-feedback" role="status" aria-live="polite"></p>
+      <p id="wireless-storage" class="wireless-storage" role="status" aria-live="polite" hidden></p>
+
+      <form id="wireless-form" class="wireless-form">
+        <label class="wireless-field wireless-mode-field">
+          <span data-i18n="wireless.modeLabel">Connection mode</span>
+          <select id="wireless-mode" name="method">
+            <option value="pair" data-i18n="wireless.mode.pair">Android 11+ pairing code</option>
+            <option value="legacy" data-i18n="wireless.mode.legacy">Legacy 5555 (no pairing code)</option>
+          </select>
+        </label>
+
+        <div id="wireless-pair-section" class="wireless-section">
+          <fieldset>
+            <legend class="wireless-legend">
+              <span data-i18n="wireless.groupPair">Pair (Android 11+)</span>
+              <button type="button" id="wireless-auto" class="wireless-auto" data-i18n="wireless.auto" aria-busy="false" disabled>Auto-fetch over USB</button>
+            </legend>
+            <p class="wireless-hint" data-i18n="wireless.autoHint">Connect the phone by USB, enable Wireless debugging, and open the pairing-code dialog. Auto-fetch reads the IP and ports; enter the 6-digit pairing code manually.</p>
+            <p class="wireless-hint" data-i18n="wireless.pairHint">Open Developer options → Wireless debugging → Pair device with pairing code.</p>
+            <label class="wireless-field">
+              <span data-i18n="wireless.pairHost">Pair IP</span>
+              <input type="text" id="wireless-pair-host" name="pairHost" autocomplete="off" spellcheck="false" required>
+            </label>
+            <label class="wireless-field">
+              <span data-i18n="wireless.pairPort">Pair port</span>
+              <input type="number" id="wireless-pair-port" name="pairPort" min="1" max="65535" step="1" inputmode="numeric" autocomplete="off" required>
+            </label>
+            <label class="wireless-field">
+              <span data-i18n="wireless.pairCode">6-digit pairing code</span>
+              <input type="text" id="wireless-pair-code" name="pairCode" maxlength="6" pattern="[0-9]{6}" inputmode="numeric" autocomplete="off" spellcheck="false" required>
+            </label>
+          </fieldset>
+
+          <fieldset>
+            <legend data-i18n="wireless.groupConnect">Connect</legend>
+            <p class="wireless-hint" data-i18n="wireless.connectHint">Use the IP address and port on the main Wireless debugging screen.</p>
+            <label class="wireless-field">
+              <span data-i18n="wireless.connectHost">Connect IP</span>
+              <input type="text" id="wireless-connect-host" name="connectHost" autocomplete="off" spellcheck="false" required>
+            </label>
+            <label class="wireless-field">
+              <span data-i18n="wireless.connectPort">Connect port</span>
+              <input type="number" id="wireless-connect-port" name="connectPort" min="1" max="65535" step="1" inputmode="numeric" autocomplete="off" required>
+            </label>
+          </fieldset>
+
+          <button type="submit" id="wireless-submit" class="wireless-primary" data-i18n="wireless.submit">Pair &amp; connect</button>
+        </div>
+
+        <div id="wireless-legacy-section" class="wireless-section" hidden>
+          <fieldset>
+            <legend data-i18n="wireless.groupLegacy">Legacy TCP connection</legend>
+            <p class="wireless-hint" data-i18n="wireless.legacyHint">For devices without a pairing-code dialog. Use the phone IP shown on its Wireless debugging screen; port 5555 is the default.</p>
+            <label class="wireless-field">
+              <span data-i18n="wireless.legacyHost">Phone IP</span>
+              <input type="text" id="wireless-legacy-host" name="legacyHost" autocomplete="off" spellcheck="false" required>
+            </label>
+            <label class="wireless-field">
+              <span data-i18n="wireless.legacyPort">Port</span>
+              <input type="number" id="wireless-legacy-port" name="legacyPort" min="1" max="65535" step="1" value="5555" inputmode="numeric" autocomplete="off" required>
+            </label>
+          </fieldset>
+          <button type="button" id="wireless-legacy-auto" class="wireless-auto wireless-legacy-auto" data-i18n="wireless.legacyAuto" aria-busy="false" disabled>Auto-fetch &amp; connect</button>
+          <button type="button" id="wireless-legacy-connect" class="wireless-primary" data-i18n="wireless.legacyConnect">Connect</button>
+        </div>
+      </form>
+
+      <div class="wireless-actions">
+        <button type="button" id="wireless-usb" data-i18n="wireless.usb">Switch to USB</button>
+        <button type="button" id="wireless-clear" data-i18n="wireless.clear">Clear saved pairing information</button>
+      </div>
+      <p id="wireless-warning" class="wireless-warning" data-i18n="wireless.warning" hidden>Warning: the full form, including the pairing code, is saved in plain text in this browser's localStorage. Anyone with access to this browser profile can read it. Pairing codes expire; if pairing fails, get the current code from the phone. Use “Clear saved pairing information” to remove it.</p>
     </section>
   </div>
   <script type="module" src="/app.js"></script>
