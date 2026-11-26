@@ -177,6 +177,7 @@ export const MESSAGES = {
     'wireless.legacy.connecting': 'Connecting…',
     'wireless.legacy.connected': 'Legacy wireless connected — restarting stream…',
     'wireless.error.legacyUsbOffline': 'The USB device is offline — connect and authorize it before auto-connecting',
+    'wireless.error.legacyAutoNoIp': 'Could not read the phone Wi-Fi IP address over USB — enter the IP manually and try again',
     'wireless.legacyWarning': 'Warning: legacy mode is unencrypted and has no authentication. Use it only on a trusted LAN.',
     // Chat feature: floating button, panel and the settings group. The
     // config itself lives on the backend; these are display strings only.
@@ -398,6 +399,7 @@ export const MESSAGES = {
     'wireless.legacy.connecting': '正在连接…',
     'wireless.legacy.connected': '传统无线连接成功 — 正在重启画面…',
     'wireless.error.legacyUsbOffline': 'USB 设备已离线 — 请先连接并授权 USB 调试后再自动获取并连接',
+    'wireless.error.legacyAutoNoIp': '无法通过 USB 读取手机 Wi-Fi IP 地址 — 请手动输入 IP 后重试',
     'wireless.legacyWarning': '警告：传统模式未加密、无认证，仅可在可信局域网中使用。',
     'chat.button': '聊天助手',
     'chat.title': '聊天助手',

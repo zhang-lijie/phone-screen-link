@@ -617,6 +617,12 @@ function renderWirelessMode() {
   wirelessPairSection.hidden = legacy;
   wirelessLegacySection.hidden = !legacy;
   wirelessLegacyWarning.hidden = !legacy;
+  // `hidden` alone does not remove a control from constraint validation: a
+  // fresh pair-mode submit would be blocked by the hidden legacy `required`
+  // inputs. Disable the inactive form's inputs as well.
+  for (const field of Object.values(wirelessFields)) field.disabled = legacy;
+  wirelessLegacyHost.disabled = !legacy;
+  wirelessLegacyPort.disabled = !legacy;
   renderWirelessLegacyButtons();
 }
 
@@ -904,12 +910,8 @@ async function connectLegacyWireless(enableTcpip) {
   if (wirelessBusy || currentWirelessMethod() !== 'legacy') return;
   saveWirelessFormFromDom();
   saveWirelessModeFromDom();
-  const host = wirelessLegacyHost.value.trim();
-  const port = Number(wirelessLegacyPort.value);
-  if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
-    setWirelessFeedback('wireless.error.invalidResponse', {}, true);
-    return;
-  }
+  let host = wirelessLegacyHost.value.trim();
+  let port = Number(wirelessLegacyPort.value);
   // The backend only runs `adb tcpip` when the user explicitly asks for it and
   // USB is online. Manual connect never touches the phone's adbd.
   if (enableTcpip && wirelessState.usbOnline !== true) {
@@ -922,6 +924,54 @@ async function connectLegacyWireless(enableTcpip) {
   setWirelessBusy(true);
   setWirelessFeedback(enableTcpip ? 'wireless.legacyAuto.loading' : 'wireless.legacy.connecting');
   try {
+    if (enableTcpip) {
+      // Auto mode really reads the phone IP over USB first; reuse the existing
+      // read-only discovery endpoint instead of connecting to a stale host.
+      const autoResult = await wirelessRequests.mutate(async () => {
+        const res = await fetch(WIRELESS_AUTO_URL, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{}',
+        });
+        const payload = await res.json().catch(() => ({}));
+        return { res, payload };
+      });
+      if (autoResult.stale) return;
+      if (autoResult.error) {
+        setWirelessFeedback('wireless.error.network', { error: messageOf(autoResult.error) }, true);
+        return;
+      }
+      const { res: autoRes, payload: autoPayload } = autoResult.value;
+      if (autoRes.status === 409) {
+        wirelessState.usbOnline = false;
+        renderWirelessLegacyButtons();
+        setWirelessFeedback('wireless.error.usbOffline', {}, true);
+        return;
+      }
+      if (!autoRes.ok) {
+        setWirelessFeedback('wireless.error.request', wirelessRequestError(autoRes, autoPayload), true);
+        return;
+      }
+      const parsed = parseWirelessAutoResult(autoPayload);
+      if (!parsed) {
+        setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+        return;
+      }
+      const fetchedHost = parsed.updates.connectHost || parsed.updates.pairHost;
+      if (!fetchedHost) {
+        setWirelessFeedback('wireless.error.legacyAutoNoIp', {}, true);
+        return;
+      }
+      host = fetchedHost;
+      if (parsed.updates.connectPort) port = Number(parsed.updates.connectPort);
+      wirelessLegacyHost.value = host;
+      wirelessLegacyPort.value = String(port);
+      saveWirelessModeFromDom();
+    }
+    if (!host || !Number.isInteger(port) || port < 1 || port > 65535) {
+      setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+      return;
+    }
     // enableTcpip is a real boolean from the two call sites; the bridge rejects
     // the string "true" with 400, so never stringify it here.
     const body = { host, port, enableTcpip };
