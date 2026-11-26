@@ -39,3 +39,13 @@ test('README documents the 400px stream and 240px chat dock minimums', () => {
   assert.match(readme, /画面侧最小 400px、聊天侧最小 240px/);
   assert.match(readme, /画面 ≥ 400px、聊天 ≥ 240px/);
 });
+
+
+test('floating stream canvas is fitted on connect, resize and tab visibility', () => {
+  assert.match(app, /import \{[^}]*fitCanvasSize[^}]*\} from '\.\/device-ui\.js';/);
+  assert.match(app, /function fitStreamCanvas\(\)[\s\S]*?canvas\.video-layer[\s\S]*?fitCanvasSize\([\s\S]*?style\.width[\s\S]*?style\.height/);
+  assert.match(app, /options\.onConnect = \(info\) => \{[\s\S]*?fitStreamCanvas\(\)/);
+  assert.match(app, /options\.onResize = \(info\) => \{[\s\S]*?fitStreamCanvas\(\)/);
+  assert.match(app, /window\.addEventListener\('resize', \(\) => \{[\s\S]*?fitStreamCanvas\(\)/);
+  assert.match(app, /document\.addEventListener\('visibilitychange', \(\) => \{[\s\S]*?fitStreamCanvas\(\)/);
+});

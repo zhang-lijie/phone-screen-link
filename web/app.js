@@ -42,7 +42,7 @@ import {
   wirelessAutoWarningKey,
 } from './keys.js';
 import { PRESET_COMMANDS, findCommands } from './chat-commands.js';
-import { canStartStream, restoreSerial } from './device-ui.js';
+import { canStartStream, fitCanvasSize, restoreSerial } from './device-ui.js';
 
 // The bridge owns the active serial; this page follows it. A second phone or
 // a replug can change it without a page reload.
@@ -631,6 +631,29 @@ async function refreshDevices() {
 // The toolbox is created by the engine once the player attaches, so it can
 // appear after our first paint — and again after a stream restart. Label every
 // copy as soon as it shows up, for as long as the page lives.
+// The engine only shrinks canvas layers via max-width/max-height; on a large
+// window the picture stays at its negotiated resolution and leaves black
+// borders. Size both stacked layers to the available cell, preserving aspect
+// so pointer/touch mapping still matches the visible image.
+function fitStreamCanvas() {
+  const canvas = streamEl.querySelector('canvas.video-layer');
+  const touch = streamEl.querySelector('canvas.touch-layer');
+  const video = streamEl.querySelector('.video');
+  if (!canvas || !video) return;
+  const rect = video.getBoundingClientRect();
+  const fitted = fitCanvasSize({
+    width: canvas.width,
+    height: canvas.height,
+    availableWidth: rect.width,
+    availableHeight: rect.height - 4, // two 2px breathing margins
+  });
+  if (!fitted) return;
+  for (const layer of [canvas, touch].filter(Boolean)) {
+    layer.style.width = `${fitted.width}px`;
+    layer.style.height = `${fitted.height}px`;
+  }
+}
+
 function labelToolbox() {
   const list = streamEl.querySelector('.control-buttons-list');
   if (!list) return;
@@ -1994,6 +2017,7 @@ dockSplitter.addEventListener('pointercancel', endSplitDrag);
 
 window.addEventListener('resize', () => {
   setChatDockButton();
+  fitStreamCanvas();
   if (chatDocked) {
     if (!canDock(window.innerWidth)) {
       exitChatDock();
@@ -2116,6 +2140,7 @@ function startStream() {
     if (gen !== generation) return;
     applyAudioVolume();
     labelToolbox();
+    fitStreamCanvas();
     const degraded = isDegradedStream(info?.resolution, size);
     const canRetry = attempts < ladder.length;
     if (degraded && canRetry) {
@@ -2153,6 +2178,7 @@ function startStream() {
   options.onResize = (info) => {
     if (gen !== generation) return;
     handleStreamOrientation(info);
+    fitStreamCanvas();
   };
 
   try {
@@ -2196,6 +2222,10 @@ deviceButton?.addEventListener('click', openDevicePicker);
 document.getElementById('device-close')?.addEventListener('click', closeDevicePicker);
 deviceOverlay?.addEventListener('click', (event) => {
   if (event.target === deviceOverlay) closeDevicePicker();
+});
+
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) fitStreamCanvas();
 });
 
 applyLanguage();

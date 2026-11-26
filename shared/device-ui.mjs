@@ -16,3 +16,17 @@ export function restoreSerial({ remembered, devices = [], selected, attempted } 
 export function canStartStream({ serial, gen, currentSerial, currentGen } = {}) {
   return Boolean(serial) && serial === currentSerial && gen === currentGen;
 }
+
+
+// Fit a canvas into the available box without changing its aspect ratio.
+// The video and touch canvases must receive the same result so touch
+// coordinates keep mapping onto the visible picture.
+export function fitCanvasSize({ width, height, availableWidth, availableHeight } = {}) {
+  const w = Number(width);
+  const h = Number(height);
+  const aw = Number(availableWidth);
+  const ah = Number(availableHeight);
+  if (![w, h, aw, ah].every(Number.isFinite) || w <= 0 || h <= 0 || aw <= 0 || ah <= 0) return null;
+  const scale = Math.min(aw / w, ah / h);
+  return { width: Math.round(w * scale), height: Math.round(h * scale) };
+}
