@@ -1186,7 +1186,10 @@ test('wireless: concurrent pair and USB requests wait for serialized transaction
 
     const usb = await usbResponse;
     assert.equal(usb.status, 200);
-    assert.deepEqual(await usb.json(), { ok: true, ...USB_STATUS });
+    const usbJson = await usb.json();
+    const { selected, devices, ...coreStatus } = usbJson;
+    assert.deepEqual(coreStatus, { ok: true, ...USB_STATUS });
+    assert.ok('selected' in usbJson && Array.isArray(devices));
     assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   });
 });
@@ -1438,7 +1441,10 @@ test('wireless: concurrent legacy and USB requests wait for serialized transacti
 
     const usb = await usbResponse;
     assert.equal(usb.status, 200);
-    assert.deepEqual(await usb.json(), { ok: true, ...USB_STATUS });
+    const usbJson = await usb.json();
+    const { selected, devices, ...coreStatus } = usbJson;
+    assert.deepEqual(coreStatus, { ok: true, ...USB_STATUS });
+    assert.ok('selected' in usbJson && Array.isArray(devices));
     assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   });
 });
@@ -1662,5 +1668,21 @@ test('select skips the intermediate preferred device when retargeting', async ()
     await selectDevice(address, { serial: 'B' });
     assert.equal(adb.getSerial(), 'B');
     assert.deepEqual(adb.connections.map((connection) => connection.serial), ['B']);
+  });
+});
+
+test('wireless: switch-to-USB response exposes scan results for the picker', async () => {
+  const connectionService = fakeConnectionService({
+    usbResult: { ...USB_STATUS, selected: 'USB-A', devices: [{ serial: 'USB-A', selectable: true }] },
+  });
+  await withBridge({ connectionService }, async (address) => {
+    const res = await postWirelessUsb(address);
+    assert.equal(res.status, 200);
+    assert.deepEqual(await res.json(), {
+      ok: true,
+      ...USB_STATUS,
+      selected: 'USB-A',
+      devices: [{ serial: 'USB-A', selectable: true }],
+    });
   });
 });

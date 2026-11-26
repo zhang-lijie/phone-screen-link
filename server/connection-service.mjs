@@ -2,6 +2,7 @@ import { performance } from 'node:perf_hooks';
 import { isMissingAdbError } from './adb.mjs';
 import { isWirelessSerial } from './connection-config.mjs';
 import { WIRELESS_AUTO_WARNING_CODES } from '../shared/keys.mjs';
+import { chooseDevice } from '../shared/device-selection.mjs';
 
 const MDNS_POLL_INTERVAL_MS = 500;
 const MDNS_POLL_TIMEOUT_MS = 8_000;
@@ -286,11 +287,48 @@ export function createConnectionService({
     });
   }
 
+  // Leaving wireless mode is a transaction: read the live USB list, pick a
+  // device with the same policy as the picker, then make that serial the
+  // single source of truth for ghost, keys, chat and the page.
+  async function scanUsbDevices() {
+    if (typeof adb.listDevices === 'function') {
+      try {
+        return await adb.listDevices();
+      } catch {
+        return [];
+      }
+    }
+    if (typeof adb.list !== 'function') return [];
+    try {
+      const serials = await adb.list();
+      return serials
+        .filter((serial) => typeof serial === 'string' && !isWirelessSerial(serial))
+        .map((serial) => ({ serial, state: 'device', selectable: true }));
+    } catch {
+      return [];
+    }
+  }
+
   function switchToUsb() {
     return serializeMutation(async () => {
       store.save({ mode: 'usb', method: 'pair', address: '' });
-      adb.setConnection({ mode: 'usb', serial: usbSerial, method: 'pair', usbSerial });
-      return committedStatus('usb', usbSerial, false);
+      const previous = typeof adb.getMode === 'function' && adb.getMode() === 'wifi'
+        ? adb.getSerial?.()
+        : null;
+      if (previous && isWirelessSerial(previous) && typeof adb.disconnect === 'function') {
+        try {
+          await adb.disconnect(previous);
+        } catch (err) {
+          // The endpoint may already be gone; switching must still proceed.
+          warn(`wireless endpoint disconnect failed: ${adbFailureText(err)}`);
+        }
+      }
+      const devices = await scanUsbDevices();
+      const chosen = chooseDevice({ devices, selected: null, preferred: usbSerial });
+      const serial = chosen ?? usbSerial;
+      adb.setConnection({ mode: 'usb', serial, method: 'pair', usbSerial: serial });
+      usbSerial = serial;
+      return { ...(await committedStatus('usb', serial, false)), selected: chosen, devices };
     });
   }
 

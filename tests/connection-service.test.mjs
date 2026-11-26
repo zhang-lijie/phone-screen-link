@@ -183,6 +183,7 @@ test('connection service: a post-commit USB status failure does not turn a compl
 
   assert.deepEqual(await service.switchToUsb(), {
     mode: 'usb', serial: USB_SERIAL, online: false, usbOnline: false, method: 'pair',
+    selected: null, devices: [],
   });
   assert.equal(adb.getMode(), 'usb');
   assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
@@ -309,8 +310,11 @@ test('connection service: switchToUsb restores the supplied USB serial and clear
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), USB_SERIAL);
   assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
-  assert.deepEqual(result, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair' });
-  assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
+  assert.deepEqual(result, {
+    mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair',
+    selected: null, devices: [],
+  });
+  assert.ok(calls.some((args) => args[0] === 'devices' && args[1] === '-l'));
 });
 
 test('connection service: concurrent pair and USB mutations serialize and return their own transaction status', async (t) => {
@@ -347,7 +351,11 @@ test('connection service: concurrent pair and USB mutations serialize and return
   assert.deepEqual(await pairPromise, {
     mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true, method: 'pair',
   });
-  assert.deepEqual(await usbPromise, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair' });
+  assert.deepEqual(await usbPromise, {
+    mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair',
+    selected: USB_SERIAL,
+    devices: [{ serial: USB_SERIAL, state: 'device', model: '', product: '', transport: '', selectable: true }],
+  });
   assert.equal(adb.getMode(), 'usb');
   assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
 });
@@ -1240,6 +1248,7 @@ test('connection service: concurrent legacy and USB mutations serialize and retu
   const usb = await usbPromise;
   assert.deepEqual(usb, {
     mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair',
+    selected: null, devices: [],
   });
   assert.equal(adb.getMode(), 'usb');
   assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
@@ -1449,4 +1458,61 @@ test('connection service: a permanently rejected connect after tcpip surfaces th
   assert.equal(adb.getMode(), 'usb');
   assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
   assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: switching to USB disconnects the wireless endpoint and adopts the scanned phone', async (t) => {
+  const calls = [];
+  const runner = async (args) => {
+    calls.push(args);
+    if (args[0] === 'devices' && args[1] === '-l') {
+      return 'List of devices attached\nUSB-A       device usb:1-1 model:Pixel_7\n';
+    }
+    if (args[0] === '-s' && args[2] === 'get-state') return 'device\n';
+    return '';
+  };
+  const { adb, service } = setup(t, {
+    initial: { mode: 'wifi', serial: WIRELESS_ADDRESS },
+    stored: { mode: 'wifi', address: WIRELESS_ADDRESS },
+    runner,
+  });
+
+  const result = await service.switchToUsb();
+
+  assert.ok(calls.some((args) => args[0] === 'disconnect' && args[1] === WIRELESS_ADDRESS),
+    'the active wireless endpoint is disconnected');
+  assert.equal(adb.getSerial(), 'USB-A');
+  assert.equal(result.selected, 'USB-A');
+  assert.deepEqual(result.devices.map((device) => device.serial), ['USB-A']);
+});
+
+test('connection service: an ambiguous USB scan leaves the selection to the user', async (t) => {
+  const runner = async (args) => {
+    if (args[0] === 'devices' && args[1] === '-l') {
+      return 'List of devices attached\nUSB-A       device usb:1-1\nUSB-B       device usb:1-2\n';
+    }
+    if (args[0] === '-s' && args[2] === 'get-state') return 'device\n';
+    return '';
+  };
+  const { service } = setup(t, { runner });
+
+  const result = await service.switchToUsb();
+
+  assert.equal(result.selected, null);
+  assert.deepEqual(result.devices.map((device) => device.serial), ['USB-A', 'USB-B']);
+});
+
+test('connection service: a lone USB device is selected even when the preferred serial is absent', async (t) => {
+  const runner = async (args) => {
+    if (args[0] === 'devices' && args[1] === '-l') {
+      return 'List of devices attached\nUSB-X       device usb:1-3 model:Tablet\n';
+    }
+    if (args[0] === '-s' && args[2] === 'get-state') return 'device\n';
+    return '';
+  };
+  const { adb, service } = setup(t, { runner });
+
+  const result = await service.switchToUsb();
+
+  assert.equal(result.selected, 'USB-X');
+  assert.equal(adb.getSerial(), 'USB-X');
 });

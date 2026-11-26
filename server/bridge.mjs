@@ -142,6 +142,8 @@ function wirelessStatusPayload(status) {
     serial: status?.serial,
     online: status?.online,
     usbOnline: status?.usbOnline === true,
+    selected: status?.selected,
+    devices: status?.devices,
   };
 }
 

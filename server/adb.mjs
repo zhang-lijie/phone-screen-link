@@ -288,6 +288,10 @@ export function createAdb(runner = defaultRunner, {
       return runner(['connect', address]);
     },
 
+    async disconnect(address) {
+      return runner(['disconnect', address]);
+    },
+
     async tcpip(deviceSerial, port) {
       return runner(['-s', deviceSerial, 'tcpip', String(port)]);
     },

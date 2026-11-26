@@ -853,3 +853,10 @@ test('mdnsServices runs the host command and returns parsed entries without chan
   assert.equal(adb.getMode(), 'wifi');
   assert.equal(adb.getSerial(), 'ACTIVE-WIFI');
 });
+
+test('disconnect asks adb to drop a wireless endpoint', async () => {
+  const calls = [];
+  const adb = createAdb(async (args) => { calls.push(args); return ''; });
+  await adb.disconnect('192.168.1.19:5555');
+  assert.deepEqual(calls, [['disconnect', '192.168.1.19:5555']]);
+});

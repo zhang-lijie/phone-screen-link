@@ -480,6 +480,7 @@ test('main injects a connection service backed by the active adb client and conn
   });
   assert.deepEqual(await service.switchToUsb(), {
     mode: 'usb', serial: DEFAULT_USB_SERIAL, online: true, usbOnline: true, method: 'pair',
+    selected: null, devices: [],
   });
   assert.equal(adbClient.getMode(), 'usb');
   assert.equal(adbClient.getSerial(), DEFAULT_USB_SERIAL);
