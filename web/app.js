@@ -1375,12 +1375,22 @@ async function switchToUsb() {
       setWirelessFeedback('wireless.error.invalidResponse', {}, true);
       return;
     }
-    if (!activateDevice(payload.serial)) {
-      setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+    // The backend now scans USB devices as part of the switch. Only a real
+    // scan result may start a stream; a stale configured serial would leave
+    // the page waiting on a phone that is not connected.
+    if (typeof payload.selected === 'string' && payload.selected) {
+      if (!activateDevice(payload.selected)) {
+        setWirelessFeedback('wireless.error.invalidResponse', {}, true);
+        return;
+      }
+      setWirelessFeedback('wireless.usbConnected');
+      restartStream('status.applying');
       return;
     }
-    setWirelessFeedback('wireless.usbConnected');
-    restartStream('status.applying');
+    const count = Array.isArray(payload.devices) ? payload.devices.length : 0;
+    setWirelessFeedback(count ? 'device.multiple' : 'device.none', { count });
+    await refreshDevices();
+    openDevicePicker();
   } finally {
     setWirelessBusy(false);
   }

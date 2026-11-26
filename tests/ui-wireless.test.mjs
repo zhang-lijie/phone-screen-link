@@ -257,8 +257,8 @@ test('successful pairing updates the active serial and uses the shared stream re
   assert.match(app, /function applySettings\(\)\s*\{[\s\S]*?restartStream\(\);/);
 });
 
-test('switching to USB updates the active serial and automatically restarts the stream', () => {
-  assert.match(app, /async function switchToUsb\(\)\s*\{[\s\S]*?fetch\(WIRELESS_USB_URL,[\s\S]*?applyWirelessStatus\(payload\)[\s\S]*?activateDevice\(payload\.serial\)[\s\S]*?restartStream\('status\.applying'\);/);
+test('switching to USB activates the scanned serial and restarts the stream', () => {
+  assert.match(app, /async function switchToUsb\(\)\s*\{[\s\S]*?fetch\(WIRELESS_USB_URL,[\s\S]*?applyWirelessStatus\(payload\)[\s\S]*?activateDevice\(payload\.selected\)[\s\S]*?restartStream\('status\.applying'\);/);
 });
 
 test('wireless actions expose pending and error states instead of failing silently', () => {
@@ -1304,4 +1304,8 @@ test('a language change mid legacy auto-fetch keeps the loading label', async ()
   await clicking;
   assert.equal(dom.auto.textContent, keys.MESSAGES.zh['wireless.legacyAuto'], 'the idle label follows the active language');
   assert.equal(dom.auto.getAttribute('aria-busy'), 'false');
+});
+
+test('USB switch uses the scan result and defers ambiguous picks to the device picker', () => {
+  assert.match(app, /async function switchToUsb\(\)\s*\{[\s\S]*?applyWirelessStatus\(payload\)[\s\S]*?if \(typeof payload\.selected === 'string' && payload\.selected\)[\s\S]*?activateDevice\(payload\.selected\)[\s\S]*?restartStream\('status\.applying'\)[\s\S]*?await refreshDevices\(\);[\s\S]*?openDevicePicker\(\)/);
 });
