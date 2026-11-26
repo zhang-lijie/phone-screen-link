@@ -4,7 +4,13 @@ import { DEFAULT_USB_SERIAL } from './adb.mjs';
 
 const DEFAULT_HOST = '127.0.0.1';
 const WIRELESS_WARNING_CODES = new Set(Object.values(WIRELESS_AUTO_WARNING_CODES));
-const ALLOWED_ORIGINS = new Set(['http://127.0.0.1:8000', 'http://localhost:8000']);
+const ENGINE_PORT = Number.parseInt(process.env.ENGINE_PORT ?? '', 10) || 8000;
+const ALLOWED_ORIGINS = new Set([
+  'http://127.0.0.1:8000',
+  'http://localhost:8000',
+  `http://127.0.0.1:${ENGINE_PORT}`,
+  `http://localhost:${ENGINE_PORT}`,
+]);
 const MAX_BODY_BYTES = 64 * 1024;
 const TOO_LARGE = Symbol('too-large');
 const INVALID_JSON = Symbol('invalid-json');

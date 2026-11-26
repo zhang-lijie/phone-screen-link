@@ -1,5 +1,6 @@
 import { performance } from 'node:perf_hooks';
 import { isMissingAdbError } from './adb.mjs';
+import { isWirelessSerial } from './connection-config.mjs';
 import { WIRELESS_AUTO_WARNING_CODES } from '../shared/keys.mjs';
 
 const MDNS_POLL_INTERVAL_MS = 500;
@@ -298,7 +299,32 @@ export function createConnectionService({
   // throttles repeated legacy bootstrap failures.
   async function supervise() {
     const mode = typeof adb.getMode === 'function' ? adb.getMode() : 'usb';
-    if (mode !== 'wifi') return adb.ensureUsbOnly();
+    if (mode !== 'wifi') {
+      await adb.ensureUsbOnly();
+      // A phone swap changes its USB serial. Keep the old target only while it
+      // is present; when exactly one physical USB device is online, adopt it
+      // so the bridge, ghost and the page all follow the same phone. Multiple
+      // candidates are deliberately left alone rather than guessing.
+      return serializeMutation(async () => {
+        if (adb.getMode() !== 'usb') return;
+        const active = adb.getSerial();
+        const devices = (await adb.list()).filter((serial) => (
+          typeof serial === 'string'
+          && serial.length > 0
+          && !isWirelessSerial(serial)
+          && !serial.startsWith('emulator-')
+        ));
+        if (devices.includes(active) || devices.length !== 1) return;
+        const candidate = devices[0];
+        usbSerial = candidate;
+        adb.setConnection({
+          mode: 'usb',
+          serial: candidate,
+          method: currentMethod(),
+          usbSerial: candidate,
+        });
+      });
+    }
     const serial = adb.getSerial();
     const method = currentMethod();
     const online = await adb.ensureWirelessConnected(serial, {

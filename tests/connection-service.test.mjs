@@ -1294,6 +1294,41 @@ test('connection service: supervise stays quiet in pair mode and checks USB in U
   assert.deepEqual(options, [{ method: 'pair', port: 5555, usbSerial: USB_SERIAL }]);
 });
 
+test('connection service: supervision adopts exactly one replacement USB device after a phone swap', async (t) => {
+  const { adb, service } = setup(t, {
+    initial: { mode: 'usb', serial: 'USB-ORIGINAL' },
+    runner: async (args) => {
+      if (args[0] === 'devices') return 'List of devices attached\nUSB-NEW\tdevice\n';
+      if (args[0] === '-s' && args[2] === 'get-state') return 'device\n';
+      return '';
+    },
+  });
+
+  await service.supervise();
+
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), 'USB-NEW');
+  assert.deepEqual(await service.status(), {
+    mode: 'usb', serial: 'USB-NEW', online: true, usbOnline: true, method: 'pair',
+  });
+});
+
+test('connection service: supervision does not guess when multiple USB devices are online', async (t) => {
+  const { adb, service } = setup(t, {
+    initial: { mode: 'usb', serial: 'USB-ORIGINAL' },
+    runner: async (args) => {
+      if (args[0] === 'devices') {
+        return 'List of devices attached\nUSB-A\tdevice\nUSB-B\tdevice\n';
+      }
+      return '';
+    },
+  });
+
+  await service.supervise();
+
+  assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+});
+
 test('connection service: supervision without an explicit serial uses the last-known USB serial', async (t) => {
   let bootstrapPhase = false;
   let wirelessChecks = 0;

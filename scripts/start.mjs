@@ -12,7 +12,10 @@ import { createGhostClient } from '../server/ghost-client.mjs';
 import { engineDir } from './setup.mjs';
 
 const BRIDGE_PORT = 8100;
-const ENGINE_URL = 'http://127.0.0.1:8000/';
+// Defaults to upstream's 8000. This deployment keeps Splash on 8000 and uses
+// ENGINE_PORT=8001 via start-8001.sh.
+const ENGINE_PORT = Number.parseInt(process.env.ENGINE_PORT ?? '', 10) || 8000;
+const ENGINE_URL = `http://127.0.0.1:${ENGINE_PORT}/`;
 const USB_RECHECK_MS = 5_000;
 const READY_TIMEOUT_MS = 30_000;
 const READY_POLL_MS = 250;
@@ -246,7 +249,7 @@ export async function main(deps = {}) {
     engine = spawnChild(spawnStep.command, spawnStep.args, {
       cwd: spawnStep.cwd,
       stdio: 'inherit',
-      env: { ...process.env, ...engineEnv() },
+      env: { ...process.env, ...engineEnv(), WS_SCRCPY_WEB_PORT: String(ENGINE_PORT) },
     });
     if (aborted) throw new Error('startup aborted');
 

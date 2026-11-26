@@ -445,13 +445,15 @@ npm run build
 
 - **设备序列号与连接模式**：默认 USB 序列号为 `2FD0221C09004177`。`PHONE_SERIAL=<USB 序列号>` 可覆盖 USB 设备；
   `PHONE_SERIAL=<连接 IP:端口>` 会自动选择无线模式；`PHONE_USB_SERIAL=<USB 序列号>` 可指定应用内「切回 USB」时使用的设备。
-  环境变量优先于 `state/connection.json`，没有覆盖时使用应用内保存的模式与地址。
+  环境变量优先于 `state/connection.json`，没有覆盖时使用应用内保存的模式与地址。USB 模式下，如果当前序列号消失且只有一台物理 USB 手机在线，
+  每 5 秒的维护任务会自动采用新序列号，投屏、控制桥和聊天会一起切换到新手机；同时在线多台设备时不会猜测，仍使用显式配置的序列号。
 - **连接配置**：`state/connection.json` 保存 `{ mode: "usb" | "wifi", method: "pair" | "legacy", address }`（旧配置缺少 `method` 时按 `pair` 处理），以 `0600` 原子写入；无线地址是手机无线调试主页面的
   `IP:端口`，不是配对弹窗的临时端口。文件不含配对码，浏览器表单的存储位置见[浏览器存储与安全](#浏览器存储与安全)。
 
 - **adb 路径**：默认依次使用 `PHONE_ADB`、`engine/dependencies/adb/adb`（引擎自带）、`PATH` 里的 `adb`；前两个由启动脚本和引擎自动维护，一般不用设置。
 - **设备必须支持 ADB**：本项目基于 ADB/scrcpy，只认 ADB 设备。华为 HDC 模式（`lsusb` 显示 `HDC Device`、USB ID `12d1:1101`）或纯血鸿蒙设备无法连接，需在手机开发者选项开启 **USB 调试（ADB）** 并切到传输文件（MTP）模式；纯鸿蒙 NEXT 无 ADB，不适用本方案。
-- **端口**：引擎 `8000`，控制桥 `8100`（`/keyevent`、`/chat`、`/api/wireless*`、`/api/chat-config` 共用）。手机无线 ADB 的配对端口和连接端口由手机动态分配，见上文，不是这两个本机端口。
+- **端口**：引擎默认 `8000`，控制桥 `8100`（`/keyevent`、`/chat`、`/api/wireless*`、`/api/chat-config` 共用）。可用 `ENGINE_PORT=<端口> npm start` 更改引擎端口；
+  启动脚本会同步设置引擎端口、就绪检查地址和控制桥的 Origin 白名单。手机无线 ADB 的配对端口和连接端口由手机动态分配，见上文，不是这两个本机端口。
 - **USB / 无线策略**：USB 模式在启动时及每 5 秒断开遗留 Wi‑Fi ADB `192.168.3.123:5555`；应用内配对成功后切到无线模式，
   本项目的连接维护停止 USB 设备枚举，只对保存的无线地址做状态检查和重连。点「切回 USB」恢复 USB 策略。
 - **聊天配置**：存在 `state/chat.json`（gitignore），由设置面板的「聊天」分组写；想直接改（例如删掉 `apiKey`）就编辑这个文件，字段见[聊天设置](#聊天设置6-项存在后端)。
@@ -494,7 +496,8 @@ npm run build
 | **传统模式「自动获取并连接」不可用** | 该按钮只在后端报告 `usbOnline: true` 时启用；请插回已授权的 USB 手机。手动「连接」不要求 USB，但要求手机已开启 TCP 模式 |
 | **传统模式连接报 `409` / 端口不对** | `409` 表示 USB 离线，`tcpip` 未执行；手机 IP 见「无线调试」主页面，端口默认 `5555`。若改过端口，需确保 `adb tcpip <端口>` 与面板端口一致 |
 | **传统模式连接报 `400`** | 只有布尔 `enableTcpip` 被接受；这是接口契约（面板已发送真正的布尔值），不要手工提交字符串 `"true"` |
-| **切回 USB 后仍离线** | 插回 USB 并授权调试。若默认序列号不正确，先用 `PHONE_USB_SERIAL=<实际 USB 序列号>` 重启服务，再点「切回 USB」；该按钮只切换到启动时配置的 USB 序列号，不会自动发现设备 |
+| **更换 USB 手机后视频流报错** | 当前版本会在 USB 维护任务中重新枚举设备：旧序列号消失且只有一台物理 USB 手机在线时自动切换，页面每 3 秒读取控制桥健康状态并重连。若同时在线多台手机，请用 `PHONE_SERIAL=<实际 USB 序列号>` 明确指定目标 |
+| **切回 USB 后仍离线** | 插回 USB 并授权调试。若默认序列号不正确，先用 `PHONE_USB_SERIAL=<实际 USB 序列号>` 重启服务，再点「切回 USB」；该按钮切换到配置的 USB 序列号，后续维护任务可在仅有一台替代手机在线时自动发现它 |
 | **右下角没有对话图标** | 图标只看 `GET /api/chat-config` 的 `enabled`：设置里勾了「启用聊天」并点过 `保存聊天设置` 才会出现（模型名留空时图标会出现，但发送会报「聊天未启用或模型名为空」）。桥没起来（`curl http://127.0.0.1:8100/health` 不通）时前端拿不到配置，图标也不显示；重启 `npm start` 后刷新页面 |
 | **聊天报「聊天服务不可用」（503 `chat unavailable`）** | ghost 子进程没起来，日志里是 `ghost MCP server failed to start; chat disabled`。依次确认 `which uvx`、`which adb`、`uvx --from ghost-in-the-droid android-agent-mcp` 能否手工启动（首次需要联网下载包），Python 需 3.10+；补齐后重启 `npm start` |
 | **模型只回文字、从不动手机**（没有 `工具 ✓` 标签） | 该端点多半不支持或没开启 function/tool calling（或模型太小/太旧）。换支持 tool calling 的模型，或按所用推理服务打开工具调用能力；system prompt 已要求「只调用给出的工具列表」，正常模型会以 `tool_calls` 应答 |

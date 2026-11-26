@@ -301,6 +301,13 @@ test('screen-state polling discards responses for a device that is no longer act
   assert.match(app, /async function pollScreenState\(\)\s*\{[\s\S]*?const requestedDevice = DEVICE_ID;[\s\S]*?fetch\(`\/api\/devices\/screen-state\?udid=\$\{encodeURIComponent\(requestedDevice\)\}`\)[\s\S]*?if \(requestedDevice !== DEVICE_ID\) return;[\s\S]*?const nextState = await res\.json\(\);[\s\S]*?if \(requestedDevice !== DEVICE_ID\) return;[\s\S]*?screenState = nextState;/);
 });
 
+test('stream errors poll bridge health and restart after a replacement phone is adopted', () => {
+  assert.match(app, /async function refreshBridgeHealth\(\{ restartOnChange = true \} = \{\}\)/);
+  assert.match(app, /activateDevice\(info\.serial\);[\s\S]*?restartStream\('status\.connectPhone'\);/);
+  assert.match(app, /options\.onError = \(err\) => \{[\s\S]*?refreshBridgeHealth\(\);/);
+  assert.match(app, /setInterval\(\(\) => \{\s*refreshBridgeHealth\(\);\s*\}, SCREEN_STATE_POLL_MS\);/);
+});
+
 test('wireless modal traps Tab focus and restores the opening control on close', () => {
   assert.match(html, /class="wireless-panel"[^>]*tabindex="-1"/);
   assert.match(app, /function trapWirelessFocus\(event\)\s*\{[\s\S]*?event\.key !== 'Tab'[\s\S]*?wirelessPanel\.contains\(document\.activeElement\)[\s\S]*?first\.focus\(\)[\s\S]*?last\.focus\(\)/);

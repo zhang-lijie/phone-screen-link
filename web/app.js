@@ -909,6 +909,32 @@ function activateDevice(serial) {
   return true;
 }
 
+let healthPollInFlight = false;
+
+// The bridge owns the active serial. Polling it lets a stream error recover
+// after the backend's USB supervision adopts a replacement phone; without
+// this, DEVICE_ID stayed pinned to the unplugged phone forever.
+async function refreshBridgeHealth({ restartOnChange = true } = {}) {
+  if (healthPollInFlight) return;
+  healthPollInFlight = true;
+  try {
+    const res = await fetch(`${BRIDGE_BASE}/health`);
+    if (!res.ok) return;
+    const info = await res.json();
+    if (typeof info.serial !== 'string' || !info.serial || info.serial === DEVICE_ID) return;
+    activateDevice(info.serial);
+    const streamMatches = window.phoneLinkHandle?.deviceId === info.serial;
+    if (restartOnChange && info.online === true && !streamMatches) {
+      setStatus('status.connectPhone');
+      restartStream('status.connectPhone');
+    }
+  } catch {
+    // Bridge unavailable: keep the current stream and its last status.
+  } finally {
+    healthPollInFlight = false;
+  }
+}
+
 async function pairWireless() {
   if (wirelessBusy) return;
   const values = readWirelessForm();
@@ -1844,10 +1870,12 @@ function startStream() {
   options.onDisconnect = (reason) => {
     if (gen !== generation) return;
     setStatus('status.disconnected', { reason: reason ? ` — ${reason}` : '' });
+    refreshBridgeHealth();
   };
   options.onError = (err) => {
     if (gen !== generation) return;
     setStatus('status.error', { error: messageOf(err) });
+    refreshBridgeHealth();
   };
   options.onResize = (info) => {
     if (gen !== generation) return;
@@ -1893,20 +1921,9 @@ async function boot() {
     setStatus('status.engineDown');
     return;
   }
-  // Ask the local bridge which device serial is configured, so changing
-  // phones is a backend env-var change only.
-  try {
-    const res = await fetch(`${BRIDGE_BASE}/health`);
-    if (res.ok) {
-      const info = await res.json();
-      if (typeof info.serial === 'string' && info.serial) {
-        DEVICE_ID = info.serial;
-        window.__PHONE_SERIAL = info.serial;
-      }
-    }
-  } catch {
-    // Bridge not up yet: keep the fallback serial.
-  }
+  // Ask the local bridge which device serial is configured. Keep polling
+  // afterwards so a replacement USB phone can be adopted after a stream error.
+  await refreshBridgeHealth({ restartOnChange: false });
   setStatus('status.connectPhone');
   try {
     startStream();
@@ -1914,6 +1931,10 @@ async function boot() {
     setStatus('status.engineDownError', { error: messageOf(err) });
   }
 }
+
+setInterval(() => {
+  refreshBridgeHealth();
+}, SCREEN_STATE_POLL_MS);
 
 // If the tab closes while chat is open, restore the phone's screen timeout.
 window.addEventListener('pagehide', () => {
