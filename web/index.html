@@ -247,6 +247,8 @@
       </header>
 
       <p id="wireless-status" class="wireless-status" role="status" aria-live="polite" data-i18n="wireless.loading">Loading wireless status…</p>
+      <p id="wireless-method-badge" class="wireless-method-badge" data-i18n="wireless.activeMethod.legacy" hidden>Active method: legacy (unencrypted, no authentication)</p>
+      <p id="wireless-legacy-warning" class="wireless-warning wireless-legacy-warning" data-i18n="wireless.legacyWarning" hidden>Warning: legacy mode is unencrypted and has no authentication. Use it only on a trusted LAN.</p>
       <p id="wireless-feedback" class="wireless-feedback" role="status" aria-live="polite"></p>
       <p id="wireless-storage" class="wireless-storage" role="status" aria-live="polite" hidden></p>
 
@@ -312,7 +314,6 @@
           </fieldset>
           <button type="button" id="wireless-legacy-auto" class="wireless-auto wireless-legacy-auto" data-i18n="wireless.legacyAuto" aria-busy="false" disabled>Auto-fetch &amp; connect</button>
           <button type="button" id="wireless-legacy-connect" class="wireless-primary" data-i18n="wireless.legacyConnect">Connect</button>
-          <p id="wireless-legacy-warning" class="wireless-warning wireless-legacy-warning" data-i18n="wireless.legacyWarning" hidden>Warning: legacy mode is unencrypted and has no authentication. Use it only on a trusted LAN.</p>
         </div>
       </form>
 

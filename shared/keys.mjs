@@ -179,6 +179,7 @@ export const MESSAGES = {
     'wireless.error.legacyUsbOffline': 'The USB device is offline — connect and authorize it before auto-connecting',
     'wireless.error.legacyAutoNoIp': 'Could not read the phone Wi-Fi IP address over USB — enter the IP manually and try again',
     'wireless.legacyWarning': 'Warning: legacy mode is unencrypted and has no authentication. Use it only on a trusted LAN.',
+    'wireless.activeMethod.legacy': 'Active method: legacy (unencrypted, no authentication)',
     // Chat feature: floating button, panel and the settings group. The
     // config itself lives on the backend; these are display strings only.
     'chat.button': 'Chat assistant',
@@ -401,6 +402,7 @@ export const MESSAGES = {
     'wireless.error.legacyUsbOffline': 'USB 设备已离线 — 请先连接并授权 USB 调试后再自动获取并连接',
     'wireless.error.legacyAutoNoIp': '无法通过 USB 读取手机 Wi-Fi IP 地址 — 请手动输入 IP 后重试',
     'wireless.legacyWarning': '警告：传统模式未加密、无认证，仅可在可信局域网中使用。',
+    'wireless.activeMethod.legacy': '当前方式：传统（未加密、无认证）',
     'chat.button': '聊天助手',
     'chat.title': '聊天助手',
     'chat.close': '关闭聊天',
@@ -660,9 +662,17 @@ export function saveWirelessPairing(storageOrProvider, values) {
     }
     // Preserve the selected method and legacy fields: saving the pair form
     // happens on every keystroke, so it must not silently reset the mode.
+    // Normalize only the fields that were actually stored, so a malformed
+    // entry is repaired instead of written back verbatim, while a form-only
+    // entry keeps its original shape.
+    const storedMode = readStoredWirelessMode(storage);
+    const normalizedMode = normalizeWirelessMode(storedMode);
+    const modePatch = Object.fromEntries(WIRELESS_MODE_FIELDS
+      .filter((field) => Object.hasOwn(storedMode, field))
+      .map((field) => [field, normalizedMode[field]]));
     storage.setItem(WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({
       ...normalized,
-      ...readStoredWirelessMode(storage),
+      ...modePatch,
     }));
     return { saved: true, values: normalized };
   } catch {

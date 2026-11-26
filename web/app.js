@@ -356,6 +356,11 @@ function applyLanguage() {
   renderChatSaveStatus();
   renderWirelessStatus();
   renderWirelessAutoButton();
+  // Re-derive the dynamic wireless strings after the data-i18n pass above:
+  // the legacy auto label comes from wirelessLegacyBusy (a language switch
+  // mid-request must not reset it), and the badge follows the active method.
+  renderWirelessLegacyButtons();
+  renderWirelessLegacyWarning();
   renderWirelessFeedback();
   renderWirelessStorage();
 }
@@ -555,6 +560,7 @@ const wirelessFields = {
   connectPort: document.getElementById('wireless-connect-port'),
 };
 const wirelessStatusEl = document.getElementById('wireless-status');
+const wirelessMethodBadge = document.getElementById('wireless-method-badge');
 const wirelessFeedbackEl = document.getElementById('wireless-feedback');
 const wirelessStorageEl = document.getElementById('wireless-storage');
 const wirelessWarning = document.getElementById('wireless-warning');
@@ -575,7 +581,13 @@ let wirelessBusy = false;
 let wirelessAutoBusy = false;
 let wirelessLegacyBusy = '';
 let wirelessRefreshTimer = null;
-let wirelessState = { mode: 'unknown', serial: '—', online: false, usbOnline: false };
+let wirelessState = { mode: 'unknown', serial: '—', online: false, usbOnline: false, method: 'pair' };
+// The selector is a user preference from localStorage; the backend method is
+// the truth about the active connection. Adopt a legacy backend method once
+// per modal opening (that is the safety-critical direction) but never discard
+// a user's own mode choice just because the backend is still on pair.
+let wirelessLegacyReconciled = false;
+let wirelessStorageSaved = false;
 let wirelessFeedbackKey = '';
 let wirelessFeedbackVars = {};
 let wirelessFeedbackIsError = false;
@@ -599,7 +611,8 @@ function readWirelessForm() {
 
 function saveWirelessFormFromDom() {
   const result = saveWirelessPairing(() => localStorage, readWirelessForm());
-  wirelessWarning.hidden = !result.saved;
+  wirelessStorageSaved = result.saved;
+  renderWirelessPlaintextWarning();
   if (!result.saved) {
     setWirelessStorageFeedback('wireless.error.save');
   } else {
@@ -612,11 +625,30 @@ function currentWirelessMethod() {
   return wirelessMode.value === 'legacy' ? 'legacy' : 'pair';
 }
 
+// The unencrypted/no-auth warning and its status badge follow the ACTIVE
+// backend method, not just the selector. A user can browse the pair form while
+// a legacy connection is still live, so tying these cues to the selector alone
+// would hide a real security warning.
+function renderWirelessLegacyWarning() {
+  const activeLegacy = wirelessState.method === 'legacy' || currentWirelessMethod() === 'legacy';
+  wirelessLegacyWarning.hidden = !activeLegacy;
+  wirelessMethodBadge.hidden = wirelessState.method !== 'legacy';
+  wirelessMethodBadge.textContent = t('wireless.activeMethod.legacy');
+}
+
+// The pairing code is only stored for pair mode. Keep the plaintext-storage
+// warning out of legacy mode so it does not describe a credential that is not
+// in use, but restore it as soon as pair mode becomes active again.
+function renderWirelessPlaintextWarning() {
+  wirelessWarning.hidden = !wirelessStorageSaved || wirelessState.method === 'legacy';
+}
+
 function renderWirelessMode() {
   const legacy = currentWirelessMethod() === 'legacy';
   wirelessPairSection.hidden = legacy;
   wirelessLegacySection.hidden = !legacy;
-  wirelessLegacyWarning.hidden = !legacy;
+  renderWirelessLegacyWarning();
+  renderWirelessPlaintextWarning();
   // `hidden` alone does not remove a control from constraint validation: a
   // fresh pair-mode submit would be blocked by the hidden legacy `required`
   // inputs. Disable the inactive form's inputs as well.
@@ -680,6 +712,7 @@ function renderWirelessStatus() {
   });
   wirelessStatusEl.dataset.mode = mode;
   wirelessStatusEl.dataset.online = String(wirelessState.online);
+  wirelessStatusEl.dataset.method = wirelessState.method;
 }
 
 function renderWirelessAutoButton() {
@@ -697,14 +730,35 @@ function applyWirelessStatus(payload) {
       || typeof payload.online !== 'boolean') {
     return false;
   }
-  wirelessState = { mode: payload.mode, serial: payload.serial, online: payload.online, usbOnline: payload.usbOnline === true };
+  // A status response without a method (older bridge) must not invent one or
+  // clobber a legacy state we already learned from an earlier response.
+  const validMethod = payload.method === 'legacy' || payload.method === 'pair';
+  const method = validMethod ? payload.method : wirelessState.method;
+  wirelessState = {
+    mode: payload.mode,
+    serial: payload.serial,
+    online: payload.online,
+    usbOnline: payload.usbOnline === true,
+    method,
+  };
+  if (method === 'legacy' && !wirelessLegacyReconciled) {
+    wirelessLegacyReconciled = true;
+    if (wirelessMode.value !== 'legacy') {
+      wirelessMode.value = 'legacy';
+      saveWirelessModeFromDom();
+    }
+    renderWirelessMode();
+  }
   renderWirelessStatus();
   renderWirelessAutoButton();
+  renderWirelessLegacyWarning();
+  renderWirelessPlaintextWarning();
   return true;
 }
 
 function setWirelessBusy(busy) {
   wirelessBusy = busy;
+  wirelessMode.disabled = busy;
   wirelessSubmit.disabled = busy;
   wirelessUsb.disabled = busy;
   wirelessClear.disabled = busy;
@@ -831,6 +885,7 @@ function openWireless() {
   saveWirelessFormFromDom();
   setWirelessFeedback('');
   wirelessOverlay.hidden = false;
+  wirelessLegacyReconciled = false;
   renderWirelessMode();
   if (currentWirelessMethod() === 'legacy') wirelessLegacyHost.focus();
   else wirelessFields.pairHost.focus();
@@ -1089,7 +1144,8 @@ wirelessClear.addEventListener('click', () => {
   wirelessLegacyHost.value = DEFAULT_WIRELESS_MODE.legacyHost;
   wirelessLegacyPort.value = DEFAULT_WIRELESS_MODE.legacyPort;
   renderWirelessMode();
-  wirelessWarning.hidden = true;
+  wirelessStorageSaved = false;
+  renderWirelessPlaintextWarning();
   setWirelessStorageFeedback('');
   setWirelessFeedback(result.feedbackKey, {}, result.isError);
   wirelessFields.pairHost.focus();

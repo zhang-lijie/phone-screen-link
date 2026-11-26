@@ -389,6 +389,22 @@ body.nav-text-only #stream .control-button[data-label]::after {
   color: var(--ui-text-muted);
 }
 
+.wireless-method-badge {
+  display: inline-block;
+  margin: 0 0 8px;
+  padding: 3px 9px;
+  border: 1px solid #8a5a32;
+  border-radius: 999px;
+  background: #2b1d14;
+  color: #f0b27a;
+  font-size: calc(11px * var(--ui-font-scale));
+  line-height: 1.4;
+}
+
+.wireless-method-badge[hidden] {
+  display: none;
+}
+
 .wireless-feedback:empty {
   display: none;
 }

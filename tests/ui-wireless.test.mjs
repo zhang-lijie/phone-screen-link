@@ -39,6 +39,7 @@ test('wireless modal contains every pairing, connect, action and warning control
   for (const id of [
     'wireless-close',
     'wireless-status',
+    'wireless-method-badge',
     'wireless-feedback',
     'wireless-pair-host',
     'wireless-pair-port',
@@ -272,7 +273,8 @@ test('wireless actions expose pending and error states instead of failing silent
 test('wireless storage failure is explicit, non-sensitive, and hides the plaintext persistence warning', () => {
   assert.match(html, /id="wireless-storage"[^>]*role="status"[^>]*aria-live="polite"/);
   assert.match(html, /id="wireless-warning"[^>]*hidden/);
-  assert.match(app, /function saveWirelessFormFromDom\(\)\s*\{[\s\S]*?const result = saveWirelessPairing\(\(\) => localStorage, readWirelessForm\(\)\);[\s\S]*?wirelessWarning\.hidden = !result\.saved;/);
+  assert.match(app, /function saveWirelessFormFromDom\(\)\s*\{[\s\S]*?const result = saveWirelessPairing\(\(\) => localStorage, readWirelessForm\(\)\);[\s\S]*?wirelessStorageSaved = result\.saved;[\s\S]*?renderWirelessPlaintextWarning\(\);/);
+  assert.match(app, /function renderWirelessPlaintextWarning\(\)\s*\{[\s\S]*?wirelessWarning\.hidden = !wirelessStorageSaved \|\| wirelessState\.method === 'legacy';/);
   assert.match(app, /if \(!result\.saved\)\s*\{\s*setWirelessStorageFeedback\('wireless\.error\.save'\);/);
   assert.match(keys.MESSAGES.en['wireless.error.save'], /pairing still works/i);
   assert.match(keys.MESSAGES.en['wireless.error.save'], /lost on reload/i);
@@ -1163,4 +1165,136 @@ test('legacy auto copy and README describe the USB IP fetch before tcpip', () =>
   assert.match(keys.MESSAGES.en['wireless.legacyAuto.loading'], /Fetching IP/i);
   assert.match(keys.MESSAGES.zh['wireless.legacyAuto.loading'], /获取 IP/);
   assert.match(readme, /自动获取并连接[\s\S]*读取手机 Wi‑Fi IP[\s\S]*tcpip/);
+});
+
+// --- Final fix wave: backend method drives the safety warning ---------------
+
+test('a legacy backend method shows the unencrypted warning and badge even when the selector says pair', async () => {
+  const storage = legacyHarnessStorage({ pairCode: '654321' }, { method: 'pair' });
+  const harnessApp = await loadWirelessApp({ storage });
+  const dom = legacyDom(harnessApp);
+  const badge = harnessApp.document.getElementById('wireless-method-badge');
+  const status = harnessApp.document.getElementById('wireless-status');
+  const plaintext = harnessApp.document.getElementById('wireless-warning');
+
+  assert.ok(badge, 'an active-method badge is present');
+  assert.equal(dom.mode.value, 'pair');
+  assert.equal(dom.legacyWarning.hidden, true, 'pair mode with a pair backend hides the legacy warning');
+
+  // The first status response reconciles the selector with the backend method.
+  harnessApp.api.applyWirelessStatus(LEGACY_ONLINE_STATUS);
+  assert.equal(dom.mode.value, 'legacy', 'the first status response adopts the backend method');
+  assert.equal(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)).method, 'legacy');
+  assert.equal(dom.legacyWarning.hidden, false, 'a legacy backend renders the unencrypted warning');
+  assert.equal(badge.hidden, false);
+  assert.equal(badge.textContent, keys.MESSAGES.en['wireless.activeMethod.legacy']);
+  assert.equal(status.dataset.method, 'legacy');
+  assert.equal(plaintext.hidden, true, 'the plaintext pairing-code warning is hidden in legacy mode');
+
+  // The warning and badge follow the backend, not the selector: a user can
+  // still browse the pair form while an unencrypted connection is active.
+  dom.mode.value = 'pair';
+  await dom.mode.dispatch('change');
+  assert.equal(dom.mode.value, 'pair');
+  assert.equal(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)).method, 'pair');
+  assert.equal(dom.pairSection.hidden, false);
+  assert.equal(dom.legacySection.hidden, true);
+  assert.equal(dom.legacyWarning.hidden, false, 'a legacy backend keeps the warning visible in pair mode');
+  assert.equal(badge.hidden, false);
+  assert.equal(plaintext.hidden, true, 'a legacy backend hides the plaintext warning even in pair mode');
+
+  // Returning to a pair backend removes the legacy-specific safety cues.
+  harnessApp.api.applyWirelessStatus({
+    mode: 'wifi', serial: 'phone.local:39541', online: true, usbOnline: true, method: 'pair',
+  });
+  assert.equal(dom.legacyWarning.hidden, true);
+  assert.equal(badge.hidden, true);
+  assert.equal(status.dataset.method, 'pair');
+});
+
+test('a pair backend status leaves the saved legacy selection intact', async () => {
+  const storage = legacyHarnessStorage({}, { method: 'legacy', legacyHost: '192.168.3.50' });
+  const app = await loadWirelessApp({ storage });
+  const dom = legacyDom(app);
+  const badge = app.document.getElementById('wireless-method-badge');
+  const plaintext = app.document.getElementById('wireless-warning');
+  app.api.openWireless();
+
+  app.api.applyWirelessStatus({
+    mode: 'usb', serial: 'USB123456', online: true, usbOnline: true, method: 'pair',
+  });
+
+  assert.equal(dom.mode.value, 'legacy', 'a pair backend must not discard the user-selected mode');
+  assert.equal(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)).method, 'legacy');
+  assert.equal(dom.legacyWarning.hidden, false, 'the selected legacy mode still previews the warning');
+  assert.equal(badge.hidden, true, 'the badge only marks an actually active legacy connection');
+  assert.equal(plaintext.hidden, false, 'the plaintext warning follows the active backend method, not the selector');
+});
+
+test('the connection mode selector is disabled during a wireless action and re-enabled in every outcome', async () => {
+  const pending = deferred();
+  const app = await loadWirelessApp({
+    storage: legacyHarnessStorage({}, {
+      method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+    }),
+    legacyResponse: () => pending.promise,
+  });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+  assert.equal(dom.mode.disabled, false);
+
+  const clicking = dom.connect.click();
+  await app.ready();
+  assert.equal(dom.mode.disabled, true, 'a busy modal must not allow a mode switch');
+  pending.resolve(response(200, LEGACY_ONLINE_STATUS));
+  await clicking;
+  assert.equal(dom.mode.disabled, false, 'a completed action re-enables the selector');
+
+  const failing = await loadWirelessApp({
+    storage: legacyHarnessStorage({}, {
+      method: 'legacy', legacyHost: '192.168.3.50', legacyPort: '5555',
+    }),
+    legacyResponse: response(502, { error: 'adb connect failed' }),
+  });
+  const failingDom = legacyDom(failing);
+  await failingDom.connect.click();
+  assert.equal(failingDom.mode.disabled, false, 'a failed action also re-enables the selector');
+});
+
+test('saving the pairing form normalizes a malformed stored mode instead of writing it back verbatim', () => {
+  const storage = memoryStorage();
+  storage.setItem(keys.WIRELESS_PAIRING_STORAGE_KEY, JSON.stringify({
+    method: 'bogus', legacyHost: 42, legacyPort: '70000',
+  }));
+  const saved = keys.saveWirelessPairing(storage, { pairCode: '123456' });
+  assert.equal(saved.saved, true);
+  assert.deepEqual(JSON.parse(storage.data.get(keys.WIRELESS_PAIRING_STORAGE_KEY)), {
+    pairHost: '', pairPort: '', pairCode: '123456', connectHost: '', connectPort: '',
+    method: 'pair', legacyHost: '', legacyPort: '5555',
+  }, 'a pairing-form save must not write a malformed stored mode back verbatim');
+  assert.equal(keys.loadWirelessPairing(storage).pairCode, '123456');
+});
+
+test('a language change mid legacy auto-fetch keeps the loading label', async () => {
+  const pending = deferred();
+  const app = await loadWirelessApp({
+    storage: legacyHarnessStorage({}, { method: 'legacy', legacyHost: '' }, 'en'),
+    autoResponse: response(200, LEGACY_AUTO_RESULT),
+    legacyResponse: () => pending.promise,
+  });
+  const dom = legacyDom(app);
+  await app.api.refreshWirelessStatus();
+
+  const clicking = dom.auto.click();
+  await app.ready();
+  assert.equal(dom.auto.textContent, keys.MESSAGES.en['wireless.legacyAuto.loading']);
+
+  app.api.setLanguage('zh');
+  assert.equal(dom.auto.textContent, keys.MESSAGES.zh['wireless.legacyAuto.loading'], 'the loading label follows the active language');
+  assert.equal(dom.auto.getAttribute('aria-busy'), 'true');
+
+  pending.resolve(response(200, LEGACY_ONLINE_STATUS));
+  await clicking;
+  assert.equal(dom.auto.textContent, keys.MESSAGES.zh['wireless.legacyAuto'], 'the idle label follows the active language');
+  assert.equal(dom.auto.getAttribute('aria-busy'), 'false');
 });

@@ -300,6 +300,10 @@ export async function loadWirelessApp({
     buttons: { auto: wirelessAuto, submit: wirelessSubmit, usb: wirelessUsb, clear: wirelessClear },
     feedback: wirelessFeedbackEl,
     warning: wirelessWarning,
+    legacyWarning: wirelessLegacyWarning,
+    status: wirelessStatusEl,
+    mode: wirelessMode,
+    setLanguage: (lang) => { settings.language = lang; applyLanguage(); },
     getDeviceId: () => DEVICE_ID,
     getRestartGeneration: () => generation,
   };`;

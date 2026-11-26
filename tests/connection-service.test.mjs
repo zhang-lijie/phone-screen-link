@@ -968,6 +968,22 @@ test('connection service: connectLegacy confirms the target before persisting an
   });
 });
 
+test('connection service: a persistence failure before legacy activation leaves runtime and disk unchanged', async (t) => {
+  const { adb, store, service, file } = setup(t, {
+    runner: async () => 'device\n',
+  });
+  store.save = () => { throw new Error('connection config is read-only'); };
+  const before = readFileSync(file);
+
+  await assert.rejects(service.connectLegacy(LEGACY_INPUT), /read-only/);
+
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+  assert.equal(adb.getMethod(), 'pair');
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+  assert.deepEqual(readFileSync(file), before);
+});
+
 test('connection service: connectLegacy with bootstrap probes USB, runs tcpip, then connects', async (t) => {
   const calls = [];
   const { adb, store, service } = setup(t, {
