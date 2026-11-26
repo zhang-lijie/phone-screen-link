@@ -113,6 +113,9 @@ let lang = effectiveLanguage(settings, navigator.language);
 let screenState = {};
 let deviceList = [];
 let switching = false;
+// True while the bridge reports no selectable device. refreshBridgeHealth
+// must not restart a stream for the fallback serial in /health in that case.
+let deviceSelectionRequired = false;
 let restoreAttempted = null;
 let reconnectTimer;
 let startTimer;
@@ -595,6 +598,7 @@ async function refreshDevices() {
   }
   deviceList = Array.isArray(payload.devices) ? payload.devices : [];
   const selected = typeof payload.selected === 'string' && payload.selected ? payload.selected : null;
+  deviceSelectionRequired = !selected;
 
   // Restore the browser's last choice once that phone actually appears.
   // An empty first poll must not consume the attempt: adb may still be
@@ -1167,6 +1171,7 @@ async function refreshBridgeHealth({ restartOnChange = true } = {}) {
     const res = await fetch(`${BRIDGE_BASE}/health`);
     if (!res.ok) return;
     const info = await res.json();
+    if (deviceSelectionRequired && wirelessState.mode === 'usb') return;
     if (typeof info.serial !== 'string' || !info.serial || info.serial === DEVICE_ID) return;
     activateDevice(info.serial);
     const streamMatches = window.phoneLinkHandle?.deviceId === info.serial;

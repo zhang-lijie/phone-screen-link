@@ -1309,3 +1309,9 @@ test('a language change mid legacy auto-fetch keeps the loading label', async ()
 test('USB switch uses the scan result and defers ambiguous picks to the device picker', () => {
   assert.match(app, /async function switchToUsb\(\)\s*\{[\s\S]*?applyWirelessStatus\(payload\)[\s\S]*?if \(typeof payload\.selected === 'string' && payload\.selected\)[\s\S]*?activateDevice\(payload\.selected\)[\s\S]*?restartStream\('status\.applying'\)[\s\S]*?await refreshDevices\(\);[\s\S]*?openDevicePicker\(\)/);
 });
+
+test('bridge health polling never restarts a stale USB stream while selection is required', () => {
+  assert.match(app, /let deviceSelectionRequired = false;/);
+  assert.match(app, /async function refreshDevices\(\)[\s\S]*?deviceSelectionRequired = !selected;/);
+  assert.match(app, /async function refreshBridgeHealth\(\{ restartOnChange = true \} = \{\}\)[\s\S]*?if \(deviceSelectionRequired && wirelessState\.mode === 'usb'\) return;/);
+});
