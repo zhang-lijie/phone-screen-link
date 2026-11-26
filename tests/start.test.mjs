@@ -466,18 +466,20 @@ test('main injects a connection service backed by the active adb client and conn
   const service = calls.bridgeOptions.connectionService;
   assert.equal(typeof service.status, 'function');
   assert.equal(typeof service.pairAndConnect, 'function');
+  assert.equal(typeof service.connectLegacy, 'function');
   assert.equal(typeof service.switchToUsb, 'function');
   assert.equal(typeof service.discoverWirelessConfig, 'function');
+  assert.equal(typeof service.supervise, 'function');
   adbClient.setConnection({ mode: 'wifi', serial: '10.0.0.5:5555' });
   assert.deepEqual(await service.status(), {
-    mode: 'wifi', serial: '10.0.0.5:5555', online: true, usbOnline: true,
+    mode: 'wifi', serial: '10.0.0.5:5555', online: true, usbOnline: true, method: 'pair',
   });
   assert.deepEqual(await service.switchToUsb(), {
-    mode: 'usb', serial: DEFAULT_USB_SERIAL, online: true, usbOnline: true,
+    mode: 'usb', serial: DEFAULT_USB_SERIAL, online: true, usbOnline: true, method: 'pair',
   });
   assert.equal(adbClient.getMode(), 'usb');
   assert.equal(adbClient.getSerial(), DEFAULT_USB_SERIAL);
-  assert.deepEqual(connectionStore.load(), { mode: 'usb', address: '' });
+  assert.deepEqual(connectionStore.load(), { mode: 'usb', address: '', method: 'pair' });
 
   await handlers.get('SIGINT')();
 });

@@ -122,6 +122,10 @@ export function createAdb(runner = defaultRunner, {
   let activeSerial = serial;
   let activeMode = mode;
   let activeMethod = method === 'legacy' ? 'legacy' : 'pair';
+  // Supervision runs on a timer outside the connection service, so the last
+  // USB serial selected by a mutation must be remembered here. Otherwise a
+  // legacy bootstrap would always fall back to the module-level default.
+  let activeUsbSerial = DEFAULT_USB_SERIAL;
   let legacyBootstrapKey = null;
 
   async function list() {
@@ -180,10 +184,16 @@ export function createAdb(runner = defaultRunner, {
       return activeMethod;
     },
 
-    setConnection({ mode: nextMode, serial: nextSerial, method: nextMethod }) {
+    setConnection({ mode: nextMode, serial: nextSerial, method: nextMethod, usbSerial: nextUsbSerial }) {
       activeMode = nextMode;
       activeSerial = nextSerial;
       activeMethod = nextMethod === 'legacy' ? 'legacy' : 'pair';
+      if (typeof nextUsbSerial === 'string' && nextUsbSerial.trim()) {
+        activeUsbSerial = nextUsbSerial.trim();
+      } else if (nextMode === 'usb' && typeof nextSerial === 'string'
+        && !isWirelessSerial(nextSerial)) {
+        activeUsbSerial = nextSerial;
+      }
       legacyBootstrapKey = null;
     },
 
@@ -207,7 +217,7 @@ export function createAdb(runner = defaultRunner, {
     async ensureWirelessConnected(address, {
       method = activeMethod,
       port,
-      usbSerial = DEFAULT_USB_SERIAL,
+      usbSerial = activeUsbSerial,
     } = {}) {
       const tcpipPort = parsePort(port ?? parseEndpointPort(address));
       const bootstrapKey = method === 'legacy'

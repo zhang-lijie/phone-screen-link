@@ -322,13 +322,11 @@ export async function main(deps = {}) {
     if (ready === ABORTED || aborted) throw new Error('startup aborted');
 
     usbInterval = setTimer(() => {
-      // The mode can change live through the connection service, so branch on
-      // every tick rather than capturing the startup mode in the timer.
-      const mode = adbClient.getMode();
-      const check = mode === 'wifi'
-        ? adbClient.ensureWirelessConnected(adbClient.getSerial())
-        : adbClient.ensureUsbOnly();
-      check.catch((err) => {
+      // The service owns the active method and the configured USB serial; the
+      // timer only supplies the tick. It also throttles legacy bootstrap
+      // warnings so a persistently offline endpoint stays quiet.
+      const mode = typeof adbClient.getMode === 'function' ? adbClient.getMode() : 'usb';
+      connectionService.supervise().catch((err) => {
         // The engine may still be installing adb in the background; that is
         // not a connection failure and must not spam the log every 5 seconds.
         if (isMissingAdbError(err)) return;

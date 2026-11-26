@@ -4,6 +4,7 @@ import { WIRELESS_AUTO_WARNING_CODES } from '../shared/keys.mjs';
 
 const MDNS_POLL_INTERVAL_MS = 500;
 const MDNS_POLL_TIMEOUT_MS = 8_000;
+const LEGACY_WARNING_THROTTLE_MS = 60_000;
 const PAIRING_SERVICE = '_adb-tls-pairing._tcp';
 const CONNECT_SERVICE = '_adb-tls-connect._tcp';
 
@@ -33,6 +34,11 @@ function isExplicitUsbOfflineError(err) {
 
 function matchingPort(services, service, host) {
   return services.find((entry) => entry.service === service && entry.host === host)?.port ?? null;
+}
+
+function endpointPort(address) {
+  const match = /:(\d+)$/.exec(String(address ?? '').trim());
+  return match ? Number(match[1]) : null;
 }
 
 function normalizeHost(value, field) {
@@ -71,8 +77,17 @@ function redactedError(err, pairingCode) {
   return new Error(redacted || 'wireless connection failed');
 }
 
-export function createConnectionService({ adb, store, usbSerial, sleep = defaultSleep, deadlineWait = defaultSleep, now = () => performance.now() }) {
+export function createConnectionService({
+  adb,
+  store,
+  usbSerial,
+  sleep = defaultSleep,
+  deadlineWait = defaultSleep,
+  now = () => performance.now(),
+  warn = (message) => console.warn(message),
+}) {
   let mutationTail = Promise.resolve();
+  let lastLegacyWarning = null;
 
   function serializeMutation(work) {
     const result = mutationTail.then(work);
@@ -88,6 +103,35 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
     }
   }
 
+  function currentMethod() {
+    return typeof adb.getMethod === 'function' ? adb.getMethod() : 'pair';
+  }
+
+  // A legacy bootstrap can fail on every supervision tick while the phone is
+  // asleep or unplugged. Warn once per outage window instead of flooding logs.
+  function warnLegacyBootstrapFailure(address, cause) {
+    const key = String(address);
+    const at = now();
+    if (lastLegacyWarning && lastLegacyWarning.key === key
+      && at - lastLegacyWarning.at < LEGACY_WARNING_THROTTLE_MS) return;
+    lastLegacyWarning = { key, at };
+    const detail = cause ? `: ${adbFailureText(cause)}` : '';
+    warn(`legacy wireless bootstrap failed for ${key}${detail}`);
+  }
+
+  // Only explicit device absence is a 409. ADB/server failures are host-side
+  // problems and must stay distinguishable as 502 at the bridge.
+  async function requireUsbOnline() {
+    let state;
+    try {
+      state = String(await adb.getState(usbSerial)).trim();
+    } catch (err) {
+      if (isMissingAdbError(err) || !isExplicitUsbOfflineError(err)) throw err;
+      throw usbOfflineError();
+    }
+    if (state !== 'device') throw usbOfflineError();
+  }
+
   async function status() {
     const mode = adb.getMode();
     const serial = adb.getSerial();
@@ -97,7 +141,7 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
     const usbOnline = mode === 'usb' && serial === usbSerial
       ? online
       : await targetedDeviceOnline(usbSerial);
-    return { mode, serial, online, usbOnline };
+    return { mode, serial, online, usbOnline, method: currentMethod() };
   }
 
   // Activation and persistence have committed. A status probe is diagnostic:
@@ -108,7 +152,7 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
     try {
       return await status();
     } catch {
-      return { mode, serial, online: knownOnline, usbOnline: false };
+      return { mode, serial, online: knownOnline, usbOnline: false, method: currentMethod() };
     }
   }
 
@@ -148,18 +192,86 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
 
       // Disk is the commit record. Do not activate a transport that was not
       // durably selected; save() returns exactly what its atomic rename wrote.
-      const saved = store.save({ mode: 'wifi', address });
-      adb.setConnection({ mode: 'wifi', serial: saved.address });
+      // The method is explicit so a legacy connection switched back to pairing
+      // cannot leave persisted and runtime state disagreeing.
+      const saved = store.save({ mode: 'wifi', method: 'pair', address });
+      adb.setConnection({ mode: 'wifi', serial: saved.address, method: 'pair', usbSerial });
+      return committedStatus('wifi', saved.address, true);
+    });
+  }
+
+  // User-triggered legacy connect. `adb tcpip` restarts adbd over USB, so it
+  // is never attempted unless the caller asked for bootstrap and USB is
+  // online. Disk and the active transport change only after a healthy target.
+  async function connectLegacy(input) {
+    if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+      throw new Error('legacy input is required');
+    }
+    const host = normalizeHost(input.host, 'host');
+    const port = normalizePort(input.port, 'port');
+    const enableTcpip = input.enableTcpip === undefined ? false : input.enableTcpip;
+    if (typeof enableTcpip !== 'boolean') {
+      throw new Error('enableTcpip must be a boolean');
+    }
+    const address = `${host}:${port}`;
+
+    return serializeMutation(async () => {
+      if (enableTcpip) {
+        try {
+          await requireUsbOnline();
+          await adb.tcpip(usbSerial, port);
+        } catch (err) {
+          warnLegacyBootstrapFailure(address, err);
+          throw err;
+        }
+      }
+
+      let online = false;
+      try {
+        await adb.connect(address);
+      } catch (err) {
+        if (enableTcpip) warnLegacyBootstrapFailure(address, err);
+        throw err;
+      }
+      try {
+        online = String(await adb.getState(address)).trim() === 'device';
+      } catch {
+        // A nonzero get-state is how adb reports an offline or unknown device.
+      }
+      if (!online) {
+        if (enableTcpip) warnLegacyBootstrapFailure(address);
+        throw new Error('wireless device is offline after connect');
+      }
+
+      const saved = store.save({ mode: 'wifi', method: 'legacy', address });
+      adb.setConnection({ mode: 'wifi', serial: saved.address, method: 'legacy', usbSerial });
       return committedStatus('wifi', saved.address, true);
     });
   }
 
   function switchToUsb() {
     return serializeMutation(async () => {
-      store.save({ mode: 'usb', address: '' });
-      adb.setConnection({ mode: 'usb', serial: usbSerial });
+      store.save({ mode: 'usb', method: 'pair', address: '' });
+      adb.setConnection({ mode: 'usb', serial: usbSerial, method: 'pair', usbSerial });
       return committedStatus('usb', usbSerial, false);
     });
+  }
+
+  // The supervision timer calls this instead of reaching into ADB directly:
+  // it keeps the configured USB serial and current method in one place and
+  // throttles repeated legacy bootstrap failures.
+  async function supervise() {
+    const mode = typeof adb.getMode === 'function' ? adb.getMode() : 'usb';
+    if (mode !== 'wifi') return adb.ensureUsbOnly();
+    const serial = adb.getSerial();
+    const method = currentMethod();
+    const online = await adb.ensureWirelessConnected(serial, {
+      method,
+      port: endpointPort(serial),
+      usbSerial,
+    });
+    if (method === 'legacy' && online === false) warnLegacyBootstrapFailure(serial);
+    return online;
   }
 
   // A runner may ignore cancellation, so the deadline is enforced by a race as
@@ -199,17 +311,7 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
   // targets the configured USB serial and never activates or persists what it
   // finds. Missing endpoints are partial success, not a failed transaction.
   async function discoverWirelessConfig() {
-    let usbState;
-    try {
-      usbState = String(await adb.getState(usbSerial)).trim();
-    } catch (err) {
-      // ADB exits nonzero for an absent serial, but the same shape carries
-      // server/permission failures. Only explicit device absence is a 409;
-      // every other host-side failure must reach the bridge as a 502.
-      if (isMissingAdbError(err) || !isExplicitUsbOfflineError(err)) throw err;
-      throw usbOfflineError();
-    }
-    if (usbState !== 'device') throw usbOfflineError();
+    await requireUsbOnline();
 
     const host = await adb.getWifiIp(usbSerial);
     let connectPort = null;
@@ -261,5 +363,5 @@ export function createConnectionService({ adb, store, usbSerial, sleep = default
     };
   }
 
-  return { status, pairAndConnect, switchToUsb, discoverWirelessConfig };
+  return { status, pairAndConnect, connectLegacy, switchToUsb, discoverWirelessConfig, supervise };
 }

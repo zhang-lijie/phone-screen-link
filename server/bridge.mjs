@@ -17,6 +17,7 @@ const PREFLIGHT_METHODS = {
   '/api/chat-config': 'GET, POST, OPTIONS',
   '/api/wireless': 'GET, OPTIONS',
   '/api/wireless/pair': 'POST, OPTIONS',
+  '/api/wireless/legacy': 'POST, OPTIONS',
   '/api/wireless/usb': 'POST, OPTIONS',
   '/api/wireless/auto': 'POST, OPTIONS',
 };
@@ -113,10 +114,22 @@ function validatePairingInput(input) {
   validatePort(input.connectPort, 'connectPort');
 }
 
+function validateLegacyInput(input) {
+  if (input === null || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('legacy input is required');
+  }
+  validateHost(input.host, 'host');
+  validatePort(input.port, 'port');
+  if (input.enableTcpip !== undefined && typeof input.enableTcpip !== 'boolean') {
+    throw new Error('enableTcpip must be a boolean');
+  }
+}
+
 function wirelessStatusPayload(status) {
   return {
     ok: true,
     mode: status?.mode,
+    method: status?.method,
     serial: status?.serial,
     online: status?.online,
     usbOnline: status?.usbOnline === true,
@@ -237,6 +250,36 @@ export function createBridge({ adb, host, port, chatConfig, chat, connectionServ
           sendJson(res, 502, {
             error: redactedErrorDetail(err, body.pairCode, 'wireless pairing failed'),
           });
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/api/wireless/legacy') {
+        if (!connectionService || typeof connectionService.connectLegacy !== 'function') {
+          sendJson(res, 503, { error: 'wireless connection unavailable' });
+          return;
+        }
+        const body = await readJsonBody(req, res);
+        if (body === TOO_LARGE) return;
+        if (body === INVALID_JSON) {
+          sendJson(res, 400, { error: 'invalid json' });
+          return;
+        }
+        try {
+          validateLegacyInput(body);
+        } catch (err) {
+          sendJson(res, 400, { error: errorDetail(err, 'invalid legacy input') });
+          return;
+        }
+        try {
+          const status = await connectionService.connectLegacy(body);
+          sendJson(res, 200, wirelessStatusPayload(status));
+        } catch (err) {
+          if (err?.code === 'USB_OFFLINE') {
+            sendJson(res, 409, { error: errorDetail(err, 'USB device is offline') });
+            return;
+          }
+          sendJson(res, 502, { error: errorDetail(err, 'legacy wireless connect failed') });
         }
         return;
       }

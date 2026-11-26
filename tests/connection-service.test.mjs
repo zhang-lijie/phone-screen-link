@@ -4,7 +4,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { performance } from 'node:perf_hooks';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createAdb } from '../server/adb.mjs';
+import { createAdb, DEFAULT_USB_SERIAL } from '../server/adb.mjs';
 import { createConnectionConfigStore } from '../server/connection-config.mjs';
 import { createConnectionService } from '../server/connection-service.mjs';
 
@@ -26,7 +26,7 @@ const PAIR_INPUT = Object.freeze({
   connectPort: '5555',
 });
 
-function setup(t, { runner, initial, stored, sleep, deadlineWait, now } = {}) {
+function setup(t, { runner, initial, stored, sleep, deadlineWait, now, warn } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'connection-service-'));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const file = join(dir, 'connection.json');
@@ -44,7 +44,10 @@ function setup(t, { runner, initial, stored, sleep, deadlineWait, now } = {}) {
       await injectSleep(ms);
     };
   }
-  const service = createConnectionService({ adb, store, usbSerial: USB_SERIAL, sleep: testSleep, deadlineWait, now: testNow });
+  const service = createConnectionService({
+    adb, store, usbSerial: USB_SERIAL, sleep: testSleep, deadlineWait, now: testNow,
+    warn: warn ?? (() => {}),
+  });
   return { adb, store, service, file };
 }
 
@@ -90,7 +93,7 @@ test('connection service: status reports active wireless and targeted USB state 
   });
 
   assert.deepEqual(await service.status(), {
-    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true,
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true, method: 'pair',
   });
   assert.deepEqual(calls, [
     ['-s', WIRELESS_ADDRESS, 'get-state'],
@@ -117,7 +120,7 @@ test('connection service: pairAndConnect pairs, connects, confirms online, then 
   assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
   assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
   assert.deepEqual(result, {
-    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true,
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true, method: 'pair',
   });
   assert.equal(JSON.stringify(result).includes(PAIR_INPUT.pairCode), false);
 });
@@ -160,7 +163,7 @@ test('connection service: a post-commit wireless status failure does not turn pa
   adb.isOnline = async () => { throw new Error('status read failed after commit'); };
 
   assert.deepEqual(await service.pairAndConnect(PAIR_INPUT), {
-    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: false,
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: false, method: 'pair',
   });
   assert.equal(adb.getMode(), 'wifi');
   assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
@@ -179,7 +182,7 @@ test('connection service: a post-commit USB status failure does not turn a compl
   });
 
   assert.deepEqual(await service.switchToUsb(), {
-    mode: 'usb', serial: USB_SERIAL, online: false, usbOnline: false,
+    mode: 'usb', serial: USB_SERIAL, online: false, usbOnline: false, method: 'pair',
   });
   assert.equal(adb.getMode(), 'usb');
   assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
@@ -306,7 +309,7 @@ test('connection service: switchToUsb restores the supplied USB serial and clear
   assert.equal(adb.getMode(), 'usb');
   assert.equal(adb.getSerial(), USB_SERIAL);
   assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
-  assert.deepEqual(result, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true });
+  assert.deepEqual(result, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair' });
   assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
 });
 
@@ -342,9 +345,9 @@ test('connection service: concurrent pair and USB mutations serialize and return
   }
 
   assert.deepEqual(await pairPromise, {
-    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true,
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: true, method: 'pair',
   });
-  assert.deepEqual(await usbPromise, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true });
+  assert.deepEqual(await usbPromise, { mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair' });
   assert.equal(adb.getMode(), 'usb');
   assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
 });
@@ -484,7 +487,7 @@ test('connection service: status reports usbOnline from the configured USB seria
   });
 
   assert.deepEqual(await service.status(), {
-    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: false,
+    mode: 'wifi', serial: WIRELESS_ADDRESS, online: true, usbOnline: false, method: 'pair',
   });
   assert.deepEqual(calls, [
     ['-s', WIRELESS_ADDRESS, 'get-state'],
@@ -904,4 +907,397 @@ if (args[0] === '-s' && args[2] === 'get-state') {
     if (attempt === 99) assert.fail(`mDNS subprocess ${pid} survived cancellation`);
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+});
+
+// ---------------------------------------------------------------------------
+// Task 2: legacy connection service
+// ---------------------------------------------------------------------------
+
+const LEGACY_ADDRESS = '192.168.1.77:5555';
+const LEGACY_INPUT = Object.freeze({ host: '192.168.1.77', port: 5555, enableTcpip: false });
+const TCPIP_INPUT = Object.freeze({ host: '192.168.1.77', port: '5555', enableTcpip: true });
+
+test('connection service: status exposes the active connection method', async (t) => {
+  const { service } = setup(t, {
+    initial: { mode: 'wifi', serial: LEGACY_ADDRESS, method: 'legacy' },
+    stored: { mode: 'wifi', method: 'legacy', address: LEGACY_ADDRESS },
+    runner: async () => 'device\n',
+  });
+
+  assert.deepEqual(await service.status(), {
+    mode: 'wifi', serial: LEGACY_ADDRESS, online: true, usbOnline: true, method: 'legacy',
+  });
+});
+
+test('connection service: USB status explicitly reports the pair method', async (t) => {
+  const { service } = setup(t, {
+    initial: { mode: 'usb', serial: USB_SERIAL },
+    runner: async (args) => (args[0] === '-s' ? 'device\n' : ''),
+  });
+
+  assert.deepEqual(await service.status(), {
+    mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair',
+  });
+});
+
+test('connection service: connectLegacy confirms the target before persisting and activating legacy mode', async (t) => {
+  const calls = [];
+  const { adb, store, service, file } = setup(t, {
+    runner: async (args) => { calls.push(args); return 'device\n'; },
+  });
+
+  const result = await service.connectLegacy(LEGACY_INPUT);
+
+  assert.deepEqual(calls, [
+    ['connect', LEGACY_ADDRESS],
+    ['-s', LEGACY_ADDRESS, 'get-state'],
+    ['-s', LEGACY_ADDRESS, 'get-state'],
+    ['-s', USB_SERIAL, 'get-state'],
+  ]);
+  assert.equal(calls.some((args) => args[2] === 'tcpip'), false);
+  assert.equal(calls.some((args) => args[0] === 'devices'), false);
+  assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getSerial(), LEGACY_ADDRESS);
+  assert.equal(adb.getMethod(), 'legacy');
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'legacy', address: LEGACY_ADDRESS });
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), {
+    mode: 'wifi', method: 'legacy', address: LEGACY_ADDRESS,
+  });
+  assert.deepEqual(result, {
+    mode: 'wifi', serial: LEGACY_ADDRESS, online: true, usbOnline: true, method: 'legacy',
+  });
+});
+
+test('connection service: connectLegacy with bootstrap probes USB, runs tcpip, then connects', async (t) => {
+  const calls = [];
+  const { adb, store, service } = setup(t, {
+    runner: async (args) => { calls.push(args); return 'device\n'; },
+  });
+
+  const result = await service.connectLegacy(TCPIP_INPUT);
+
+  assert.deepEqual(calls, [
+    ['-s', USB_SERIAL, 'get-state'],
+    ['-s', USB_SERIAL, 'tcpip', '5555'],
+    ['connect', LEGACY_ADDRESS],
+    ['-s', LEGACY_ADDRESS, 'get-state'],
+    ['-s', LEGACY_ADDRESS, 'get-state'],
+    ['-s', USB_SERIAL, 'get-state'],
+  ]);
+  assert.equal(adb.getMethod(), 'legacy');
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'legacy', address: LEGACY_ADDRESS });
+  assert.deepEqual(result, {
+    mode: 'wifi', serial: LEGACY_ADDRESS, online: true, usbOnline: true, method: 'legacy',
+  });
+});
+
+test('connection service: legacy bootstrap rejects an offline USB before any network mutation', async (t) => {
+  const cases = [
+    { label: 'offline output', output: 'offline\n' },
+    {
+      label: 'device-not-found stderr',
+      failure: Object.assign(new Error('Command failed: adb get-state'), {
+        stderr: `error: device '${USB_SERIAL}' not found\n`,
+      }),
+    },
+  ];
+  for (const { label, output, failure } of cases) {
+    const calls = [];
+    const { adb, store, service, file } = setup(t, {
+      runner: async (args) => {
+        calls.push(args);
+        if (failure) throw failure;
+        return output;
+      },
+    });
+    const before = readFileSync(file);
+
+    await assert.rejects(service.connectLegacy(TCPIP_INPUT), (err) => {
+      assert.equal(err.code, 'USB_OFFLINE', label);
+      assert.match(err.message, /USB device is offline/);
+      return true;
+    });
+
+    assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']], label);
+    assert.equal(adb.getMode(), 'usb');
+    assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+    assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+    assert.deepEqual(readFileSync(file), before);
+  }
+});
+
+test('connection service: legacy bootstrap preserves host-side get-state failures instead of reporting USB offline', async (t) => {
+  const failures = [
+    Object.assign(new Error('spawn adb ENOENT'), { code: 'ENOENT' }),
+    Object.assign(new Error('adb server failure'), {
+      stderr: "error: cannot connect to daemon at 'tcp:5037': Connection refused\n",
+    }),
+  ];
+  for (const failure of failures) {
+    const calls = [];
+    const { service } = setup(t, {
+      runner: async (args) => { calls.push(args); throw failure; },
+    });
+
+    await assert.rejects(service.connectLegacy(TCPIP_INPUT), (err) => err === failure);
+    assert.deepEqual(calls, [['-s', USB_SERIAL, 'get-state']]);
+  }
+});
+
+test('connection service: a failed tcpip leaves the active device and persisted config unchanged', async (t) => {
+  const calls = [];
+  const { adb, store, service, file } = setup(t, {
+    runner: async (args) => {
+      calls.push(args);
+      if (args[2] === 'tcpip') throw new Error('tcpip rejected');
+      return 'device\n';
+    },
+  });
+  const before = readFileSync(file);
+
+  await assert.rejects(service.connectLegacy(TCPIP_INPUT), /tcpip rejected/);
+
+  assert.deepEqual(calls, [
+    ['-s', USB_SERIAL, 'get-state'],
+    ['-s', USB_SERIAL, 'tcpip', '5555'],
+  ]);
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+  assert.equal(adb.getMethod(), 'pair');
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+  assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: a connect failure after tcpip leaves the previous pair state unchanged', async (t) => {
+  const previousAddress = '10.0.0.9:5555';
+  const calls = [];
+  const { adb, store, service, file } = setup(t, {
+    initial: { mode: 'wifi', serial: previousAddress, method: 'pair' },
+    stored: { mode: 'wifi', method: 'pair', address: previousAddress },
+    runner: async (args) => {
+      calls.push(args);
+      if (args[0] === 'connect') throw new Error('connect rejected');
+      return 'device\n';
+    },
+  });
+  const before = readFileSync(file);
+
+  await assert.rejects(service.connectLegacy(TCPIP_INPUT), /connect rejected/);
+
+  assert.deepEqual(calls, [
+    ['-s', USB_SERIAL, 'get-state'],
+    ['-s', USB_SERIAL, 'tcpip', '5555'],
+    ['connect', LEGACY_ADDRESS],
+  ]);
+  assert.equal(adb.getMode(), 'wifi');
+  assert.equal(adb.getSerial(), previousAddress);
+  assert.equal(adb.getMethod(), 'pair');
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: previousAddress });
+  assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: an offline target after connect is not activated or persisted as legacy', async (t) => {
+  const { adb, store, service, file } = setup(t, {
+    runner: async (args) => (args[0] === '-s' ? 'offline\n' : ''),
+  });
+  const before = readFileSync(file);
+
+  await assert.rejects(service.connectLegacy(LEGACY_INPUT), /offline after connect/i);
+
+  assert.equal(adb.getMode(), 'usb');
+  assert.equal(adb.getSerial(), 'USB-ORIGINAL');
+  assert.equal(adb.getMethod(), 'pair');
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+  assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: invalid legacy input is rejected before any ADB command or persistence', async (t) => {
+  const calls = [];
+  const { adb, store, service, file } = setup(t, {
+    runner: async (args) => { calls.push(args); return ''; },
+  });
+  const before = readFileSync(file);
+  const invalidInputs = [
+    [null, /input/],
+    [[], /input/],
+    [{ ...LEGACY_INPUT, host: '' }, /host/],
+    [{ ...LEGACY_INPUT, host: 'bad host' }, /host/],
+    [{ ...LEGACY_INPUT, host: '192.168.1.999' }, /host/],
+    [{ ...LEGACY_INPUT, port: 0 }, /port/],
+    [{ ...LEGACY_INPUT, port: 65536 }, /port/],
+    [{ ...LEGACY_INPUT, port: 'abc' }, /port/],
+    [{ ...LEGACY_INPUT, enableTcpip: 'yes' }, /enableTcpip/],
+  ];
+
+  for (const [input, expected] of invalidInputs) {
+    await assert.rejects(service.connectLegacy(input), expected);
+  }
+
+  assert.deepEqual(calls, []);
+  assert.equal(adb.getMode(), 'usb');
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+  assert.deepEqual(readFileSync(file), before);
+});
+
+test('connection service: a failed user-triggered bootstrap warns once per outage window', async (t) => {
+  let clock = 0;
+  const warnings = [];
+  const { service } = setup(t, {
+    now: () => clock,
+    warn: (message) => warnings.push(message),
+    runner: async (args) => {
+      if (args[2] === 'tcpip') throw new Error('tcpip rejected');
+      return 'device\n';
+    },
+  });
+
+  await assert.rejects(service.connectLegacy(TCPIP_INPUT), /tcpip rejected/);
+  await assert.rejects(service.connectLegacy(TCPIP_INPUT), /tcpip rejected/);
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /tcpip rejected/);
+
+  clock = 60_000;
+  await assert.rejects(service.connectLegacy(TCPIP_INPUT), /tcpip rejected/);
+  assert.equal(warnings.length, 2);
+});
+
+test('connection service: pairAndConnect explicitly switches a legacy connection back to pair', async (t) => {
+  const { adb, store, service } = setup(t, {
+    initial: { mode: 'wifi', serial: LEGACY_ADDRESS, method: 'legacy' },
+    stored: { mode: 'wifi', method: 'legacy', address: LEGACY_ADDRESS },
+    runner: async () => 'device\n',
+  });
+
+  const result = await service.pairAndConnect(PAIR_INPUT);
+
+  assert.equal(result.method, 'pair');
+  assert.equal(adb.getMethod(), 'pair');
+  assert.deepEqual(store.load(), { mode: 'wifi', method: 'pair', address: WIRELESS_ADDRESS });
+});
+
+test('connection service: switchToUsb defines the pair method when leaving legacy mode', async (t) => {
+  const { adb, store, service } = setup(t, {
+    initial: { mode: 'wifi', serial: LEGACY_ADDRESS, method: 'legacy' },
+    stored: { mode: 'wifi', method: 'legacy', address: LEGACY_ADDRESS },
+    runner: async () => 'device\n',
+  });
+
+  const result = await service.switchToUsb();
+
+  assert.equal(result.method, 'pair');
+  assert.equal(adb.getMethod(), 'pair');
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+});
+
+test('connection service: concurrent legacy and USB mutations serialize and return their own status', async (t) => {
+  const tcpipGate = deferred();
+  let markTcpipStarted;
+  const tcpipStarted = new Promise((resolve) => { markTcpipStarted = resolve; });
+  const { adb, store, service } = setup(t, {
+    runner: async (args) => {
+      if (args[2] === 'tcpip') {
+        markTcpipStarted();
+        await tcpipGate.promise;
+      }
+      return 'device\n';
+    },
+  });
+
+  const legacyPromise = service.connectLegacy(TCPIP_INPUT);
+  await tcpipStarted;
+  const usbPromise = service.switchToUsb();
+  try {
+    assert.equal(adb.getMode(), 'usb', 'the USB switch must wait for the legacy transaction');
+    assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+  } finally {
+    tcpipGate.resolve();
+    await Promise.allSettled([legacyPromise, usbPromise]);
+  }
+
+  const legacy = await legacyPromise;
+  assert.deepEqual(legacy, {
+    mode: 'wifi', serial: LEGACY_ADDRESS, online: true, usbOnline: true, method: 'legacy',
+  });
+  const usb = await usbPromise;
+  assert.deepEqual(usb, {
+    mode: 'usb', serial: USB_SERIAL, online: true, usbOnline: true, method: 'pair',
+  });
+  assert.equal(adb.getMode(), 'usb');
+  assert.deepEqual(store.load(), { mode: 'usb', method: 'pair', address: '' });
+});
+
+test('connection service: supervise passes legacy options with the configured USB serial and throttles warnings', async (t) => {
+  let clock = 0;
+  const warnings = [];
+  const options = [];
+  const { adb, service } = setup(t, {
+    initial: { mode: 'wifi', serial: LEGACY_ADDRESS, method: 'legacy' },
+    stored: { mode: 'wifi', method: 'legacy', address: LEGACY_ADDRESS },
+    now: () => clock,
+    warn: (message) => warnings.push(message),
+  });
+  // The injected adb is shared with the service; replace its supervision call
+  // so the test observes exactly what the service hands to ADB.
+  adb.ensureWirelessConnected = async (address, opts) => { options.push(opts); return false; };
+
+  await service.supervise();
+  clock = 30_000;
+  await service.supervise();
+  clock = 70_000;
+  await service.supervise();
+
+  assert.equal(options.length, 3);
+  for (const opts of options) {
+    assert.deepEqual(opts, { method: 'legacy', port: 5555, usbSerial: USB_SERIAL });
+  }
+  assert.equal(warnings.length, 2, 'repeated failing ticks must not spam warnings');
+  assert.match(warnings[0], /legacy/i);
+});
+
+test('connection service: supervise stays quiet in pair mode and checks USB in USB mode', async (t) => {
+  const warnings = [];
+  const options = [];
+  const { adb, service } = setup(t, {
+    warn: (message) => warnings.push(message),
+  });
+  adb.ensureWirelessConnected = async (address, opts) => { options.push(opts); return false; };
+  let usbChecks = 0;
+  adb.ensureUsbOnly = async () => { usbChecks += 1; };
+
+  await service.supervise();
+  assert.deepEqual(warnings, []);
+  assert.equal(options.length, 0);
+  assert.equal(usbChecks, 1);
+
+  adb.setConnection({ mode: 'wifi', serial: WIRELESS_ADDRESS, method: 'pair' });
+  await service.supervise();
+  assert.deepEqual(warnings, []);
+  assert.deepEqual(options, [{ method: 'pair', port: 5555, usbSerial: USB_SERIAL }]);
+});
+
+test('connection service: supervision without an explicit serial uses the last-known USB serial', async (t) => {
+  let bootstrapPhase = false;
+  let wirelessChecks = 0;
+  const calls = [];
+  const { adb, service } = setup(t, {
+    runner: async (args) => {
+      calls.push(args);
+      if (args[0] === '-s' && args[1] === LEGACY_ADDRESS && args[2] === 'get-state') {
+        if (!bootstrapPhase) return 'device\n';
+        wirelessChecks += 1;
+        return wirelessChecks === 3 ? 'device\n' : 'offline\n';
+      }
+      if (args[0] === '-s' && args[1] === USB_SERIAL && args[2] === 'get-state') return 'device\n';
+      return '';
+    },
+  });
+
+  await service.connectLegacy(TCPIP_INPUT);
+  bootstrapPhase = true;
+  calls.length = 0;
+  wirelessChecks = 0;
+
+  assert.equal(await adb.ensureWirelessConnected(LEGACY_ADDRESS, { method: 'legacy' }), true);
+  assert.ok(calls.some((args) => args.join(' ') === `-s ${USB_SERIAL} tcpip 5555`));
+  assert.equal(calls.some((args) => args[1] === DEFAULT_USB_SERIAL && args[2] === 'tcpip'), false);
 });
