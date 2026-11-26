@@ -1686,3 +1686,14 @@ test('wireless: switch-to-USB response exposes scan results for the picker', asy
     });
   });
 });
+
+test('GET /api/devices has no selection when the USB list is empty', async () => {
+  const adb = deviceAdb([], { getSerial: () => DEFAULT_USB_SERIAL });
+  await withBridge({ adb }, async (address) => {
+    const res = await getDevices(address);
+    assert.equal(res.status, 200);
+    const payload = await res.json();
+    assert.deepEqual(payload.devices, []);
+    assert.equal(payload.selected, null);
+  });
+});

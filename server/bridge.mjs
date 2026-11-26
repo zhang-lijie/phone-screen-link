@@ -252,7 +252,10 @@ export function createBridge({
     if (devices === null) return current ?? DEFAULT_USB_SERIAL;
     const chosen = chooseDevice({ devices, selected: current, preferred: preferredSerial });
     if (chosen && chosen !== current) applyConnection(chosen);
-    return chosen ?? current ?? null;
+    // With an empty USB list there is no selection, even though adb still
+    // carries a configured fallback serial. The page must not keep streaming
+    // to a phone that is not there.
+    return chosen;
   }
 
   async function requireSelected(res) {
