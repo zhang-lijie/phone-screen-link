@@ -384,10 +384,11 @@ CORS 只拦「读响应」，恶意网页仍能发出免预检的简单请求（
 ```sh
 npm run setup   # 首次运行：克隆并构建固定版本引擎，打上仅监听 127.0.0.1 的补丁（已构建则跳过）
 npm start       # 复制 web/ 资源、启动引擎、控制桥与 ghost MCP 子进程
+npm run stop    # 停止当前项目的启动进程；先 SIGTERM，必要时 SIGKILL
 npm test        # 运行全部 node 单元测试
 ```
 
-浏览器打开 <http://127.0.0.1:8000/>。按 `Ctrl-C` 或发送 `SIGTERM` 即可干净停止引擎、桥和 ghost 子进程，无需进程守护工具。
+浏览器打开 <http://127.0.0.1:8000/>。按 `Ctrl-C`、发送 `SIGTERM`，或在另一个终端执行 `npm run stop`，即可干净停止引擎、桥和 ghost 子进程，无需进程守护工具。`npm run stop` 只匹配当前项目目录下的 `scripts/start.mjs` / `dist/index.js`，不会误杀其他副本；超时后会对残留进程执行 `SIGKILL`。
 
 > 修改 `web/` 或 `shared/` 后必须**重启 `npm start`**：自定义页面只在启动时复制到引擎目录。
 > 修改 `server/` 后同样需要重启桥。聊天设置改完不用重启，`state/chat.json` 每次请求都重新读。
